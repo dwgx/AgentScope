@@ -229,7 +229,7 @@ export async function planSessionImport(
     warnings,
     blockers,
     notes: [
-      "Import is dry-run only in this version. AgentScope verifies backup shape and reports local conflicts.",
+      "This import plan is a preview. Executing importSessionBackup restores copied files from a validated AgentScope backup when targets do not already exist.",
       "Authentication, settings, and global history are never imported from a session backup."
     ],
     evidence: [

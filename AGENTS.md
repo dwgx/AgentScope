@@ -1,0 +1,86 @@
+# AgentScope Agent Handoff Rules
+
+AgentScope is a Windows-only TypeScript/Electron desktop console for local AI coding agent trace and control. It indexes Codex and Claude Code processes, sessions, transcripts, and evidence. It is not a chat UI and not a Kanban board.
+
+## User And Product Direction
+
+- Speak with the user in Chinese unless they explicitly ask otherwise.
+- Be direct, rigorous, and pragmatic. The user expects concrete implementation, screenshots/smoke tests when UI changes, and honest risk reporting.
+- The user strongly prefers high-quality UI that feels polished, dense, and controllable. Avoid decorative marketing layouts. Use a serious desktop-console feel with careful spacing, alignment, animation, and keyboard behavior.
+- The user dislikes vague claims. Every session/process association must show evidence and confidence.
+- The user wants subagent-style research when explicitly requested, but do not block on delegation if thread limits are reached. Continue locally and document what was verified.
+
+## Engineering Defaults
+
+- Use TypeScript, Electron, React, and the existing workspace structure.
+- Prefer the existing core library over duplicating logic in the renderer.
+- Keep Windows path handling centralized in `packages/core/src/paths.ts`.
+- Keep privileged filesystem/process work in `packages/core` or Electron main. Renderer access goes through preload IPC only.
+- Do not read or display hidden vendor reasoning. AgentScope only parses plaintext JSONL, SQLite, PID/session maps, path encodings, process metadata, and index relations.
+- Default destructive behavior must be blocked, confirmed, backed up, and evidenced.
+- Never delete credentials, auth files, settings, plugins, skills, rules, or full global history as a side effect of deleting one session.
+
+## Current Commands
+
+Run these before handoff after code changes:
+
+```powershell
+npm run typecheck
+npm test
+npm run i18n:check
+npm run package
+```
+
+For desktop iteration:
+
+```powershell
+npm run dev
+```
+
+Unpacked executable:
+
+```text
+apps/desktop/out/win-unpacked/AgentScope.exe
+```
+
+## Code Map
+
+- `packages/core/src/processes.ts`: Windows process enumeration with `Get-CimInstance Win32_Process` and `Get-Process` runtime fields.
+- `packages/core/src/codex.ts`: Codex SQLite and rollout JSONL indexing.
+- `packages/core/src/claude.ts`: Claude session maps, daemon/jobs, transcript discovery.
+- `packages/core/src/scope.ts`: unified snapshot merge, process/session candidate scoring, confidence and relations.
+- `packages/core/src/search.ts`: Codex SQLite and JSONL search.
+- `packages/core/src/sessionOps.ts`: backup, delete, import planning/execution. Treat this file as high risk.
+- `apps/desktop/src/main/main.ts`: Electron IPC, shell path allowlists, dialogs.
+- `apps/desktop/src/preload/preload.cjs`: narrow renderer API.
+- `apps/desktop/src/renderer/src/App.tsx`: current desktop UI.
+- `apps/desktop/src/renderer/src/styles.css`: theme, layout, animation, notification and menu styling.
+- `packages/i18n/src/resources/*.ts`: all UI text for English, Chinese, Japanese, Korean.
+
+## Safety Rules For Session Operations
+
+- `backupSession` writes AgentScope backups under `~/.agentscope/backups`.
+- `deleteSession` must first write a backup, then quarantine files under `~/.agentscope/quarantine`.
+- Active sessions must block destructive actions unless a future explicit force workflow exists.
+- Codex SQLite writes must use a writable DB connection, busy timeout, and transaction.
+- Delete plan and execution must agree. If a table is marked `skip`, execution must not mutate it.
+- Import must accept only AgentScope backup manifests, reject path traversal, reject hash mismatch, and reject existing targets.
+- Import currently restores copied files only; it does not fully rebuild Codex SQLite rows. Document this limitation before extending.
+
+## UI Rules
+
+- `Ctrl+F` opens search everywhere. `Esc` closes search first, then steps back view history.
+- Search runs as-you-type. Clearing search must cancel stale async results.
+- Notifications appear bottom-center, do not close on body click, and expose explicit actions such as reveal/open path.
+- Session row right-click menu is intentionally small: backup session, delete session, locate transcript file.
+- The Sessions page owns import backup. Inspector safe control should stay focused on the selected session.
+- Keep icons visually centered in `AgentTile`, buttons, segmented controls, and menus.
+- After UI changes, smoke-test packed or dev desktop if feasible and inspect screenshots if layout/alignment changed.
+
+## Documentation
+
+The next AI should read these before changing the project:
+
+- `docs/handoff-next-ai.md`
+- `docs/research-local-agent-stores.md`
+- `README.md`

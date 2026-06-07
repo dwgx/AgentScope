@@ -36,6 +36,9 @@ and React/TypeScript renderer for the control surface.
 - Provides Processes, Sessions, Relations, Search, Doctor, and Settings views.
 - Uses a flat graphite desktop UI with functional Settings sections for
   General, Appearance, Indexing, Runtime, and Diagnostics.
+- Supports explicit session backup, safe delete, and AgentScope backup import
+  through the desktop UI. Delete writes a backup first, then moves removable
+  files to quarantine and patches only known session references.
 
 ## Commands
 
@@ -75,19 +78,39 @@ build, and an unpacked Electron package artifact.
 
 ## Safety Boundaries
 
-First version behavior:
+Current behavior:
 
-- Does not modify Codex or Claude files.
 - Does not terminate processes.
 - Does not decrypt hidden/internal vendor state.
 - Only parses local plaintext JSONL, SQLite, PID mappings, path encodings, and
   index relations.
+- Backs up sessions under `%USERPROFILE%\.agentscope\backups`.
+- Deletes only after backup and quarantine under
+  `%USERPROFILE%\.agentscope\quarantine`.
+- Blocks destructive operations against sessions that still have an active PID
+  mapping in the current Windows process snapshot.
+- Never imports or deletes credentials, auth files, global settings, plugins,
+  skills, rules, or full global history as a session side effect.
+
+Known limits:
+
+- Codex import currently restores backup files only; full SQLite row restore is
+  planned but not complete.
+- Codex process-to-thread mapping is still partly heuristic because Codex does
+  not expose a reliable PID-to-thread map in the parsed local state.
 
 Planned later controls:
 
 - `resume`: generate or run `codex resume` / `claude resume`
 - `kill`: terminate only with explicit `--force`
-- `open-transcript`
-- `export`
+- richer export/import bundles with row-level SQLite restore
 - `watch`
 - web/TUI dashboard on the same core library
+
+## Handoff Docs
+
+Future agents should read:
+
+- `AGENTS.md`
+- `docs/handoff-next-ai.md`
+- `docs/research-local-agent-stores.md`
