@@ -22,13 +22,20 @@ and React/TypeScript renderer for the control surface.
 
 - Enumerates Windows `Win32_Process` rows for Codex, Claude, node, node_repl,
   app-server, and daemon-like processes.
+- Enriches process rows with start time and `MainWindowTitle` from
+  `Get-Process` when Windows exposes it.
 - Parses Claude session PID files from `%USERPROFILE%\.claude\sessions`.
 - Resolves Claude transcripts under `%USERPROFILE%\.claude\projects`.
 - Reads Codex `%USERPROFILE%\.codex\state_5.sqlite`.
 - Scans Codex rollout JSONL under `%USERPROFILE%\.codex\sessions`.
-- Tracks confidence: `exact`, `indexed`, `heuristic`, `unknown`.
+- Scores process-to-session candidates with evidence from PID, cwd,
+  transcript path, session id, window title, and start/update time.
+- Tracks confidence: `exact`, `indexed`, `heuristic`, `unknown`. Time-only
+  candidates stay `unknown` and are shown as weak evidence, not as matches.
 - Shows evidence for every association.
-- Provides Sessions, Processes, Graph, Search, and Doctor views.
+- Provides Processes, Sessions, Relations, Search, Doctor, and Settings views.
+- Uses a flat graphite desktop UI with functional Settings sections for
+  General, Appearance, Indexing, Runtime, and Diagnostics.
 
 ## Commands
 
@@ -55,6 +62,12 @@ Packaging smoke test:
 
 ```powershell
 npm --workspace @agentscope/desktop run package
+```
+
+The unpacked Windows app is written to:
+
+```text
+apps/desktop/out/win-unpacked/AgentScope.exe
 ```
 
 CI runs on `windows-latest` and verifies install, typecheck, tests, production

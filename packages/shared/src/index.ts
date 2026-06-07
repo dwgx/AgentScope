@@ -18,9 +18,25 @@ export interface AgentProcess {
   executablePath?: string | undefined;
   commandLine?: string | undefined;
   creationDate?: string | undefined;
+  startTime?: string | undefined;
+  windowTitle?: string | undefined;
   cwdHint?: string | undefined;
   agent: AgentKind;
+  sessionCandidates?: SessionCandidate[] | undefined;
   evidence: Evidence[];
+}
+
+export interface SessionCandidate {
+  agent: AgentKind;
+  sessionId: string;
+  title?: string | undefined;
+  cwd?: string | undefined;
+  transcriptPath?: string | undefined;
+  confidence: Confidence;
+  score: number;
+  startedAt?: string | undefined;
+  updatedAt?: string | undefined;
+  reasons: Evidence[];
 }
 
 export interface Transcript {
@@ -40,6 +56,7 @@ export interface IndexRecord {
   cwd?: string | undefined;
   title?: string | undefined;
   status?: string | undefined;
+  startedAt?: string | undefined;
   updatedAt?: string | undefined;
   preview?: string | undefined;
   metadata?: Record<string, unknown> | undefined;
@@ -70,6 +87,7 @@ export interface AgentSession {
   childSessionIds: string[];
   confidence: Confidence;
   title?: string | undefined;
+  startedAt?: string | undefined;
   updatedAt?: string | undefined;
   evidence: Evidence[];
 }

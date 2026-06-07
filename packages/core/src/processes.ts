@@ -15,6 +15,8 @@ interface Win32ProcessRow {
   ExecutablePath?: string | null;
   CommandLine?: string | null;
   CreationDate?: string | null;
+  StartTime?: string | null;
+  MainWindowTitle?: string | null;
 }
 
 export function isWindows(): boolean {
@@ -25,16 +27,30 @@ export async function listProcesses(includeAll = false): Promise<AgentProcess[]>
   if (!isWindows()) return [];
   const script = `
 $ErrorActionPreference = 'Stop'
-Get-CimInstance Win32_Process |
-  Select-Object `
-    + "`" + `
-    @{Name='ProcessId';Expression={$_.ProcessId}},
-    @{Name='ParentProcessId';Expression={$_.ParentProcessId}},
-    @{Name='Name';Expression={$_.Name}},
-    @{Name='ExecutablePath';Expression={$_.ExecutablePath}},
-    @{Name='CommandLine';Expression={$_.CommandLine}},
-    @{Name='CreationDate';Expression={ if ($_.CreationDate) { $_.CreationDate.ToString('o') } else { $null } }} |
-  ConvertTo-Json -Depth 3
+$processMap = @{}
+Get-Process | ForEach-Object {
+  $startTime = $null
+  try {
+    if ($_.StartTime) { $startTime = $_.StartTime.ToString('o') }
+  } catch {}
+  $processMap[[int]$_.Id] = [pscustomobject]@{
+    MainWindowTitle = $_.MainWindowTitle
+    StartTime = $startTime
+  }
+}
+Get-CimInstance Win32_Process | ForEach-Object {
+  $runtime = $processMap[[int]$_.ProcessId]
+  [pscustomobject]@{
+    ProcessId = $_.ProcessId
+    ParentProcessId = $_.ParentProcessId
+    Name = $_.Name
+    ExecutablePath = $_.ExecutablePath
+    CommandLine = $_.CommandLine
+    CreationDate = if ($_.CreationDate) { $_.CreationDate.ToString('o') } else { $null }
+    StartTime = if ($runtime) { $runtime.StartTime } else { $null }
+    MainWindowTitle = if ($runtime) { $runtime.MainWindowTitle } else { $null }
+  }
+} | ConvertTo-Json -Depth 3
 `;
   try {
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], {
@@ -74,12 +90,14 @@ function processFromRow(row: Win32ProcessRow): AgentProcess {
     executablePath,
     commandLine,
     creationDate: row.CreationDate ?? undefined,
+    startTime: row.StartTime ?? row.CreationDate ?? undefined,
+    windowTitle: row.MainWindowTitle?.trim() || undefined,
     agent: classifyProcess(row.Name, commandLine, executablePath),
     evidence: [
       {
         source: "Win32_Process",
-        detail: "Process metadata from Get-CimInstance Win32_Process.",
-        field: "ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,CreationDate"
+        detail: "Process metadata from Get-CimInstance Win32_Process plus Get-Process runtime title/start time.",
+        field: "ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,CreationDate,StartTime,MainWindowTitle"
       }
     ]
   };

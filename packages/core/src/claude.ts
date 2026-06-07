@@ -54,8 +54,9 @@ export function loadClaudeIndexRecords(home?: string): IndexRecord[] {
     path: session.transcriptPath,
     cwd: session.cwd,
     status: session.status,
+    startedAt: session.startedAt,
     updatedAt: session.updatedAt,
-    metadata: { pid: session.pid },
+    metadata: { pid: session.pid, startedAt: session.startedAt },
     evidence: session.evidence
   }));
 }
@@ -77,7 +78,8 @@ function loadClaudeSessionFile(filePath: string): AgentSession | undefined {
       indexSource: "claude.sessions",
       childSessionIds: [],
       confidence: Number.isFinite(pid) ? "exact" : "indexed",
-      updatedAt: payload.updatedAt === undefined ? undefined : String(payload.updatedAt),
+      startedAt: timestampValue(payload.startedAt),
+      updatedAt: timestampValue(payload.updatedAt),
       evidence: [
         {
           source: "claude.sessions",
@@ -99,6 +101,26 @@ function loadClaudeSessionFile(filePath: string): AgentSession | undefined {
   } catch {
     return undefined;
   }
+}
+
+function timestampValue(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "number") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+  }
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return undefined;
+    const numeric = Number(text);
+    if (Number.isFinite(numeric) && text.length >= 10) {
+      const date = new Date(numeric);
+      return Number.isNaN(date.getTime()) ? text : date.toISOString();
+    }
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? text : date.toISOString();
+  }
+  return String(value);
 }
 
 function findClaudeTranscript(sessionFile: string, cwd: string | undefined, sessionId: string): string | undefined {

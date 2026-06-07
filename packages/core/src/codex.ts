@@ -7,6 +7,7 @@ import { codexHome, normalizeWindowsPath } from "./paths.js";
 import { iterateJsonl } from "./jsonl.js";
 
 const rolloutNameRe = /^rollout-(.+)\.jsonl$/i;
+const rolloutStartRe = /^rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-/i;
 const uuidTailRe = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 export function loadCodexIndex(home?: string): {
@@ -40,6 +41,7 @@ export function loadCodexIndex(home?: string): {
       if (!sessionId) continue;
       const rolloutPath = normalizeWindowsPath(stringValue(row.rollout_path));
       const cwd = normalizeWindowsPath(stringValue(row.cwd));
+      const startedAt = rolloutPath ? rolloutStartedAt(rolloutPath) : undefined;
       const evidence = [
         {
           source: "codex.sqlite.threads",
@@ -57,6 +59,7 @@ export function loadCodexIndex(home?: string): {
         childSessionIds: [],
         confidence: "indexed",
         title: stringValue(row.title),
+        startedAt,
         updatedAt: stringValue(row.updated_at),
         evidence
       });
@@ -67,6 +70,7 @@ export function loadCodexIndex(home?: string): {
         path: rolloutPath,
         cwd,
         title: stringValue(row.title),
+        startedAt,
         updatedAt: stringValue(row.updated_at),
         preview: stringValue(row.preview),
         metadata: {
@@ -107,6 +111,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
     if (!sessionId) continue;
     const metadata = await readRolloutMetadata(filePath);
     const cwd = normalizeWindowsPath(stringValue(metadata.cwd));
+    const startedAt = rolloutStartedAt(filePath);
     const updatedAt = fs.statSync(filePath).mtime.toISOString();
     const evidence = [
       {
@@ -126,6 +131,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
       childSessionIds: [],
       confidence: "indexed",
       title: stringValue(metadata.title),
+      startedAt,
       updatedAt,
       evidence
     });
@@ -136,6 +142,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
       path: filePath,
       cwd,
       title: stringValue(metadata.title),
+      startedAt,
       updatedAt,
       metadata,
       evidence
@@ -149,6 +156,14 @@ export function rolloutThreadId(filePath: string): string | undefined {
   if (!match) return undefined;
   const value = match[1]!;
   return uuidTailRe.exec(value)?.[1] ?? value;
+}
+
+export function rolloutStartedAt(filePath: string): string | undefined {
+  const match = rolloutStartRe.exec(path.basename(filePath));
+  if (!match) return undefined;
+  const [, day, hour, minute, second] = match;
+  const date = new Date(`${day}T${hour}:${minute}:${second}`);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 export async function readRolloutMetadata(filePath: string): Promise<Record<string, unknown>> {
