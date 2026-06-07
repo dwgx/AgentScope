@@ -125,6 +125,17 @@ ipcMain.handle("session:backup", async (_event, agent: string, sessionId: string
   const core = await loadCore();
   return core.backupSession(sessionId, asAgent(agent));
 });
+ipcMain.handle("session:delete", async (_event, agent: string, sessionId: string) => {
+  const core = await loadCore();
+  return core.deleteSession(sessionId, asAgent(agent));
+});
+ipcMain.handle("session:import", async (_event, backupDir: string) => {
+  if (!(await isAllowedAgentScopeOperationPath(backupDir))) {
+    throw new Error("Import is limited to AgentScope backup directories.");
+  }
+  const core = await loadCore();
+  return core.importSessionBackup(backupDir);
+});
 ipcMain.handle("session:deletePlan", async (_event, agent: string, sessionId: string) => {
   const core = await loadCore();
   return core.writeSessionDeletePlan(sessionId, asAgent(agent));
@@ -151,6 +162,22 @@ ipcMain.handle("session:chooseImportPlan", async () => {
   }
   const core = await loadCore();
   return core.planSessionImport(result.filePaths[0]);
+});
+ipcMain.handle("session:chooseImport", async () => {
+  const backupRoot = path.join(os.homedir(), ".agentscope", "backups");
+  await fs.promises.mkdir(backupRoot, { recursive: true });
+  const options = {
+    title: "Choose AgentScope backup directory",
+    defaultPath: backupRoot,
+    properties: ["openDirectory"] as Array<"openDirectory">
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  if (result.canceled || !result.filePaths[0]) return { canceled: true };
+  if (!(await isAllowedAgentScopeOperationPath(result.filePaths[0]))) {
+    throw new Error("Import is limited to AgentScope backup directories.");
+  }
+  const core = await loadCore();
+  return core.importSessionBackup(result.filePaths[0]);
 });
 
 process.on("uncaughtException", (error) => {

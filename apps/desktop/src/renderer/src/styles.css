@@ -551,8 +551,15 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+.paneHeaderAction {
+  flex: none;
+  display: flex;
+  align-items: center;
 }
 
 .paneHeader h2 {
@@ -2255,22 +2262,147 @@ input {
   }
 }
 
-.toast {
+.notification {
   position: fixed;
   left: 50%;
-  bottom: 22px;
-  z-index: 50;
-  max-width: min(620px, calc(100vw - 48px));
+  bottom: 34px;
+  z-index: 80;
+  width: min(720px, calc(100vw - 52px));
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 28px;
+  align-items: center;
+  gap: 12px;
   transform: translateX(-50%);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 10px;
+  padding: 10px 12px 10px 14px;
   color: var(--text);
-  background: color-mix(in srgb, var(--panel) 92%, #000000);
-  box-shadow: 0 18px 52px var(--shadow);
-  cursor: pointer;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface2) 70%, transparent), transparent),
+    color-mix(in srgb, var(--panel) 96%, #000000);
+  box-shadow:
+    0 18px 58px rgba(0, 0, 0, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   animation: toastIn 180ms ease both;
   overflow-wrap: anywhere;
+}
+
+.notification > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.notification strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.notification span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notificationActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.notificationActions button,
+.notificationClose {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--surface2);
+  cursor: pointer;
+}
+
+.notificationActions button {
+  padding: 0 10px;
+}
+
+.notificationActions button:hover,
+.notificationClose:hover {
+  background: var(--hover);
+}
+
+.notificationClose {
+  width: 28px;
+  display: grid;
+  place-items: center;
+}
+
+.confirmOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(8px);
+  animation: overlayIn 140ms ease both;
+}
+
+.confirmDialog {
+  width: min(460px, calc(100vw - 48px));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  color: var(--text);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface2) 60%, transparent), transparent),
+    color-mix(in srgb, var(--panel) 97%, #000000);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+  animation: paletteIn 160ms ease both;
+}
+
+.confirmDialog h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.confirmDialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.confirmActions button {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface2);
+  cursor: pointer;
+}
+
+.confirmActions button:hover {
+  background: var(--hover);
+}
+
+.confirmActions .dangerAction {
+  color: #1b0808;
+  border-color: color-mix(in srgb, #ff7a7a 70%, var(--border));
+  background: #ff9b9b;
 }
 
 .contextMenu {
@@ -2309,6 +2441,19 @@ input {
 
 .contextMenu button:hover {
   background: var(--surface2);
+}
+
+.contextMenu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.contextMenu .dangerItem {
+  color: #ffb0b0;
+}
+
+.contextMenu .dangerItem:hover {
+  background: color-mix(in srgb, #ff3b30 18%, var(--surface2));
 }
 
 .contextMenu button > strong,

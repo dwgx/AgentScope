@@ -2,6 +2,8 @@ import type {
   Diagnostic,
   ScopeSnapshot,
   SessionBackupResult,
+  SessionDeleteResult,
+  SessionImportResult,
   SessionOperationPlanResult
 } from "@agentscope/shared";
 
@@ -32,6 +34,9 @@ export interface AgentScopeApi {
   inspectPid(pid: number): Promise<Record<string, unknown>>;
   inspectSession(sessionId: string): Promise<Record<string, unknown>>;
   backupSession(agent: string, sessionId: string): Promise<SessionBackupResult>;
+  deleteSession(agent: string, sessionId: string): Promise<SessionDeleteResult>;
+  importSessionBackup(backupDir: string): Promise<SessionImportResult>;
+  chooseImportSession(): Promise<SessionImportResult | { canceled: true }>;
   writeDeletePlan(agent: string, sessionId: string): Promise<SessionOperationPlanResult>;
   writeImportPlan(backupDir: string): Promise<SessionOperationPlanResult>;
   chooseImportPlan(): Promise<SessionOperationPlanResult | { canceled: true }>;

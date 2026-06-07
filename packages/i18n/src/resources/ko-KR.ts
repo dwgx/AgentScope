@@ -12,6 +12,8 @@ export const koKR = {
       refresh: "새로 고침",
       reset: "초기화",
       clear: "지우기",
+      cancel: "취소",
+      reveal: "위치 표시",
       show: "표시",
       hide: "숨기기"
     },
@@ -405,6 +407,8 @@ export const koKR = {
       openTranscript: "Transcript 열기",
       revealTranscript: "Transcript 위치 표시",
       backupSession: "세션 백업",
+      deleteSession: "세션 삭제",
+      importSession: "세션 가져오기",
       writeDeletePlan: "삭제 계획 작성",
       planImport: "가져오기 계획"
     },
@@ -452,16 +456,23 @@ export const koKR = {
   },
   toast: {
     snapshotCanceled: "내보내기가 취소됨",
-    snapshotExported: "스냅샷을 내보냈습니다: {{path}}",
-    externalOpened: "{{url}} 열림",
-    externalBlocked: "외부 URL 차단됨: {{url}}",
+    snapshotExported: "스냅샷을 내보냈습니다",
+    externalOpened: "외부 링크 열림",
+    externalBlocked: "외부 링크 차단됨",
     openFailed: "열기 실패: {{message}}",
-    pathOpened: "{{path}} 열림",
-    pathRevealed: "{{path}} 위치 열림",
-    sessionBackedUp: "세션 백업 작성됨: {{path}}",
+    pathOpened: "경로 열림",
+    pathRevealed: "경로 위치 열림",
+    sessionBackedUp: "세션 백업 작성됨",
+    sessionDeleted: "세션이 격리 폴더로 이동됨",
+    sessionImported: "백업에서 세션을 가져왔습니다",
     deletePlanWritten: "삭제 계획 작성됨: {{path}}",
     importPlanWritten: "가져오기 계획 작성됨: {{path}}",
     importPlanCanceled: "가져오기 계획 취소됨",
     operationFailed: "작업 실패: {{message}}"
+  },
+  confirm: {
+    deleteSessionTitle: "세션 삭제",
+    deleteSession:
+      "이 세션을 삭제할까요?\n\n{{title}}\n\nAgentScope는 먼저 백업한 뒤 세션 파일을 격리 폴더로 이동하고 검증된 로컬 참조만 제거합니다. 정확한 PID가 남아 있는 활성 세션은 차단됩니다."
   }
 } satisfies ResourceTree;

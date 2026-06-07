@@ -81,6 +81,26 @@ interface SearchSuggestion {
   targetView?: View;
 }
 
+interface NoticeAction {
+  label: string;
+  onClick: () => void;
+}
+
+interface NoticeState {
+  id: number;
+  message: string;
+  detail?: string | undefined;
+  actions?: NoticeAction[] | undefined;
+}
+
+interface ConfirmState {
+  title: string;
+  detail: string;
+  confirmLabel: string;
+  danger?: boolean | undefined;
+  onConfirm: () => void;
+}
+
 interface TranscriptContext {
   path: string;
   line: number;
@@ -199,8 +219,10 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [highlightTarget, setHighlightTarget] = useState<SearchResultRecord | null>(null);
   const searchDebounceRef = useRef<number | undefined>(undefined);
+  const searchRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState("");
+  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmState | null>(null);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [installedFonts, setInstalledFonts] = useState<string[]>([]);
 
@@ -296,16 +318,19 @@ function App() {
   }
 
   async function runSearchText(value: string) {
+    const requestId = (searchRequestIdRef.current += 1);
     if (!value.trim()) {
       setResults([]);
       return;
     }
     const trimmed = value.trim();
     const nextResults = await window.agentscope.search(trimmed, settings.searchLimit);
+    if (requestId !== searchRequestIdRef.current) return;
     setResults(nextResults.map((result) => ({ ...result, query: trimmed })));
   }
 
   function clearSearchState() {
+    searchRequestIdRef.current += 1;
     window.clearTimeout(searchDebounceRef.current);
     setQuery("");
     setResults([]);
@@ -315,66 +340,105 @@ function App() {
   async function exportCurrentSnapshot() {
     if (!snapshot) return;
     const result = await window.agentscope.exportSnapshot();
-    setToast(
+    showNotice(
       result.canceled
-        ? t("toast.snapshotCanceled")
-        : t("toast.snapshotExported", { path: result.path })
+        ? { message: t("toast.snapshotCanceled") }
+        : {
+            message: t("toast.snapshotExported"),
+            detail: result.path,
+            actions: noticePathActions(result.path)
+          }
     );
   }
 
   async function openExternal(url: string) {
     const opened = await window.agentscope.openExternal(url);
-    setToast(opened ? t("toast.externalOpened", { url }) : t("toast.externalBlocked", { url }));
+    showNotice({ message: opened ? t("toast.externalOpened") : t("toast.externalBlocked"), detail: url });
   }
 
   async function openPath(targetPath?: string) {
     if (!targetPath) return;
     const result = await window.agentscope.openPath(targetPath);
-    setToast(
+    showNotice(
       result
-        ? t("toast.openFailed", { message: result })
-        : t("toast.pathOpened", { path: targetPath })
+        ? { message: t("toast.openFailed", { message: result }) }
+        : { message: t("toast.pathOpened"), detail: targetPath, actions: noticePathActions(targetPath) }
     );
   }
 
   async function revealPath(targetPath?: string) {
     if (!targetPath) return;
     await window.agentscope.revealPath(targetPath);
-    setToast(t("toast.pathRevealed", { path: targetPath }));
+    showNotice({ message: t("toast.pathRevealed"), detail: targetPath, actions: noticePathActions(targetPath) });
   }
 
   async function backupSelectedSession(session: AgentSession) {
     try {
       const result = await window.agentscope.backupSession(session.agent, session.sessionId);
-      setToast(t("toast.sessionBackedUp", { path: result.backupDir }));
+      showNotice({
+        message: t("toast.sessionBackedUp"),
+        detail: result.backupDir,
+        actions: noticePathActions(result.manifestPath)
+      });
       await window.agentscope.revealPath(result.manifestPath);
     } catch (error) {
-      setToast(t("toast.operationFailed", { message: errorMessage(error) }));
+      showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
     }
   }
 
-  async function writeDeletePlanForSession(session: AgentSession) {
+  async function deleteSelectedSession(session: AgentSession) {
+    setConfirmDialog({
+      title: t("confirm.deleteSessionTitle"),
+      detail: t("confirm.deleteSession", { title: displayTitle(session) }),
+      confirmLabel: t("inspector.actions.deleteSession"),
+      danger: true,
+      onConfirm: () => void executeDeleteSession(session)
+    });
+  }
+
+  async function executeDeleteSession(session: AgentSession) {
     try {
-      const result = await window.agentscope.writeDeletePlan(session.agent, session.sessionId);
-      setToast(t("toast.deletePlanWritten", { path: result.path }));
-      await window.agentscope.revealPath(result.path);
+      const result = await window.agentscope.deleteSession(session.agent, session.sessionId);
+      showNotice({
+        message: t("toast.sessionDeleted"),
+        detail: result.quarantineDir,
+        actions: noticePathActions(result.quarantineDir)
+      });
+      await window.agentscope.revealPath(result.quarantineDir);
+      await refresh();
     } catch (error) {
-      setToast(t("toast.operationFailed", { message: errorMessage(error) }));
+      showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
     }
   }
 
-  async function chooseImportPlan() {
+  async function chooseImportSession() {
     try {
-      const result = await window.agentscope.chooseImportPlan();
-      if ("path" in result) {
-        setToast(t("toast.importPlanWritten", { path: result.path }));
-        await window.agentscope.revealPath(result.path);
+      const result = await window.agentscope.chooseImportSession();
+      if ("backupDir" in result) {
+        showNotice({
+          message: t("toast.sessionImported"),
+          detail: result.backupDir,
+          actions: noticePathActions(result.backupDir)
+        });
+        await refresh();
       } else {
-        setToast(t("toast.importPlanCanceled"));
+        showNotice({ message: t("toast.importPlanCanceled") });
       }
     } catch (error) {
-      setToast(t("toast.operationFailed", { message: errorMessage(error) }));
+      showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
     }
+  }
+
+  function noticePathActions(targetPath?: string): NoticeAction[] {
+    if (!targetPath) return [];
+    return [
+      { label: t("common.action.reveal"), onClick: () => void window.agentscope.revealPath(targetPath) },
+      { label: t("common.action.open"), onClick: () => void openPath(targetPath) }
+    ];
+  }
+
+  function showNotice(next: Omit<NoticeState, "id">) {
+    setNotice({ id: Date.now(), ...next });
   }
 
   const sessions = snapshot?.sessions ?? [];
@@ -505,9 +569,13 @@ function App() {
                 selectedKey={selected?.type === "session" ? sessionKey(selected.value) : undefined}
                 loading={initialLoading}
                 highlightTarget={highlightTarget}
+                onImportSession={() => void chooseImportSession()}
                 onSelect={(session) =>
                   setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId })
                 }
+                onBackupSession={(session) => void backupSelectedSession(session)}
+                onDeleteSession={(session) => void deleteSelectedSession(session)}
+                onRevealTranscript={(session) => void revealPath(session.transcriptPath)}
               />
             )}
             {view === "graph" && (
@@ -540,13 +608,18 @@ function App() {
               onOpenPath={(targetPath) => void openPath(targetPath)}
               onRevealPath={(targetPath) => void revealPath(targetPath)}
               onBackupSession={(session) => void backupSelectedSession(session)}
-              onWriteDeletePlan={(session) => void writeDeletePlanForSession(session)}
-              onChooseImportPlan={() => void chooseImportPlan()}
+              onDeleteSession={(session) => void deleteSelectedSession(session)}
             />
           )}
         </div>
       </section>
-      {toast && <Toast message={toast} onClose={() => setToast("")} />}
+      {notice && <Notification notice={notice} onClose={() => setNotice(null)} />}
+      {confirmDialog && (
+        <ConfirmDialog
+          value={confirmDialog}
+          onClose={() => setConfirmDialog(null)}
+        />
+      )}
     </main>
   );
 }
@@ -1294,12 +1367,21 @@ function SessionList(props: {
   selectedKey?: string | undefined;
   loading: boolean;
   highlightTarget: SearchResultRecord | null;
+  onImportSession: () => void;
   onSelect: (session: AgentSession) => void;
+  onBackupSession: (session: AgentSession) => void;
+  onDeleteSession: (session: AgentSession) => void;
+  onRevealTranscript: (session: AgentSession) => void;
 }) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
   const [groupMode, setGroupMode] = useState<SessionGroupMode>("none");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [contextMenu, setContextMenu] = useState<{
+    session: AgentSession;
+    x: number;
+    y: number;
+  } | null>(null);
   const groups = useMemo(
     () => groupSessions(props.sessions, groupMode),
     [props.sessions, groupMode]
@@ -1330,6 +1412,7 @@ function SessionList(props: {
       <PaneHeader
         title={t("nav.sessions")}
         subtitle={t("views.sessions.subtitle", { count: props.sessions.length })}
+        action={<ActionButton label={t("inspector.actions.importSession")} onClick={props.onImportSession} />}
       />
       <div className="listToolbar">
         <MiniSegmentedControl
@@ -1349,6 +1432,9 @@ function SessionList(props: {
                 highlighted={highlightedKey === sessionKey(session)}
                 locale={locale}
                 onSelect={() => props.onSelect(session)}
+                onContextMenu={(event) =>
+                  setContextMenu({ session, x: event.clientX, y: event.clientY })
+                }
               />
             ))
           : groups.map((group) => {
@@ -1369,12 +1455,35 @@ function SessionList(props: {
                     highlighted={highlightedKey === sessionKey(session)}
                     locale={locale}
                     onSelect={() => props.onSelect(session)}
+                    onContextMenu={(event) =>
+                      setContextMenu({ session, x: event.clientX, y: event.clientY })
+                    }
                   />
                 ))}
             </section>
           );
         })}
       </div>
+      {contextMenu && (
+        <SessionContextMenu
+          session={contextMenu.session}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onBackup={() => {
+            props.onBackupSession(contextMenu.session);
+            setContextMenu(null);
+          }}
+          onDelete={() => {
+            props.onDeleteSession(contextMenu.session);
+            setContextMenu(null);
+          }}
+          onRevealTranscript={() => {
+            props.onRevealTranscript(contextMenu.session);
+            setContextMenu(null);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1385,6 +1494,7 @@ function SessionRow(props: {
   highlighted: boolean;
   locale?: string;
   onSelect: () => void;
+  onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { t } = useTranslation();
   const session = props.session;
@@ -1398,6 +1508,10 @@ function SessionRow(props: {
       ref={rowRef}
       className={`sessionRow ${props.selected ? "selected" : ""} ${props.highlighted ? "highlighted" : ""}`}
       onClick={props.onSelect}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        props.onContextMenu(event);
+      }}
     >
       <AgentTile agent={session.agent} />
       <div className="rowMain">
@@ -1425,6 +1539,54 @@ function SessionRow(props: {
       </div>
       <ChevronRight size={16} />
     </button>
+  );
+}
+
+function SessionContextMenu(props: {
+  session: AgentSession;
+  x: number;
+  y: number;
+  onClose: () => void;
+  onBackup: () => void;
+  onDelete: () => void;
+  onRevealTranscript: () => void;
+}) {
+  const { t } = useTranslation();
+  const left = clampMenuCoordinate(props.x, window.innerWidth, 300);
+  const top = clampMenuCoordinate(props.y, window.innerHeight, 230);
+  useEffect(() => {
+    const close = () => props.onClose();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [props]);
+  return (
+    <div
+      className="contextMenu sessionContextMenu"
+      style={{ left, top } as CSSProperties}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <span>{displayTitle(props.session)}</span>
+      <button onClick={props.onBackup}>
+        <Download size={15} />
+        <strong>{t("inspector.actions.backupSession")}</strong>
+      </button>
+      <button disabled={!props.session.transcriptPath} onClick={props.onRevealTranscript}>
+        <FolderOpen size={15} />
+        <strong>{t("inspector.actions.revealTranscript")}</strong>
+      </button>
+      <div className="menuDivider" />
+      <button className="dangerItem" onClick={props.onDelete}>
+        <AlertTriangle size={15} />
+        <strong>{t("inspector.actions.deleteSession")}</strong>
+      </button>
+    </div>
   );
 }
 
@@ -2511,8 +2673,7 @@ function Inspector(props: {
   onOpenPath: (targetPath?: string) => void;
   onRevealPath: (targetPath?: string) => void;
   onBackupSession: (session: AgentSession) => void;
-  onWriteDeletePlan: (session: AgentSession) => void;
-  onChooseImportPlan: () => void;
+  onDeleteSession: (session: AgentSession) => void;
 }) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
@@ -2621,8 +2782,7 @@ function Inspector(props: {
         onOpenPath={props.onOpenPath}
         onRevealPath={props.onRevealPath}
         onBackupSession={props.onBackupSession}
-        onWriteDeletePlan={props.onWriteDeletePlan}
-        onChooseImportPlan={props.onChooseImportPlan}
+        onDeleteSession={props.onDeleteSession}
       />
       {props.transcriptPreviewEnabled && (
         <TranscriptHitContext
@@ -2758,8 +2918,7 @@ function ControlSummary(props: {
   onOpenPath: (targetPath?: string) => void;
   onRevealPath: (targetPath?: string) => void;
   onBackupSession: (session: AgentSession) => void;
-  onWriteDeletePlan: (session: AgentSession) => void;
-  onChooseImportPlan: () => void;
+  onDeleteSession: (session: AgentSession) => void;
 }) {
   const { t } = useTranslation();
   const resumeCommand = suggestedResumeCommand(props.session);
@@ -2767,26 +2926,17 @@ function ControlSummary(props: {
     <FieldGroup title={t("inspector.control")}>
       <div className="actionGrid">
         <ActionButton
-          label={t("inspector.actions.openTranscript")}
-          disabled={!props.session.transcriptPath}
-          onClick={() => props.onOpenPath(props.session.transcriptPath)}
+          label={t("inspector.actions.backupSession")}
+          onClick={() => props.onBackupSession(props.session)}
+        />
+        <ActionButton
+          label={t("inspector.actions.deleteSession")}
+          onClick={() => props.onDeleteSession(props.session)}
         />
         <ActionButton
           label={t("inspector.actions.revealTranscript")}
           disabled={!props.session.transcriptPath}
           onClick={() => props.onRevealPath(props.session.transcriptPath)}
-        />
-        <ActionButton
-          label={t("inspector.actions.backupSession")}
-          onClick={() => props.onBackupSession(props.session)}
-        />
-        <ActionButton
-          label={t("inspector.actions.writeDeletePlan")}
-          onClick={() => props.onWriteDeletePlan(props.session)}
-        />
-        <ActionButton
-          label={t("inspector.actions.planImport")}
-          onClick={props.onChooseImportPlan}
         />
       </div>
       <Field label={t("inspector.fields.resumeCommand")} value={resumeCommand} mono long />
@@ -2958,13 +3108,14 @@ function InspectorHeader(props: { title: string; subtitle: string; agent: string
   );
 }
 
-function PaneHeader(props: { title: string; subtitle: string }) {
+function PaneHeader(props: { title: string; subtitle: string; action?: ReactNode | undefined }) {
   return (
     <div className="paneHeader">
       <div>
         <h2>{props.title}</h2>
         <p>{props.subtitle}</p>
       </div>
+      {props.action && <div className="paneHeaderAction">{props.action}</div>}
     </div>
   );
 }
@@ -3088,10 +3239,14 @@ function CommandPalette(props: {
               <button
                 type="button"
                 disabled={!props.query && props.results.length === 0}
-                onClick={props.clearSearch}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  props.clearSearch();
+                }}
               >
-                  {t("command.clearSearch")}
-                </button>
+                {t("command.clearSearch")}
+              </button>
             </div>
             <div className="suggestionList">
               {props.suggestions.length ? (
@@ -3763,15 +3918,65 @@ function cleanTitle(value: string): string {
   return value.replaceAll("_", " ").replace(/\s+/g, " ").trim();
 }
 
-function Toast(props: { message: string; onClose: () => void }) {
+function Notification(props: { notice: NoticeState; onClose: () => void }) {
   useEffect(() => {
-    const timer = window.setTimeout(props.onClose, 4200);
+    const timer = window.setTimeout(props.onClose, 7800);
     return () => window.clearTimeout(timer);
-  }, [props.onClose]);
+  }, [props.notice.id, props.onClose]);
   return (
-    <button className="toast" onClick={props.onClose}>
-      {props.message}
-    </button>
+    <section className="notification" role="status" aria-live="polite">
+      <div>
+        <strong>{props.notice.message}</strong>
+        {props.notice.detail && <span className="mono">{props.notice.detail}</span>}
+      </div>
+      {props.notice.actions?.length ? (
+        <div className="notificationActions">
+          {props.notice.actions.map((action) => (
+            <button key={action.label} type="button" onClick={action.onClick}>
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <button className="notificationClose" type="button" onClick={props.onClose} aria-label="Close">
+        <X size={14} />
+      </button>
+    </section>
+  );
+}
+
+function ConfirmDialog(props: { value: ConfirmState; onClose: () => void }) {
+  const { t } = useTranslation();
+  const confirm = () => {
+    props.onClose();
+    props.value.onConfirm();
+  };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [props]);
+  return (
+    <div className="confirmOverlay" onMouseDown={props.onClose}>
+      <section className="confirmDialog" onMouseDown={(event) => event.stopPropagation()}>
+        <h2>{props.value.title}</h2>
+        <p>{props.value.detail}</p>
+        <div className="confirmActions">
+          <button type="button" onClick={props.onClose}>
+            {t("common.action.cancel")}
+          </button>
+          <button
+            type="button"
+            className={props.value.danger ? "dangerAction" : ""}
+            onClick={confirm}
+          >
+            {props.value.confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 

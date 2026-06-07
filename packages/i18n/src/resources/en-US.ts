@@ -13,6 +13,8 @@ export const enUS = {
       refresh: "Refresh",
       reset: "Reset",
       clear: "Clear",
+      cancel: "Cancel",
+      reveal: "Reveal",
       show: "Show",
       hide: "Hide"
     },
@@ -430,6 +432,8 @@ export const enUS = {
       openTranscript: "Open transcript",
       revealTranscript: "Reveal transcript",
       backupSession: "Back up session",
+      deleteSession: "Delete session",
+      importSession: "Import session",
       writeDeletePlan: "Write delete plan",
       planImport: "Plan import"
     },
@@ -477,16 +481,23 @@ export const enUS = {
   },
   toast: {
     snapshotCanceled: "Export canceled",
-    snapshotExported: "Snapshot exported: {{path}}",
-    externalOpened: "Opened {{url}}",
-    externalBlocked: "Blocked external URL: {{url}}",
+    snapshotExported: "Snapshot exported",
+    externalOpened: "Opened external link",
+    externalBlocked: "Blocked external link",
     openFailed: "Open failed: {{message}}",
-    pathOpened: "Opened {{path}}",
-    pathRevealed: "Revealed {{path}}",
-    sessionBackedUp: "Session backup written: {{path}}",
+    pathOpened: "Opened path",
+    pathRevealed: "Revealed path",
+    sessionBackedUp: "Session backup written",
+    sessionDeleted: "Session moved to quarantine",
+    sessionImported: "Session imported from backup",
     deletePlanWritten: "Delete plan written: {{path}}",
     importPlanWritten: "Import plan written: {{path}}",
     importPlanCanceled: "Import planning canceled",
     operationFailed: "Operation failed: {{message}}"
+  },
+  confirm: {
+    deleteSessionTitle: "Delete session",
+    deleteSession:
+      "Delete this session?\n\n{{title}}\n\nAgentScope will back it up first, then move session files to quarantine and remove verified local references. Active exact PID sessions are blocked."
   }
 } as const;

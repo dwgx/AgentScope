@@ -202,3 +202,18 @@ export interface SessionOperationPlanResult {
   plan: SessionOperationPlan;
   path: string;
 }
+
+export interface SessionDeleteResult {
+  plan: SessionOperationPlan;
+  backup: SessionBackupResult;
+  quarantineDir: string;
+  movedFiles: SessionOperationFile[];
+  patchedFiles: SessionOperationFile[];
+  databaseChanges: SessionOperationDatabaseChange[];
+}
+
+export interface SessionImportResult {
+  plan: SessionOperationPlan;
+  backupDir: string;
+  importedFiles: SessionOperationFile[];
+}

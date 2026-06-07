@@ -2,16 +2,20 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import type {
   AgentKind,
   AgentSession,
   Evidence,
   SessionBackupResult,
+  SessionDeleteResult,
+  SessionImportResult,
   SessionOperationDatabaseChange,
   SessionOperationFile,
   SessionOperationPlan,
   SessionOperationPlanResult
 } from "@agentscope/shared";
+import { tableColumns } from "./codex.js";
 import { buildSnapshot, findSession } from "./scope.js";
 import { claudeHome, codexHome, encodeClaudeProjectPath, normalizeWindowsPath, userHome } from "./paths.js";
 
@@ -19,6 +23,8 @@ export interface SessionOperationOptions {
   home?: string | undefined;
   outputRoot?: string | undefined;
   now?: Date | undefined;
+  allowActive?: boolean | undefined;
+  includeProcesses?: boolean | undefined;
 }
 
 export async function planSessionDelete(
@@ -26,9 +32,9 @@ export async function planSessionDelete(
   agent?: AgentKind,
   options: SessionOperationOptions = {}
 ): Promise<SessionOperationPlan> {
-  const session = await resolveSession(sessionId, agent, options.home);
+  const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses);
   const plan = await buildSessionPlan("delete", session, options);
-  plan.notes.push("This plan is dry-run only. AgentScope does not delete Codex or Claude files in this version.");
+  plan.notes.push("This plan is a preview. Executing deleteSession first writes an AgentScope backup, then moves removable files to quarantine and patches only known session references.");
   return plan;
 }
 
@@ -59,6 +65,7 @@ export async function backupSession(
   await fs.promises.mkdir(filesRoot, { recursive: true });
 
   const copiedFiles: SessionOperationFile[] = [];
+  const copiedManifestFiles: Array<SessionOperationFile & { backupRelativePath: string }> = [];
   for (const file of plan.files) {
     if (!file.exists || file.action !== "copy") continue;
     const relative = relativeBackupPath(file.path);
@@ -70,7 +77,9 @@ export async function backupSession(
     } else {
       await fs.promises.copyFile(file.path, target);
     }
-    copiedFiles.push({ ...file, sha256: await hashPath(file.path) });
+    const copied = { ...file, sha256: await hashPath(file.path) };
+    copiedFiles.push(copied);
+    copiedManifestFiles.push({ ...copied, backupRelativePath: relative });
   }
 
   const manifestPath = path.join(backupDir, "manifest.json");
@@ -81,11 +90,101 @@ export async function backupSession(
     agent: session.agent,
     sessionId: session.sessionId,
     sourceHome: options.home ?? userHome(),
-    copiedFiles,
+    copiedFiles: copiedManifestFiles,
     plan
   };
   await writeJson(manifestPath, manifest);
   return { plan: { ...plan, files: copiedFiles }, backupDir, manifestPath, copiedFiles };
+}
+
+export async function deleteSession(
+  sessionId: string,
+  agent?: AgentKind,
+  options: SessionOperationOptions = {}
+): Promise<SessionDeleteResult> {
+  const session = await resolveSession(sessionId, agent, options.home, true);
+  const plan = await buildSessionPlan("delete", session, options);
+  if (plan.blockers.length && !options.allowActive) {
+    throw new Error(plan.blockers.join(" "));
+  }
+  const backup = await backupSession(session.sessionId, session.agent, options);
+  const quarantineDir = path.join(
+    operationRoot(options),
+    "quarantine",
+    `${safeStamp(plan.createdAt)}-${session.agent}-${safeName(session.sessionId)}`
+  );
+  await fs.promises.mkdir(quarantineDir, { recursive: true });
+  const movedFiles: SessionOperationFile[] = [];
+  const patchedFiles: SessionOperationFile[] = [];
+  for (const file of plan.files) {
+    if (!file.exists) continue;
+    if (file.action === "delete") {
+      const target = path.join(quarantineDir, relativeBackupPath(file.path));
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await movePath(file.path, target);
+      movedFiles.push({ ...file, action: "move", sha256: await hashPath(target) });
+    } else if (file.action === "patch") {
+      const patched = await patchSessionReferenceFile(file, session);
+      if (patched) patchedFiles.push(patched);
+    }
+  }
+  if (session.agent === "codex") await backupCodexDatabases(options.home, quarantineDir);
+  const databaseChanges = session.agent === "codex" ? applyCodexDatabaseDelete(plan, options.home) : [];
+  return { plan, backup, quarantineDir, movedFiles, patchedFiles, databaseChanges };
+}
+
+export async function importSessionBackup(
+  backupDir: string,
+  options: SessionOperationOptions = {}
+): Promise<SessionImportResult> {
+  const planResult = await planSessionImport(backupDir, options);
+  const plan = planResult.plan;
+  if (plan.blockers.length) throw new Error(plan.blockers.join(" "));
+  if (plan.target) throw new Error("A session with this id already exists locally; delete or archive it before importing.");
+  const manifest = await readBackupManifest(backupDir);
+  const copiedFiles = manifestCopiedFiles(manifest);
+  if (!copiedFiles.length) throw new Error("Backup manifest has no copied files to import.");
+  const importedFiles: SessionOperationFile[] = [];
+  const filesRoot = path.join(backupDir, "files");
+  for (const file of copiedFiles) {
+    const originalPath = typeof file.path === "string" ? file.path : undefined;
+    const backupRelativePath = typeof file.backupRelativePath === "string" ? file.backupRelativePath : undefined;
+    if (!originalPath || !backupRelativePath) continue;
+    if (backupRelativePath.includes("..") || path.isAbsolute(backupRelativePath)) {
+      throw new Error(`Unsafe backup relative path: ${backupRelativePath}`);
+    }
+    const source = path.join(filesRoot, backupRelativePath);
+    if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
+    const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
+    const actualSha = await hashPath(source);
+    if (expectedSha && actualSha && expectedSha !== actualSha) {
+      throw new Error(`Backup checksum mismatch: ${source}`);
+    }
+    if (await pathExists(originalPath)) throw new Error(`Import target already exists: ${originalPath}`);
+    await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
+    const stat = await fs.promises.stat(source);
+    if (stat.isDirectory()) {
+      await fs.promises.cp(source, originalPath, { recursive: true, force: false, errorOnExist: true });
+    } else {
+      await fs.promises.copyFile(source, originalPath);
+    }
+    importedFiles.push({
+      role: typeof file.role === "string" ? file.role : "backup_file",
+      path: originalPath,
+      exists: true,
+      bytes: stat.isDirectory() ? await directoryBytes(originalPath) : stat.size,
+      sha256: await hashPath(originalPath),
+      action: "copy",
+      evidence: [
+        {
+          source: "agentscope.backup.import",
+          detail: "File restored from AgentScope session backup manifest.",
+          path: source
+        }
+      ]
+    });
+  }
+  return { plan, backupDir, importedFiles };
 }
 
 export async function planSessionImport(
@@ -209,8 +308,13 @@ async function buildSessionPlan(
   };
 }
 
-async function resolveSession(sessionId: string, agent?: AgentKind, home?: string): Promise<AgentSession> {
-  const snapshot = await buildSnapshot(home, false);
+async function resolveSession(
+  sessionId: string,
+  agent?: AgentKind,
+  home?: string,
+  includeProcesses = false
+): Promise<AgentSession> {
+  const snapshot = await buildSnapshot(home, includeProcesses);
   const exact = findSession(snapshot, sessionId, agent);
   if (exact) return exact;
   const lowered = sessionId.toLowerCase();
@@ -258,8 +362,7 @@ async function discoverSessionFiles(
         field: "sessionId,pid,cwd"
       }
     ]);
-    const encoded = session.cwd ? encodeClaudeProjectPath(session.cwd) : undefined;
-    await add("claude.session_sidecar", encoded ? path.join(claudeRoot, "projects", encoded, session.sessionId) : undefined, [
+    await add("claude.session_sidecar", claudeSidecarPath(claudeRoot, session), [
       {
         source: "claude.projects.sidecar",
         detail: "Claude per-session directory may contain tool results and subagent transcripts.",
@@ -308,6 +411,16 @@ async function discoverSessionFiles(
         field: "workers.*.sessionId"
       }
     ], operation === "backup" ? "inspect" : "patch");
+    for (const jobPath of await findClaudeJobStateFiles(claudeRoot, session.sessionId)) {
+      await add("claude.job_state", jobPath, [
+        {
+          source: "claude.jobs",
+          detail: "Claude job state references this session id or resume session id.",
+          path: jobPath,
+          field: "sessionId,resumeSessionId"
+        }
+      ]);
+    }
   }
 
   if (session.agent === "codex") {
@@ -445,9 +558,32 @@ async function findClaudePidMap(claudeRoot: string, sessionId: string): Promise<
   return undefined;
 }
 
+async function findClaudeJobStateFiles(claudeRoot: string, sessionId: string): Promise<string[]> {
+  const jobsDir = path.join(claudeRoot, "jobs");
+  const out: string[] = [];
+  const entries = await fs.promises.readdir(jobsDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const statePath = path.join(jobsDir, entry.name, "state.json");
+    try {
+      const payload = JSON.parse(await fs.promises.readFile(statePath, "utf8")) as Record<string, unknown>;
+      if (payload.sessionId === sessionId || payload.resumeSessionId === sessionId) out.push(statePath);
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+function claudeSidecarPath(claudeRoot: string, session: AgentSession): string | undefined {
+  if (session.cwd) return path.join(claudeRoot, "projects", encodeClaudeProjectPath(session.cwd), session.sessionId);
+  if (session.transcriptPath) return path.join(path.dirname(session.transcriptPath), session.sessionId);
+  return undefined;
+}
+
 function activeSessionBlockers(session: AgentSession): string[] {
   const blockers: string[] = [];
-  if (session.pid !== undefined && session.confidence === "exact") {
+  if (session.pid !== undefined && (session.processName || session.commandLine || session.path)) {
     blockers.push(`Session has an exact active PID mapping (${session.pid}); destructive operations must wait until the process exits.`);
   }
   return blockers;
@@ -467,6 +603,255 @@ function riskWarnings(session: AgentSession, operation: "backup" | "delete"): st
   }
   if (!session.transcriptPath) warnings.push("No transcript path is indexed for this session.");
   return warnings;
+}
+
+async function patchSessionReferenceFile(
+  file: SessionOperationFile,
+  session: AgentSession
+): Promise<SessionOperationFile | undefined> {
+  if (file.role === "claude.history_jsonl_patch") {
+    return patchJsonlLinesBySessionId(file, session.sessionId);
+  }
+  if (file.role === "claude.global_state_patch") {
+    return patchClaudeGlobalState(file, session.sessionId);
+  }
+  if (file.role === "claude.daemon_roster_patch") {
+    return patchClaudeDaemonRoster(file, session.sessionId);
+  }
+  return undefined;
+}
+
+async function patchJsonlLinesBySessionId(
+  file: SessionOperationFile,
+  sessionId: string
+): Promise<SessionOperationFile | undefined> {
+  const original = await fs.promises.readFile(file.path, "utf8");
+  const lines = original.split(/\r?\n/);
+  const kept: string[] = [];
+  let removed = 0;
+  for (const line of lines) {
+    if (!line.trim()) {
+      kept.push(line);
+      continue;
+    }
+    try {
+      const value = JSON.parse(line) as Record<string, unknown>;
+      if (value.sessionId === sessionId || value.session_id === sessionId) {
+        removed += 1;
+        continue;
+      }
+    } catch {
+      // Keep malformed lines; destructive cleanup must not drop data it cannot parse.
+    }
+    kept.push(line);
+  }
+  if (!removed) return undefined;
+  await writePatchBackup(file.path, original);
+  await fs.promises.writeFile(file.path, kept.join("\n"), "utf8");
+  return {
+    ...file,
+    action: "patch",
+    sha256: await hashPath(file.path),
+    evidence: [
+      ...file.evidence,
+      {
+        source: "agentscope.delete.patch",
+        detail: `Removed ${removed} JSONL line(s) referencing this session id.`,
+        path: file.path,
+        field: "sessionId"
+      }
+    ]
+  };
+}
+
+async function patchClaudeGlobalState(
+  file: SessionOperationFile,
+  sessionId: string
+): Promise<SessionOperationFile | undefined> {
+  const original = await fs.promises.readFile(file.path, "utf8");
+  let payload: unknown;
+  try {
+    payload = JSON.parse(original) as unknown;
+  } catch {
+    return undefined;
+  }
+  const removed = removeMatchingJsonValues(payload, sessionId);
+  if (!removed) return undefined;
+  await writePatchBackup(file.path, original);
+  await writeJson(file.path, payload);
+  return patchedFile(file, `Removed ${removed} JSON field(s) equal to the session id.`, "lastSessionId");
+}
+
+async function patchClaudeDaemonRoster(
+  file: SessionOperationFile,
+  sessionId: string
+): Promise<SessionOperationFile | undefined> {
+  const original = await fs.promises.readFile(file.path, "utf8");
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(original) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  const workers = objectValue(payload.workers);
+  if (!workers) return undefined;
+  let removed = 0;
+  for (const [key, worker] of Object.entries(workers)) {
+    const workerObject = objectValue(worker);
+    const dispatch = objectValue(workerObject?.dispatch);
+    if (workerObject?.sessionId === sessionId || dispatch?.sessionId === sessionId) {
+      delete workers[key];
+      removed += 1;
+    }
+  }
+  if (!removed) return undefined;
+  await writePatchBackup(file.path, original);
+  await writeJson(file.path, payload);
+  return patchedFile(file, `Removed ${removed} daemon worker reference(s) for this session id.`, "workers.*.sessionId");
+}
+
+function applyCodexDatabaseDelete(
+  plan: SessionOperationPlan,
+  home: string | undefined
+): SessionOperationDatabaseChange[] {
+  const root = codexHome(home);
+  const applied: SessionOperationDatabaseChange[] = [];
+  const statePath = path.join(root, "state_5.sqlite");
+  const stateDb = openWritableDb(statePath);
+  if (stateDb) {
+    try {
+      const db = stateDb;
+      db.pragma("busy_timeout = 5000");
+      db.pragma("foreign_keys = ON");
+      const transaction = db.transaction(() => {
+        applied.push(deleteRows(db, statePath, "thread_spawn_edges", "parent_thread_id = ? OR child_thread_id = ?", [plan.sessionId, plan.sessionId], "codex.sqlite.thread_spawn_edges"));
+        applied.push(deleteRows(db, statePath, "thread_dynamic_tools", "thread_id = ?", [plan.sessionId], "codex.sqlite.thread_dynamic_tools"));
+        applied.push(deleteRows(db, statePath, "threads", "id = ?", [plan.sessionId], "codex.sqlite.threads"));
+      });
+      transaction();
+    } finally {
+      stateDb.close();
+    }
+  }
+  for (const [dbName, table, where, source] of [
+    ["goals_1.sqlite", "thread_goals", "thread_id = ?", "codex.sqlite.goals"],
+    ["memories_1.sqlite", "stage1_outputs", "thread_id = ?", "codex.sqlite.memories"]
+  ] as const) {
+    const dbPath = path.join(root, dbName);
+    const db = openWritableDb(dbPath);
+    if (!db) continue;
+    try {
+      db.pragma("busy_timeout = 5000");
+      applied.push(deleteRows(db, dbPath, table, where, [plan.sessionId], source));
+    } finally {
+      db.close();
+    }
+  }
+  return applied.filter((change) => change.estimatedRows !== 0);
+}
+
+async function backupCodexDatabases(home: string | undefined, quarantineDir: string): Promise<void> {
+  const root = codexHome(home);
+  const backupDir = path.join(quarantineDir, "sqlite-backup");
+  await fs.promises.mkdir(backupDir, { recursive: true });
+  for (const name of ["state_5.sqlite", "goals_1.sqlite", "memories_1.sqlite", "logs_2.sqlite"]) {
+    const source = path.join(root, name);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const candidate = `${source}${suffix}`;
+      if (!(await pathExists(candidate))) continue;
+      await fs.promises.copyFile(candidate, path.join(backupDir, `${name}${suffix}`));
+    }
+  }
+}
+
+function deleteRows(
+  db: Database.Database,
+  dbPath: string,
+  table: string,
+  where: string,
+  params: unknown[],
+  source: string
+): SessionOperationDatabaseChange {
+  const columns = tableColumns(db, table);
+  if (!columns.size) return dbChange(dbPath, table, where, "skip", source);
+  const before = countRows(db, table, where, params);
+  if (before > 0) db.prepare(`DELETE FROM ${quoteIdentifier(table)} WHERE ${where}`).run(...params);
+  return {
+    ...dbChange(dbPath, table, where, "delete", source),
+    estimatedRows: before
+  };
+}
+
+function openWritableDb(dbPath: string): Database.Database | undefined {
+  if (!fs.existsSync(dbPath)) return undefined;
+  try {
+    return new Database(dbPath, { fileMustExist: true });
+  } catch {
+    return undefined;
+  }
+}
+
+function countRows(db: Database.Database, table: string, where: string, params: unknown[]): number {
+  try {
+    const row = db.prepare(`SELECT COUNT(*) AS count FROM ${quoteIdentifier(table)} WHERE ${where}`).get(...params) as
+      | { count?: unknown }
+      | undefined;
+    const count = Number(row?.count);
+    return Number.isFinite(count) ? count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+async function writePatchBackup(filePath: string, original: string): Promise<void> {
+  const backupPath = `${filePath}.agentscope-${safeStamp(new Date().toISOString())}.bak`;
+  await fs.promises.writeFile(backupPath, original, "utf8");
+}
+
+function patchedFile(file: SessionOperationFile, detail: string, field: string): SessionOperationFile {
+  return {
+    ...file,
+    action: "patch",
+    evidence: [
+      ...file.evidence,
+      {
+        source: "agentscope.delete.patch",
+        detail,
+        path: file.path,
+        field
+      }
+    ]
+  };
+}
+
+function removeMatchingJsonValues(value: unknown, target: string): number {
+  if (!value || typeof value !== "object") return 0;
+  let removed = 0;
+  if (Array.isArray(value)) {
+    for (let index = value.length - 1; index >= 0; index -= 1) {
+      if (value[index] === target) {
+        value.splice(index, 1);
+        removed += 1;
+      } else {
+        removed += removeMatchingJsonValues(value[index], target);
+      }
+    }
+    return removed;
+  }
+  const object = value as Record<string, unknown>;
+  for (const [key, child] of Object.entries(object)) {
+    if (child === target) {
+      delete object[key];
+      removed += 1;
+      continue;
+    }
+    removed += removeMatchingJsonValues(child, target);
+  }
+  return removed;
 }
 
 function backupNotes(agent: AgentKind): string[] {
@@ -510,6 +895,16 @@ async function listBackupFiles(backupDir: string): Promise<SessionOperationFile[
   return out;
 }
 
+async function readBackupManifest(backupDir: string): Promise<Record<string, unknown>> {
+  const manifestPath = path.join(backupDir, "manifest.json");
+  return JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+}
+
+function manifestCopiedFiles(manifest: Record<string, unknown>): Array<Record<string, unknown>> {
+  const copiedFiles = manifest.copiedFiles;
+  return Array.isArray(copiedFiles) ? copiedFiles.filter(isObjectValue) : [];
+}
+
 async function describeTree(root: string, depth: number): Promise<Record<string, unknown>> {
   const exists = await pathExists(root);
   if (!exists) return { root, exists: false };
@@ -550,6 +945,23 @@ async function directoryBytes(root: string): Promise<number> {
     total += (await fs.promises.stat(filePath)).size;
   });
   return total;
+}
+
+async function movePath(source: string, target: string): Promise<void> {
+  try {
+    await fs.promises.rename(source, target);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+  }
+  const stat = await fs.promises.stat(source);
+  if (stat.isDirectory()) {
+    await fs.promises.cp(source, target, { recursive: true, force: false, errorOnExist: true });
+    await fs.promises.rm(source, { recursive: true, force: false });
+  } else {
+    await fs.promises.copyFile(source, target);
+    await fs.promises.rm(source, { force: false });
+  }
 }
 
 async function hashPath(filePath: string): Promise<string | undefined> {
@@ -596,6 +1008,14 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 function asAgent(value: unknown): AgentKind | undefined {
   return value === "codex" || value === "claude" ? value : undefined;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return isObjectValue(value) ? value : undefined;
+}
+
+function isObjectValue(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function compactEvidence(value: {

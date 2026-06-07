@@ -2,10 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { backupSession, planSessionDelete, planSessionImport, writeSessionDeletePlan } from "./sessionOps.js";
+import {
+  backupSession,
+  deleteSession,
+  importSessionBackup,
+  planSessionDelete,
+  planSessionImport,
+  writeSessionDeletePlan
+} from "./sessionOps.js";
 
 describe("session operations", () => {
-  it("plans Claude session sidecars without deleting active PID mappings", async () => {
+  it("plans Claude session sidecars without treating stale PID files as blockers", async () => {
     const home = tempHome();
     const sessionId = "11111111-1111-4111-8111-111111111111";
     const cwd = String.raw`D:\Project\AgentScope`;
@@ -22,8 +29,8 @@ describe("session operations", () => {
     const plan = await planSessionDelete(sessionId, "claude", { home, now: new Date("2026-06-07T00:00:00Z") });
 
     expect(plan.mode).toBe("dry-run");
-    expect(plan.risk).toBe("blocked");
-    expect(plan.blockers.join(" ")).toContain("exact active PID");
+    expect(plan.risk).toBe("caution");
+    expect(plan.blockers).toHaveLength(0);
     expect(plan.files.some((file) => file.role === "transcript" && file.exists)).toBe(true);
     expect(plan.files.some((file) => file.role === "claude.session_sidecar" && file.exists)).toBe(true);
     expect(plan.files.some((file) => file.role === "claude.history_jsonl_patch")).toBe(true);
@@ -48,6 +55,61 @@ describe("session operations", () => {
     expect(result.copiedFiles.some((file) => file.role === "transcript" && file.sha256)).toBe(true);
     const manifest = JSON.parse(fs.readFileSync(result.manifestPath, "utf8")) as Record<string, unknown>;
     expect(manifest.sessionId).toBe(sessionId);
+  });
+
+  it("deletes a Claude session by backing up and quarantining files", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-delete-"));
+    const sessionId = "55555555-5555-4555-8555-555555555555";
+    const encoded = "D--Project-AgentScope";
+    const transcript = path.join(home, ".claude", "projects", encoded, `${sessionId}.jsonl`);
+    const sidecar = path.join(home, ".claude", "projects", encoded, sessionId, "tool-results");
+    const jobState = path.join(home, ".claude", "jobs", "abc12345", "state.json");
+    fs.mkdirSync(sidecar, { recursive: true });
+    fs.mkdirSync(path.dirname(jobState), { recursive: true });
+    fs.writeFileSync(transcript, "{}\n");
+    fs.writeFileSync(path.join(sidecar, "1.txt"), "tool");
+    fs.writeFileSync(jobState, JSON.stringify({ sessionId, state: "stopped" }));
+    fs.writeFileSync(
+      path.join(home, ".claude", "history.jsonl"),
+      `${JSON.stringify({ sessionId, display: "remove" })}\n${JSON.stringify({ sessionId: "other", display: "keep" })}\n`
+    );
+
+    const result = await deleteSession(sessionId, "claude", {
+      home,
+      outputRoot,
+      now: new Date("2026-06-07T04:00:00Z")
+    });
+
+    expect(fs.existsSync(result.backup.manifestPath)).toBe(true);
+    expect(fs.existsSync(transcript)).toBe(false);
+    expect(fs.existsSync(path.join(sidecar, "1.txt"))).toBe(false);
+    expect(fs.existsSync(jobState)).toBe(false);
+    expect(fs.readFileSync(path.join(home, ".claude", "history.jsonl"), "utf8")).not.toContain(sessionId);
+    expect(result.movedFiles.some((file) => file.role === "transcript")).toBe(true);
+    expect(result.movedFiles.some((file) => file.role === "claude.job_state")).toBe(true);
+    expect(result.patchedFiles.some((file) => file.role === "claude.history_jsonl_patch")).toBe(true);
+  });
+
+  it("imports an AgentScope backup when target files are absent", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-import-exec-"));
+    const sessionId = "66666666-6666-4666-8666-666666666666";
+    const encoded = "D--Project-AgentScope";
+    const transcript = path.join(home, ".claude", "projects", encoded, `${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    fs.writeFileSync(transcript, "{}\n");
+    const backup = await backupSession(sessionId, "claude", {
+      home,
+      outputRoot,
+      now: new Date("2026-06-07T05:00:00Z")
+    });
+    fs.rmSync(transcript);
+
+    const imported = await importSessionBackup(backup.backupDir, { home, outputRoot });
+
+    expect(fs.existsSync(transcript)).toBe(true);
+    expect(imported.importedFiles.some((file) => file.path === transcript)).toBe(true);
   });
 
   it("plans Codex delete as row-level sqlite operations", async () => {

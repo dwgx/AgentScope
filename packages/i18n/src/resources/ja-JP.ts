@@ -12,6 +12,8 @@ export const jaJP = {
       refresh: "更新",
       reset: "リセット",
       clear: "消去",
+      cancel: "キャンセル",
+      reveal: "場所を表示",
       show: "表示",
       hide: "非表示"
     },
@@ -408,6 +410,8 @@ export const jaJP = {
       openTranscript: "転写を開く",
       revealTranscript: "転写の場所を表示",
       backupSession: "セッションをバックアップ",
+      deleteSession: "セッションを削除",
+      importSession: "セッションをインポート",
       writeDeletePlan: "削除計画を書き出す",
       planImport: "インポート計画"
     },
@@ -455,16 +459,23 @@ export const jaJP = {
   },
   toast: {
     snapshotCanceled: "書き出しをキャンセルしました",
-    snapshotExported: "スナップショットを書き出しました: {{path}}",
-    externalOpened: "{{url}} を開きました",
-    externalBlocked: "外部 URL をブロックしました: {{url}}",
+    snapshotExported: "スナップショットを書き出しました",
+    externalOpened: "外部リンクを開きました",
+    externalBlocked: "外部リンクをブロックしました",
     openFailed: "開けませんでした: {{message}}",
-    pathOpened: "{{path}} を開きました",
-    pathRevealed: "{{path}} を表示しました",
-    sessionBackedUp: "セッションバックアップを書き出しました: {{path}}",
+    pathOpened: "パスを開きました",
+    pathRevealed: "パスを表示しました",
+    sessionBackedUp: "セッションバックアップを書き出しました",
+    sessionDeleted: "セッションを隔離へ移動しました",
+    sessionImported: "バックアップからセッションをインポートしました",
     deletePlanWritten: "削除計画を書き出しました: {{path}}",
     importPlanWritten: "インポート計画を書き出しました: {{path}}",
     importPlanCanceled: "インポート計画をキャンセルしました",
     operationFailed: "操作に失敗しました: {{message}}"
+  },
+  confirm: {
+    deleteSessionTitle: "セッションを削除",
+    deleteSession:
+      "このセッションを削除しますか?\n\n{{title}}\n\nAgentScope は先にバックアップし、セッションファイルを隔離へ移動し、検証済みのローカル参照だけを削除します。正確な PID が残るアクティブセッションはブロックされます。"
   }
 } satisfies ResourceTree;

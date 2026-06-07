@@ -12,6 +12,8 @@ export const zhCN = {
       refresh: "刷新",
       reset: "重置",
       clear: "清空",
+      cancel: "取消",
+      reveal: "定位",
       show: "显示",
       hide: "隐藏"
     },
@@ -400,6 +402,8 @@ export const zhCN = {
       openTranscript: "打开转录",
       revealTranscript: "定位转录",
       backupSession: "备份会话",
+      deleteSession: "删除会话",
+      importSession: "导入会话",
       writeDeletePlan: "生成删除计划",
       planImport: "生成导入计划"
     },
@@ -447,16 +451,23 @@ export const zhCN = {
   },
   toast: {
     snapshotCanceled: "已取消导出",
-    snapshotExported: "快照已导出：{{path}}",
-    externalOpened: "已打开 {{url}}",
-    externalBlocked: "已阻止外部 URL：{{url}}",
+    snapshotExported: "快照已导出",
+    externalOpened: "已打开外部链接",
+    externalBlocked: "已阻止外部链接",
     openFailed: "打开失败：{{message}}",
-    pathOpened: "已打开 {{path}}",
-    pathRevealed: "已定位 {{path}}",
-    sessionBackedUp: "会话备份已写入：{{path}}",
+    pathOpened: "已打开路径",
+    pathRevealed: "已定位路径",
+    sessionBackedUp: "会话备份已写入",
+    sessionDeleted: "会话已移入隔离区",
+    sessionImported: "会话已从备份导入",
     deletePlanWritten: "删除计划已写入：{{path}}",
     importPlanWritten: "导入计划已写入：{{path}}",
     importPlanCanceled: "已取消导入计划",
     operationFailed: "操作失败：{{message}}"
+  },
+  confirm: {
+    deleteSessionTitle: "删除会话",
+    deleteSession:
+      "删除这个会话？\n\n{{title}}\n\nAgentScope 会先备份，再把会话文件移入隔离区，并移除已验证的本地引用。仍有精确 PID 的活跃会话会被阻止。"
   }
 } satisfies ResourceTree;
