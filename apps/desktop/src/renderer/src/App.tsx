@@ -343,6 +343,40 @@ function App() {
     setToast(t("toast.pathRevealed", { path: targetPath }));
   }
 
+  async function backupSelectedSession(session: AgentSession) {
+    try {
+      const result = await window.agentscope.backupSession(session.agent, session.sessionId);
+      setToast(t("toast.sessionBackedUp", { path: result.backupDir }));
+      await window.agentscope.revealPath(result.manifestPath);
+    } catch (error) {
+      setToast(t("toast.operationFailed", { message: errorMessage(error) }));
+    }
+  }
+
+  async function writeDeletePlanForSession(session: AgentSession) {
+    try {
+      const result = await window.agentscope.writeDeletePlan(session.agent, session.sessionId);
+      setToast(t("toast.deletePlanWritten", { path: result.path }));
+      await window.agentscope.revealPath(result.path);
+    } catch (error) {
+      setToast(t("toast.operationFailed", { message: errorMessage(error) }));
+    }
+  }
+
+  async function chooseImportPlan() {
+    try {
+      const result = await window.agentscope.chooseImportPlan();
+      if ("path" in result) {
+        setToast(t("toast.importPlanWritten", { path: result.path }));
+        await window.agentscope.revealPath(result.path);
+      } else {
+        setToast(t("toast.importPlanCanceled"));
+      }
+    } catch (error) {
+      setToast(t("toast.operationFailed", { message: errorMessage(error) }));
+    }
+  }
+
   const sessions = snapshot?.sessions ?? [];
   const rawProcesses = snapshot?.processes ?? [];
   const processes = useMemo(
@@ -505,6 +539,9 @@ function App() {
               highlightTarget={highlightTarget}
               onOpenPath={(targetPath) => void openPath(targetPath)}
               onRevealPath={(targetPath) => void revealPath(targetPath)}
+              onBackupSession={(session) => void backupSelectedSession(session)}
+              onWriteDeletePlan={(session) => void writeDeletePlanForSession(session)}
+              onChooseImportPlan={() => void chooseImportPlan()}
             />
           )}
         </div>
@@ -2473,6 +2510,9 @@ function Inspector(props: {
   highlightTarget: SearchResultRecord | null;
   onOpenPath: (targetPath?: string) => void;
   onRevealPath: (targetPath?: string) => void;
+  onBackupSession: (session: AgentSession) => void;
+  onWriteDeletePlan: (session: AgentSession) => void;
+  onChooseImportPlan: () => void;
 }) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
@@ -2580,6 +2620,9 @@ function Inspector(props: {
         session={session}
         onOpenPath={props.onOpenPath}
         onRevealPath={props.onRevealPath}
+        onBackupSession={props.onBackupSession}
+        onWriteDeletePlan={props.onWriteDeletePlan}
+        onChooseImportPlan={props.onChooseImportPlan}
       />
       {props.transcriptPreviewEnabled && (
         <TranscriptHitContext
@@ -2714,6 +2757,9 @@ function ControlSummary(props: {
   session: AgentSession;
   onOpenPath: (targetPath?: string) => void;
   onRevealPath: (targetPath?: string) => void;
+  onBackupSession: (session: AgentSession) => void;
+  onWriteDeletePlan: (session: AgentSession) => void;
+  onChooseImportPlan: () => void;
 }) {
   const { t } = useTranslation();
   const resumeCommand = suggestedResumeCommand(props.session);
@@ -2729,6 +2775,18 @@ function ControlSummary(props: {
           label={t("inspector.actions.revealTranscript")}
           disabled={!props.session.transcriptPath}
           onClick={() => props.onRevealPath(props.session.transcriptPath)}
+        />
+        <ActionButton
+          label={t("inspector.actions.backupSession")}
+          onClick={() => props.onBackupSession(props.session)}
+        />
+        <ActionButton
+          label={t("inspector.actions.writeDeletePlan")}
+          onClick={() => props.onWriteDeletePlan(props.session)}
+        />
+        <ActionButton
+          label={t("inspector.actions.planImport")}
+          onClick={props.onChooseImportPlan}
         />
       </div>
       <Field label={t("inspector.fields.resumeCommand")} value={resumeCommand} mono long />
@@ -3641,6 +3699,10 @@ function formatDate(value: string, locale?: string) {
 
 function formatMaybeDate(value: string | undefined, locale?: string) {
   return value ? formatDate(value, locale) : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function formatDuration(startTime: string, locale?: string): string {

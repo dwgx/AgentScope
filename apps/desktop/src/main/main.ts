@@ -121,6 +121,37 @@ ipcMain.handle("inspect:session", async (_event, sessionId: string) => {
     indexRecords: snapshot.indexRecords.filter((record) => record.sessionId.toLowerCase() === sessionId.toLowerCase())
   };
 });
+ipcMain.handle("session:backup", async (_event, agent: string, sessionId: string) => {
+  const core = await loadCore();
+  return core.backupSession(sessionId, asAgent(agent));
+});
+ipcMain.handle("session:deletePlan", async (_event, agent: string, sessionId: string) => {
+  const core = await loadCore();
+  return core.writeSessionDeletePlan(sessionId, asAgent(agent));
+});
+ipcMain.handle("session:importPlan", async (_event, backupDir: string) => {
+  if (!(await isAllowedAgentScopeOperationPath(backupDir))) {
+    throw new Error("Import planning is limited to AgentScope backup directories.");
+  }
+  const core = await loadCore();
+  return core.planSessionImport(backupDir);
+});
+ipcMain.handle("session:chooseImportPlan", async () => {
+  const backupRoot = path.join(os.homedir(), ".agentscope", "backups");
+  await fs.promises.mkdir(backupRoot, { recursive: true });
+  const options = {
+    title: "Choose AgentScope backup directory",
+    defaultPath: backupRoot,
+    properties: ["openDirectory"] as Array<"openDirectory">
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  if (result.canceled || !result.filePaths[0]) return { canceled: true };
+  if (!(await isAllowedAgentScopeOperationPath(result.filePaths[0]))) {
+    throw new Error("Import planning is limited to AgentScope backup directories.");
+  }
+  const core = await loadCore();
+  return core.planSessionImport(result.filePaths[0]);
+});
 
 process.on("uncaughtException", (error) => {
   log(`uncaughtException ${error.stack ?? error.message}`);
@@ -272,6 +303,7 @@ async function allowedLocalPaths(): Promise<string[]> {
   addAllowedPath(paths, info.userData);
   addAllowedPath(paths, info.codexHome);
   addAllowedPath(paths, info.claudeHome);
+  addAllowedPath(paths, path.join(os.homedir(), ".agentscope"));
   addAllowedPath(paths, path.join(info.codexHome, "state_5.sqlite"));
 
   const snapshot = await buildSnapshot();
@@ -325,6 +357,20 @@ function normalizeFsPath(candidate: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+async function isAllowedAgentScopeOperationPath(targetPath: string): Promise<boolean> {
+  const normalizedTarget = normalizeFsPath(targetPath);
+  if (!normalizedTarget) return false;
+  const operationRoots = [
+    normalizeFsPath(path.join(os.homedir(), ".agentscope", "backups")),
+    normalizeFsPath(path.join(app.getPath("userData"), "backups"))
+  ].filter((item): item is string => !!item);
+  return operationRoots.some((root) => normalizedTarget === root || normalizedTarget.startsWith(`${root}${path.sep}`));
+}
+
+function asAgent(value: string): "codex" | "claude" | undefined {
+  return value === "codex" || value === "claude" ? value : undefined;
 }
 
 

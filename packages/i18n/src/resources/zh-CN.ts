@@ -398,7 +398,10 @@ export const zhCN = {
       "只读模式：可以打开、定位、生成 resume 命令和导出；kill/archive 在显式 force 控制出现前保持禁用。",
     actions: {
       openTranscript: "打开转录",
-      revealTranscript: "定位转录"
+      revealTranscript: "定位转录",
+      backupSession: "备份会话",
+      writeDeletePlan: "生成删除计划",
+      planImport: "生成导入计划"
     },
     fields: {
       pid: "PID",
@@ -449,6 +452,11 @@ export const zhCN = {
     externalBlocked: "已阻止外部 URL：{{url}}",
     openFailed: "打开失败：{{message}}",
     pathOpened: "已打开 {{path}}",
-    pathRevealed: "已定位 {{path}}"
+    pathRevealed: "已定位 {{path}}",
+    sessionBackedUp: "会话备份已写入：{{path}}",
+    deletePlanWritten: "删除计划已写入：{{path}}",
+    importPlanWritten: "导入计划已写入：{{path}}",
+    importPlanCanceled: "已取消导入计划",
+    operationFailed: "操作失败：{{message}}"
   }
 } satisfies ResourceTree;

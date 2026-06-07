@@ -147,3 +147,58 @@ export interface ScopeSnapshot {
   relations: Relation[];
   diagnostics?: Diagnostic[];
 }
+
+export type SessionOperation = "backup" | "delete" | "import";
+
+export type SessionOperationMode = "dry-run" | "execute";
+
+export type SessionOperationRisk = "safe" | "caution" | "blocked";
+
+export interface SessionOperationFile {
+  role: string;
+  path: string;
+  exists: boolean;
+  bytes?: number | undefined;
+  sha256?: string | undefined;
+  action: "copy" | "move" | "delete" | "patch" | "inspect" | "skip";
+  evidence: Evidence[];
+}
+
+export interface SessionOperationDatabaseChange {
+  database: string;
+  table: string;
+  where: string;
+  action: "delete" | "insert" | "update" | "inspect" | "skip";
+  estimatedRows?: number | undefined;
+  evidence: Evidence[];
+}
+
+export interface SessionOperationPlan {
+  schemaVersion: 1;
+  operation: SessionOperation;
+  mode: SessionOperationMode;
+  risk: SessionOperationRisk;
+  agent: AgentKind;
+  sessionId: string;
+  createdAt: string;
+  target?: AgentSession | undefined;
+  files: SessionOperationFile[];
+  databaseChanges: SessionOperationDatabaseChange[];
+  warnings: string[];
+  blockers: string[];
+  notes: string[];
+  evidence: Evidence[];
+  backupRequiredBeforeExecute: boolean;
+}
+
+export interface SessionBackupResult {
+  plan: SessionOperationPlan;
+  backupDir: string;
+  manifestPath: string;
+  copiedFiles: SessionOperationFile[];
+}
+
+export interface SessionOperationPlanResult {
+  plan: SessionOperationPlan;
+  path: string;
+}

@@ -406,7 +406,10 @@ export const jaJP = {
       "読み取り専用モードです。開く、場所を表示、resume コマンド生成、書き出しのみを許可します。kill/archive は明示的な force 制御が入るまで無効です。",
     actions: {
       openTranscript: "転写を開く",
-      revealTranscript: "転写の場所を表示"
+      revealTranscript: "転写の場所を表示",
+      backupSession: "セッションをバックアップ",
+      writeDeletePlan: "削除計画を書き出す",
+      planImport: "インポート計画"
     },
     fields: {
       pid: "PID",
@@ -457,6 +460,11 @@ export const jaJP = {
     externalBlocked: "外部 URL をブロックしました: {{url}}",
     openFailed: "開けませんでした: {{message}}",
     pathOpened: "{{path}} を開きました",
-    pathRevealed: "{{path}} を表示しました"
+    pathRevealed: "{{path}} を表示しました",
+    sessionBackedUp: "セッションバックアップを書き出しました: {{path}}",
+    deletePlanWritten: "削除計画を書き出しました: {{path}}",
+    importPlanWritten: "インポート計画を書き出しました: {{path}}",
+    importPlanCanceled: "インポート計画をキャンセルしました",
+    operationFailed: "操作に失敗しました: {{message}}"
   }
 } satisfies ResourceTree;

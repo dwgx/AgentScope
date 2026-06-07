@@ -13,5 +13,9 @@ contextBridge.exposeInMainWorld("agentscope", {
   openPath: (targetPath) => ipcRenderer.invoke("shell:openPath", targetPath),
   revealPath: (targetPath) => ipcRenderer.invoke("shell:revealPath", targetPath),
   inspectPid: (pid) => ipcRenderer.invoke("inspect:pid", pid),
-  inspectSession: (sessionId) => ipcRenderer.invoke("inspect:session", sessionId)
+  inspectSession: (sessionId) => ipcRenderer.invoke("inspect:session", sessionId),
+  backupSession: (agent, sessionId) => ipcRenderer.invoke("session:backup", agent, sessionId),
+  writeDeletePlan: (agent, sessionId) => ipcRenderer.invoke("session:deletePlan", agent, sessionId),
+  writeImportPlan: (backupDir) => ipcRenderer.invoke("session:importPlan", backupDir),
+  chooseImportPlan: () => ipcRenderer.invoke("session:chooseImportPlan")
 });

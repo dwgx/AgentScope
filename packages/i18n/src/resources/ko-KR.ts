@@ -403,7 +403,10 @@ export const koKR = {
       "읽기 전용 모드입니다. 열기, 위치 표시, resume 명령 생성, 내보내기만 허용합니다. kill/archive는 명시적 force 제어가 생기기 전까지 비활성화됩니다.",
     actions: {
       openTranscript: "Transcript 열기",
-      revealTranscript: "Transcript 위치 표시"
+      revealTranscript: "Transcript 위치 표시",
+      backupSession: "세션 백업",
+      writeDeletePlan: "삭제 계획 작성",
+      planImport: "가져오기 계획"
     },
     fields: {
       pid: "PID",
@@ -454,6 +457,11 @@ export const koKR = {
     externalBlocked: "외부 URL 차단됨: {{url}}",
     openFailed: "열기 실패: {{message}}",
     pathOpened: "{{path}} 열림",
-    pathRevealed: "{{path}} 위치 열림"
+    pathRevealed: "{{path}} 위치 열림",
+    sessionBackedUp: "세션 백업 작성됨: {{path}}",
+    deletePlanWritten: "삭제 계획 작성됨: {{path}}",
+    importPlanWritten: "가져오기 계획 작성됨: {{path}}",
+    importPlanCanceled: "가져오기 계획 취소됨",
+    operationFailed: "작업 실패: {{message}}"
   }
 } satisfies ResourceTree;

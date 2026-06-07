@@ -428,7 +428,10 @@ export const enUS = {
       "Read-only mode: open, reveal, resume command generation, and export are allowed; kill/archive stay disabled until explicit force controls exist.",
     actions: {
       openTranscript: "Open transcript",
-      revealTranscript: "Reveal transcript"
+      revealTranscript: "Reveal transcript",
+      backupSession: "Back up session",
+      writeDeletePlan: "Write delete plan",
+      planImport: "Plan import"
     },
     fields: {
       pid: "PID",
@@ -479,6 +482,11 @@ export const enUS = {
     externalBlocked: "Blocked external URL: {{url}}",
     openFailed: "Open failed: {{message}}",
     pathOpened: "Opened {{path}}",
-    pathRevealed: "Revealed {{path}}"
+    pathRevealed: "Revealed {{path}}",
+    sessionBackedUp: "Session backup written: {{path}}",
+    deletePlanWritten: "Delete plan written: {{path}}",
+    importPlanWritten: "Import plan written: {{path}}",
+    importPlanCanceled: "Import planning canceled",
+    operationFailed: "Operation failed: {{message}}"
   }
 } as const;

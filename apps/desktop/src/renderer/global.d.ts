@@ -1,4 +1,9 @@
-import type { Diagnostic, ScopeSnapshot } from "@agentscope/shared";
+import type {
+  Diagnostic,
+  ScopeSnapshot,
+  SessionBackupResult,
+  SessionOperationPlanResult
+} from "@agentscope/shared";
 
 export interface AppInfo {
   userData: string;
@@ -26,6 +31,10 @@ export interface AgentScopeApi {
   revealPath(targetPath: string): Promise<boolean>;
   inspectPid(pid: number): Promise<Record<string, unknown>>;
   inspectSession(sessionId: string): Promise<Record<string, unknown>>;
+  backupSession(agent: string, sessionId: string): Promise<SessionBackupResult>;
+  writeDeletePlan(agent: string, sessionId: string): Promise<SessionOperationPlanResult>;
+  writeImportPlan(backupDir: string): Promise<SessionOperationPlanResult>;
+  chooseImportPlan(): Promise<SessionOperationPlanResult | { canceled: true }>;
 }
 
 declare global {
