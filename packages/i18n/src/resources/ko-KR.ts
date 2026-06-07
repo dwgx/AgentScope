@@ -23,7 +23,7 @@ export const koKR = {
       evidence: "증거",
       readOnly: "읽기 전용"
     },
-    confidence: { exact: "정확", indexed: "색인", heuristic: "추정", unknown: "알 수 없음" },
+    confidence: { exact: "정확", indexed: "색인됨", heuristic: "추정", unknown: "알 수 없음" },
     date: { started: "시작 {{date}}", updated: "업데이트 {{date}}" },
     path: {
       noCommandLine: "명령줄 없음",
@@ -40,6 +40,20 @@ export const koKR = {
     settings: "설정",
     system: "시스템",
     refreshIndex: "색인 새로 고침"
+  },
+  relations: {
+    kind: {
+      parent_child: "세션 파생",
+      process_parent: "프로세스 트리",
+      transcript: "전사 연결",
+      subagent: "하위 에이전트"
+    },
+    endpoint: {
+      parent_child: { source: "부모 세션", target: "자식 세션" },
+      process_parent: { source: "부모 PID", target: "자식 PID" },
+      transcript: { source: "세션", target: "전사" },
+      subagent: { source: "부모 세션", target: "하위 에이전트" }
+    }
   },
   menu: {
     file: {
@@ -78,11 +92,15 @@ export const koKR = {
     detail: { json: "JSON", jsonl: "JSONL", logs: "로그", public: "공개" }
   },
   command: {
-    searchPlaceholder: "세션, transcript, 명령줄 검색",
+    searchPlaceholder: "세션, 전사, 명령줄 검색",
+    palettePlaceholder: "세션, 경로, 이벤트, 명령 검색",
     proc: "Proc",
     matched: "일치",
     warn: "경고",
-    refreshTitle: "새로 고침"
+    refreshTitle: "새로 고침",
+    results: "검색 결과",
+    history: "최근 검색",
+    noHistory: "최근 검색이 없습니다"
   },
   views: {
     processes: {

@@ -116,6 +116,9 @@ function App() {
   const [selectionKey, setSelectionKey] = useState<SelectionKey>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Record<string, unknown>[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => loadSearchHistory());
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState("");
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
@@ -155,11 +158,19 @@ function App() {
   }, [settings.language, appInfo?.locale]);
 
   async function runSearch() {
-    if (!query.trim()) {
+    await runSearchText(query);
+  }
+
+  async function runSearchText(value: string) {
+    if (!value.trim()) {
       setResults([]);
       return;
     }
-    setResults(await window.agentscope.search(query, settings.searchLimit));
+    const trimmed = value.trim();
+    const nextResults = await window.agentscope.search(trimmed, settings.searchLimit);
+    setQuery(trimmed);
+    setResults(nextResults);
+    setSearchHistory((current) => saveSearchHistory(trimmed, current));
   }
 
   async function exportCurrentSnapshot() {
@@ -238,6 +249,7 @@ function App() {
           query={query}
           setQuery={setQuery}
           runSearch={() => void runSearch()}
+          openSearch={() => setSearchOpen(true)}
           counts={counts}
           loading={loading}
           onRefresh={() => void refresh()}
@@ -249,7 +261,21 @@ function App() {
           settings={settings}
           updateSettings={updateSettings}
         />
-        {results.length > 0 && <SearchResults results={results} onPick={() => setResults([])} />}
+        {searchOpen && (
+          <CommandPalette
+            query={query}
+            setQuery={setQuery}
+            runSearch={() => void runSearch()}
+            runSearchText={(value) => void runSearchText(value)}
+            results={results}
+            history={searchHistory}
+            historyExpanded={historyExpanded}
+            setHistoryExpanded={setHistoryExpanded}
+            setView={setView}
+            refresh={() => void refresh()}
+            close={() => setSearchOpen(false)}
+          />
+        )}
         <div className="content" key={settings.inspector}>
           <section className="listPane" key={view}>
             {view === "processes" && (
@@ -267,7 +293,7 @@ function App() {
                 onSelect={(session) => setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId })}
               />
             )}
-            {view === "graph" && <RelationList relations={relations} />}
+            {view === "graph" && <RelationList relations={relations} sessions={sessions} />}
             {view === "doctor" && <DoctorPanel checks={doctor} />}
             {view === "settings" && (
               <SettingsPanel
@@ -389,6 +415,7 @@ function CommandBar(props: {
   query: string;
   setQuery: (value: string) => void;
   runSearch: () => void;
+  openSearch: () => void;
   counts: {
     sessions: number;
     processes: number;
@@ -428,9 +455,17 @@ function CommandBar(props: {
         <Search size={17} />
         <input
           value={props.query}
-          onChange={(event) => props.setQuery(event.target.value)}
+          onFocus={props.openSearch}
+          onClick={props.openSearch}
+          onChange={(event) => {
+            props.setQuery(event.target.value);
+            props.openSearch();
+          }}
           onKeyDown={(event) => {
-            if (event.key === "Enter") props.runSearch();
+            if (event.key === "Enter") {
+              props.openSearch();
+              props.runSearch();
+            }
           }}
           placeholder={t("command.searchPlaceholder")}
         />
@@ -477,7 +512,7 @@ function TopMenus(props: {
     close();
   };
   return (
-    <div className="menuText" onMouseLeave={() => setOpen(null)}>
+    <div className="menuText">
       <MenuButton label={t("menu.file.label")} open={open} setOpen={setOpen}>
         <MenuItem
           icon={<Download size={15} />}
@@ -860,7 +895,7 @@ function SessionList(props: { sessions: AgentSession[]; selectedKey?: string | u
   );
 }
 
-function RelationList(props: { relations: Relation[] }) {
+function RelationList(props: { relations: Relation[]; sessions: AgentSession[] }) {
   const { t } = useTranslation();
   if (!props.relations.length) {
     return (
@@ -883,11 +918,24 @@ function RelationList(props: { relations: Relation[] }) {
             className="relationItem"
             key={`${relation.kind}:${relation.sourceId}:${relation.targetId}:${index}`}
           >
-            <Badge text={relation.kind} />
-            <span className="mono">{short(relation.sourceId)}</span>
+            <div className="relationKind">
+              <Badge text={t(`relations.kind.${relation.kind}`)} />
+            </div>
+            <div className="relationEndpoint">
+              <span>{t(`relations.endpoint.${relation.kind}.source`)}</span>
+              <strong>{relationEndpointName(props.sessions, relation.sourceId)}</strong>
+              <em className="mono">{short(relation.sourceId)}</em>
+            </div>
             <span className="arrow">{"->"}</span>
-            <span className="mono">{short(relation.targetId)}</span>
+            <div className="relationEndpoint">
+              <span>{t(`relations.endpoint.${relation.kind}.target`)}</span>
+              <strong>{relationEndpointName(props.sessions, relation.targetId)}</strong>
+              <em className="mono">{short(relation.targetId)}</em>
+            </div>
             <ConfidenceBadge value={relation.confidence} />
+            <div className="relationEvidence">
+              {relation.evidence[0]?.source ?? t("inspector.noEvidence")}
+            </div>
           </div>
         ))}
       </div>
@@ -1692,6 +1740,91 @@ function EvidenceList(props: { evidence: Evidence[] }) {
   );
 }
 
+function CommandPalette(props: {
+  query: string;
+  setQuery: (value: string) => void;
+  runSearch: () => void;
+  runSearchText: (value: string) => void;
+  results: Record<string, unknown>[];
+  history: string[];
+  historyExpanded: boolean;
+  setHistoryExpanded: (value: boolean) => void;
+  setView: (view: View) => void;
+  refresh: () => void;
+  close: () => void;
+}) {
+  const { t } = useTranslation();
+  const visibleHistory = props.historyExpanded ? props.history : props.history.slice(0, 4);
+  const runQuick = (action: () => void) => {
+    action();
+    props.close();
+  };
+  return (
+    <div className="paletteOverlay" onMouseDown={props.close}>
+      <section className="commandPalette" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="paletteSearch">
+          <Search size={19} />
+          <input
+            autoFocus
+            value={props.query}
+            onChange={(event) => props.setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") props.runSearch();
+              if (event.key === "Escape") props.close();
+            }}
+            placeholder={t("command.palettePlaceholder")}
+          />
+          <button className="iconButton" onClick={props.close} title={t("common.action.hide")}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="quickActions">
+          <button onClick={() => runQuick(() => props.setView("processes"))}>{t("nav.processes")}</button>
+          <button onClick={() => runQuick(() => props.setView("sessions"))}>{t("nav.sessions")}</button>
+          <button onClick={() => runQuick(() => props.setView("graph"))}>{t("nav.relations")}</button>
+          <button onClick={() => runQuick(props.refresh)}>{t("nav.refreshIndex")}</button>
+        </div>
+        <div className="paletteBody">
+          <section>
+            <div className="paletteSectionTitle">
+              <span>{t("command.results")}</span>
+              <button onClick={props.runSearch}>{t("common.action.show")}</button>
+            </div>
+            <SearchResults results={props.results} onPick={props.close} />
+          </section>
+          <section>
+            <div className="paletteSectionTitle">
+              <span>{t("command.history")}</span>
+              {props.history.length > 4 && (
+                <button onClick={() => props.setHistoryExpanded(!props.historyExpanded)}>
+                  {props.historyExpanded ? t("common.action.hide") : t("common.action.show")}
+                </button>
+              )}
+            </div>
+            <div className="historyList">
+              {visibleHistory.length ? (
+                visibleHistory.map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => {
+                      props.runSearchText(item);
+                    }}
+                  >
+                    <Search size={14} />
+                    <span>{item}</span>
+                  </button>
+                ))
+              ) : (
+                <p className="muted">{t("command.noHistory")}</p>
+              )}
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function MetadataSummary(props: { metadata?: Record<string, unknown> | undefined }) {
   const { t } = useTranslation();
   const entries = Object.entries(props.metadata ?? {}).filter(([, value]) => value !== undefined && value !== null && value !== "");
@@ -1829,6 +1962,11 @@ function candidateTitle(candidate: SessionCandidate) {
   return candidate.title || short(candidate.sessionId);
 }
 
+function relationEndpointName(sessions: AgentSession[], id: string): string {
+  const session = sessions.find((item) => item.sessionId === id);
+  return session ? displayTitle(session) : id;
+}
+
 function searchResultTitle(result: Record<string, unknown>): string {
   if (result.title) return String(result.title);
   const eventType = result.eventType ? String(result.eventType) : "jsonl";
@@ -1837,6 +1975,22 @@ function searchResultTitle(result: Record<string, unknown>): string {
     ? `fields ${result.matchedFields.map(String).join(", ")}`
     : "";
   return [eventType, line, fields, result.path ? String(result.path) : ""].filter(Boolean).join(" · ");
+}
+
+function loadSearchHistory(): string[] {
+  try {
+    const raw = localStorage.getItem("agentscope.searchHistory.v1");
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string").slice(0, 20) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSearchHistory(query: string, current: string[]): string[] {
+  const next = [query, ...current.filter((item) => item.toLowerCase() !== query.toLowerCase())].slice(0, 20);
+  localStorage.setItem("agentscope.searchHistory.v1", JSON.stringify(next));
+  return next;
 }
 
 function selectedTranscriptPath(selection: Selection): string | undefined {

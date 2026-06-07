@@ -56,6 +56,20 @@ export const enUS = {
     system: "System",
     refreshIndex: "Refresh index"
   },
+  relations: {
+    kind: {
+      parent_child: "Thread lineage",
+      process_parent: "Process tree",
+      transcript: "Transcript link",
+      subagent: "Subagent"
+    },
+    endpoint: {
+      parent_child: { source: "Parent session", target: "Child session" },
+      process_parent: { source: "Parent PID", target: "Child PID" },
+      transcript: { source: "Session", target: "Transcript" },
+      subagent: { source: "Parent session", target: "Subagent" }
+    }
+  },
   menu: {
     file: {
       label: "File",
@@ -99,10 +113,14 @@ export const enUS = {
   },
   command: {
     searchPlaceholder: "Search sessions, transcripts, command lines",
+    palettePlaceholder: "Search sessions, paths, events, and commands",
     proc: "Proc",
     matched: "Matched",
     warn: "Warn",
-    refreshTitle: "Refresh"
+    refreshTitle: "Refresh",
+    results: "Results",
+    history: "Recent searches",
+    noHistory: "No recent searches"
   },
   views: {
     processes: {

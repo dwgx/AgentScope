@@ -23,7 +23,7 @@ export const zhCN = {
       evidence: "证据",
       readOnly: "只读"
     },
-    confidence: { exact: "精确", indexed: "索引", heuristic: "推断", unknown: "未知" },
+    confidence: { exact: "精确", indexed: "已索引", heuristic: "推测", unknown: "未知" },
     date: { started: "启动 {{date}}", updated: "更新 {{date}}" },
     path: {
       noCommandLine: "没有命令行",
@@ -40,6 +40,20 @@ export const zhCN = {
     settings: "设置",
     system: "系统",
     refreshIndex: "刷新索引"
+  },
+  relations: {
+    kind: {
+      parent_child: "会话派生",
+      process_parent: "进程树",
+      transcript: "转录关联",
+      subagent: "子代理"
+    },
+    endpoint: {
+      parent_child: { source: "父会话", target: "子会话" },
+      process_parent: { source: "父进程 PID", target: "子进程 PID" },
+      transcript: { source: "会话", target: "转录" },
+      subagent: { source: "父会话", target: "子代理" }
+    }
   },
   menu: {
     file: {
@@ -79,10 +93,14 @@ export const zhCN = {
   },
   command: {
     searchPlaceholder: "搜索会话、转录、命令行",
+    palettePlaceholder: "搜索会话、路径、事件和命令",
     proc: "进程",
     matched: "匹配",
     warn: "警告",
-    refreshTitle: "刷新"
+    refreshTitle: "刷新",
+    results: "搜索结果",
+    history: "最近搜索",
+    noHistory: "暂无搜索历史"
   },
   views: {
     processes: {

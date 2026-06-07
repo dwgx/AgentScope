@@ -3,8 +3,13 @@ import type { AgentKind, SessionActivity, TokenUsage } from "@agentscope/shared"
 import { normalizeWindowsPath } from "./paths.js";
 import { iterateJsonl } from "./jsonl.js";
 
+const activityCache = new Map<string, SessionActivity>();
+
 export async function analyzeTranscriptActivity(agent: AgentKind, filePath: string): Promise<SessionActivity> {
   const stats = statSafe(filePath);
+  const cacheKey = stats ? `${agent}\0${filePath}\0${stats.mtimeMs}\0${stats.size}` : undefined;
+  const cached = cacheKey ? activityCache.get(cacheKey) : undefined;
+  if (cached) return cloneActivity(cached);
   const activity: SessionActivity = {
     lineCount: 0,
     byteSize: stats?.size,
@@ -27,6 +32,13 @@ export async function analyzeTranscriptActivity(agent: AgentKind, filePath: stri
   });
 
   trimEmptyMaps(activity);
+  if (cacheKey) {
+    activityCache.set(cacheKey, cloneActivity(activity));
+    if (activityCache.size > 1200) {
+      const oldestKey = activityCache.keys().next().value;
+      if (oldestKey) activityCache.delete(oldestKey);
+    }
+  }
   return activity;
 }
 
@@ -251,4 +263,20 @@ function statSafe(filePath: string): fs.Stats | undefined {
   } catch {
     return undefined;
   }
+}
+
+function cloneActivity(activity: SessionActivity): SessionActivity {
+  return {
+    ...activity,
+    eventCounts: { ...activity.eventCounts },
+    roleCounts: activity.roleCounts ? { ...activity.roleCounts } : undefined,
+    modelCounts: activity.modelCounts ? { ...activity.modelCounts } : undefined,
+    toolCounts: activity.toolCounts ? { ...activity.toolCounts } : undefined,
+    tokenUsage: activity.tokenUsage
+      ? {
+          ...activity.tokenUsage,
+          serverToolUse: activity.tokenUsage.serverToolUse ? { ...activity.tokenUsage.serverToolUse } : undefined
+        }
+      : undefined
+  };
 }

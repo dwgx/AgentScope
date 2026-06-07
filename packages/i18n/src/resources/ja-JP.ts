@@ -23,7 +23,7 @@ export const jaJP = {
       evidence: "証拠",
       readOnly: "読み取り専用"
     },
-    confidence: { exact: "正確", indexed: "索引", heuristic: "推定", unknown: "不明" },
+    confidence: { exact: "一致", indexed: "索引済み", heuristic: "推定", unknown: "不明" },
     date: { started: "開始 {{date}}", updated: "更新 {{date}}" },
     path: {
       noCommandLine: "コマンドラインなし",
@@ -40,6 +40,20 @@ export const jaJP = {
     settings: "設定",
     system: "システム",
     refreshIndex: "索引を更新"
+  },
+  relations: {
+    kind: {
+      parent_child: "セッション派生",
+      process_parent: "プロセスツリー",
+      transcript: "転写リンク",
+      subagent: "サブエージェント"
+    },
+    endpoint: {
+      parent_child: { source: "親セッション", target: "子セッション" },
+      process_parent: { source: "親 PID", target: "子 PID" },
+      transcript: { source: "セッション", target: "転写" },
+      subagent: { source: "親セッション", target: "サブエージェント" }
+    }
   },
   menu: {
     file: {
@@ -79,10 +93,14 @@ export const jaJP = {
   },
   command: {
     searchPlaceholder: "セッション、転写、コマンドラインを検索",
+    palettePlaceholder: "セッション、パス、イベント、コマンドを検索",
     proc: "Proc",
     matched: "一致",
     warn: "警告",
-    refreshTitle: "更新"
+    refreshTitle: "更新",
+    results: "検索結果",
+    history: "最近の検索",
+    noHistory: "最近の検索はありません"
   },
   views: {
     processes: {
