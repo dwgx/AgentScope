@@ -15,6 +15,7 @@ export const enUS = {
       clear: "Clear",
       cancel: "Cancel",
       reveal: "Reveal",
+      revealJournal: "Reveal journal",
       show: "Show",
       hide: "Hide"
     },
@@ -498,6 +499,6 @@ export const enUS = {
   confirm: {
     deleteSessionTitle: "Delete session",
     deleteSession:
-      "Delete this session?\n\n{{title}}\n\nAgentScope will back it up first, then move session files to quarantine and remove verified local references. Active exact PID sessions are blocked."
+      "Delete this session?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope will back it up first, write the journal, then remove verified local references and move session files to quarantine. Active exact PID and high-confidence Codex process candidates are blocked."
   }
 } as const;

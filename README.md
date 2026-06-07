@@ -37,8 +37,9 @@ and React/TypeScript renderer for the control surface.
 - Uses a flat graphite desktop UI with functional Settings sections for
   General, Appearance, Indexing, Runtime, and Diagnostics.
 - Supports explicit session backup, safe delete, and AgentScope backup import
-  through the desktop UI. Delete writes a backup first, then moves removable
-  files to quarantine and patches only known session references.
+  through the desktop UI. Delete writes a backup and quarantine journal first,
+  applies journaled row-level changes, then moves removable files to quarantine
+  and patches only known session references.
 
 ## Commands
 
@@ -87,15 +88,22 @@ Current behavior:
 - Backs up sessions under `%USERPROFILE%\.agentscope\backups`.
 - Deletes only after backup and quarantine under
   `%USERPROFILE%\.agentscope\quarantine`.
+- Writes `journal.json` for every delete under the quarantine directory,
+  recording backup, file move, patch, SQLite backup, and SQLite delete steps.
 - Blocks destructive operations against sessions that still have an active PID
-  mapping in the current Windows process snapshot.
+  mapping, high-confidence Codex heuristic process candidate, or indexed child
+  sessions in the current snapshot.
+- Exports Codex row-level SQLite bundles for compatible restore from
+  `state_5.sqlite`, `goals_1.sqlite`, and `memories_1.sqlite`; `logs_2.sqlite`
+  is backed up as summary metadata only and log bodies are not restored or
+  deleted.
 - Never imports or deletes credentials, auth files, global settings, plugins,
   skills, rules, or full global history as a session side effect.
 
 Known limits:
 
-- Codex import currently restores backup files only; full SQLite row restore is
-  planned but not complete.
+- Codex row restore requires compatible target SQLite tables and columns; schema
+  drift is rejected instead of partially reconstructing rows.
 - Codex process-to-thread mapping is still partly heuristic because Codex does
   not expose a reliable PID-to-thread map in the parsed local state.
 

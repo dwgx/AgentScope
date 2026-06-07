@@ -36,6 +36,7 @@ import type {
   Evidence,
   Relation,
   SessionActivity,
+  SessionOperationPlanResult,
   ScopeSnapshot,
   SessionCandidate
 } from "@agentscope/shared";
@@ -387,27 +388,45 @@ function App() {
   }
 
   async function deleteSelectedSession(session: AgentSession) {
-    setConfirmDialog({
-      title: t("confirm.deleteSessionTitle"),
-      detail: t("confirm.deleteSession", { title: displayTitle(session) }),
-      confirmLabel: t("inspector.actions.deleteSession"),
-      danger: true,
-      onConfirm: () => void executeDeleteSession(session)
-    });
+    try {
+      const planResult = await window.agentscope.writeDeletePlan(session.agent, session.sessionId);
+      setConfirmDialog({
+        title: t("confirm.deleteSessionTitle"),
+        detail: t("confirm.deleteSession", {
+          title: displayTitle(session),
+          backupDir: planResult.backupDir ?? "",
+          quarantineDir: planResult.quarantineDir ?? "",
+          journalPath: planResult.journalPath ?? ""
+        }),
+        confirmLabel: t("inspector.actions.deleteSession"),
+        danger: true,
+        onConfirm: () => void executeDeleteSession(session, planResult)
+      });
+    } catch (error) {
+      showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+    }
   }
 
-  async function executeDeleteSession(session: AgentSession) {
+  async function executeDeleteSession(session: AgentSession, planResult?: SessionOperationPlanResult) {
     try {
-      const result = await window.agentscope.deleteSession(session.agent, session.sessionId);
+      const result = await window.agentscope.deleteSession(session.agent, session.sessionId, planResult?.plan.createdAt);
       showNotice({
         message: t("toast.sessionDeleted"),
-        detail: result.quarantineDir,
-        actions: noticePathActions(result.quarantineDir)
+        detail: result.journalPath,
+        actions: [
+          { label: t("common.action.revealJournal"), onClick: () => void window.agentscope.revealPath(result.journalPath) },
+          ...noticePathActions(result.quarantineDir)
+        ]
       });
       await window.agentscope.revealPath(result.quarantineDir);
       await refresh();
     } catch (error) {
-      showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+      const journalPath = journalPathFromError(errorMessage(error));
+      showNotice({
+        message: t("toast.operationFailed", { message: errorMessage(error) }),
+        detail: journalPath,
+        actions: journalPath ? [{ label: t("common.action.revealJournal"), onClick: () => void window.agentscope.revealPath(journalPath) }] : undefined
+      });
     }
   }
 
@@ -3858,6 +3877,11 @@ function formatMaybeDate(value: string | undefined, locale?: string) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function journalPathFromError(message: string): string | undefined {
+  const match = /\bjournalPath=([^\r\n]+)/.exec(message);
+  return match?.[1]?.trim();
 }
 
 function formatDuration(startTime: string, locale?: string): string {

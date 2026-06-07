@@ -14,6 +14,7 @@ export const koKR = {
       clear: "지우기",
       cancel: "취소",
       reveal: "위치 표시",
+      revealJournal: "journal 표시",
       show: "표시",
       hide: "숨기기"
     },
@@ -473,6 +474,6 @@ export const koKR = {
   confirm: {
     deleteSessionTitle: "세션 삭제",
     deleteSession:
-      "이 세션을 삭제할까요?\n\n{{title}}\n\nAgentScope는 먼저 백업한 뒤 세션 파일을 격리 폴더로 이동하고 검증된 로컬 참조만 제거합니다. 정확한 PID가 남아 있는 활성 세션은 차단됩니다."
+      "이 세션을 삭제할까요?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope는 먼저 백업하고 journal을 쓴 뒤 검증된 로컬 참조를 제거하고 세션 파일을 격리 폴더로 이동합니다. 정확한 PID와 신뢰도 높은 Codex 프로세스 후보는 차단됩니다."
   }
 } satisfies ResourceTree;

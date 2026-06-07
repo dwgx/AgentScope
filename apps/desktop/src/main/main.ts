@@ -125,9 +125,9 @@ ipcMain.handle("session:backup", async (_event, agent: string, sessionId: string
   const core = await loadCore();
   return core.backupSession(sessionId, asAgent(agent));
 });
-ipcMain.handle("session:delete", async (_event, agent: string, sessionId: string) => {
+ipcMain.handle("session:delete", async (_event, agent: string, sessionId: string, createdAt?: string) => {
   const core = await loadCore();
-  return core.deleteSession(sessionId, asAgent(agent));
+  return core.deleteSession(sessionId, asAgent(agent), createdAt ? { now: new Date(createdAt) } : undefined);
 });
 ipcMain.handle("session:import", async (_event, backupDir: string) => {
   if (!(await isAllowedAgentScopeOperationPath(backupDir))) {

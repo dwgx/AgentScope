@@ -14,6 +14,7 @@ export const zhCN = {
       clear: "清空",
       cancel: "取消",
       reveal: "定位",
+      revealJournal: "定位 journal",
       show: "显示",
       hide: "隐藏"
     },
@@ -468,6 +469,6 @@ export const zhCN = {
   confirm: {
     deleteSessionTitle: "删除会话",
     deleteSession:
-      "删除这个会话？\n\n{{title}}\n\nAgentScope 会先备份，再把会话文件移入隔离区，并移除已验证的本地引用。仍有精确 PID 的活跃会话会被阻止。"
+      "删除这个会话？\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope 会先备份并写入 journal，再移除已验证的本地引用并把会话文件移入隔离区。精确 PID 和高置信 Codex 进程候选都会被阻止。"
   }
 } satisfies ResourceTree;

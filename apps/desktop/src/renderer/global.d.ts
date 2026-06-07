@@ -34,7 +34,7 @@ export interface AgentScopeApi {
   inspectPid(pid: number): Promise<Record<string, unknown>>;
   inspectSession(sessionId: string): Promise<Record<string, unknown>>;
   backupSession(agent: string, sessionId: string): Promise<SessionBackupResult>;
-  deleteSession(agent: string, sessionId: string): Promise<SessionDeleteResult>;
+  deleteSession(agent: string, sessionId: string, createdAt?: string): Promise<SessionDeleteResult>;
   importSessionBackup(backupDir: string): Promise<SessionImportResult>;
   chooseImportSession(): Promise<SessionImportResult | { canceled: true }>;
   writeDeletePlan(agent: string, sessionId: string): Promise<SessionOperationPlanResult>;

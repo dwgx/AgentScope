@@ -27,6 +27,68 @@ export interface SessionOperationOptions {
   includeProcesses?: boolean | undefined;
 }
 
+interface OperationDirectories {
+  backupDir: string;
+  quarantineDir: string;
+  journalPath: string;
+}
+
+interface DeleteJournalStep {
+  at?: string | undefined;
+  phase: "backup" | "file" | "patch" | "sqlite_backup" | "sqlite_delete" | "operation";
+  action: string;
+  status: "started" | "succeeded" | "failed" | "skipped";
+  role?: string | undefined;
+  path?: string | undefined;
+  targetPath?: string | undefined;
+  database?: string | undefined;
+  table?: string | undefined;
+  where?: string | undefined;
+  sha256?: string | undefined;
+  estimatedRows?: number | undefined;
+  detail?: string | undefined;
+  error?: string | undefined;
+  evidence?: Evidence[] | undefined;
+}
+
+interface DeleteJournal {
+  schemaVersion: 1;
+  kind: "AgentScope Session Delete Journal";
+  createdAt: string;
+  updatedAt: string;
+  agent: AgentKind;
+  sessionId: string;
+  backupDir: string;
+  quarantineDir: string;
+  journalPath: string;
+  steps: DeleteJournalStep[];
+}
+
+interface CodexDatabaseBundleManifest {
+  role: string;
+  databaseName: string;
+  table: string;
+  relativePath: string;
+  action: "restore" | "summary";
+  rowCount: number;
+  sha256?: string | undefined;
+}
+
+interface BackupManifest extends Record<string, unknown> {
+  schemaVersion: 1;
+  kind: "AgentScope Session Backup";
+  createdAt: string;
+  agent: AgentKind;
+  sessionId: string;
+  sourceHome: string;
+  copiedFiles: Array<Record<string, unknown>>;
+  databaseBundles?: CodexDatabaseBundleManifest[] | undefined;
+  plan?: unknown;
+}
+
+const backupKind = "AgentScope Session Backup";
+const deleteJournalKind = "AgentScope Session Delete Journal";
+
 export async function planSessionDelete(
   sessionId: string,
   agent?: AgentKind,
@@ -34,7 +96,7 @@ export async function planSessionDelete(
 ): Promise<SessionOperationPlan> {
   const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses);
   const plan = await buildSessionPlan("delete", session, options);
-  plan.notes.push("This plan is a preview. Executing deleteSession first writes an AgentScope backup, then moves removable files to quarantine and patches only known session references.");
+  plan.notes.push("This plan is a preview. Executing deleteSession writes an AgentScope backup and quarantine journal before row-level deletes, file moves, or reference patches.");
   return plan;
 }
 
@@ -49,7 +111,8 @@ export async function writeSessionDeletePlan(
   await fs.promises.mkdir(dir, { recursive: true });
   const filePath = path.join(dir, `${safeStamp(plan.createdAt)}-${plan.agent}-${safeName(plan.sessionId)}-delete-plan.json`);
   await writeJson(filePath, plan);
-  return { plan, path: filePath };
+  const dirs = operationDirectories(plan, options);
+  return { plan, path: filePath, backupDir: dirs.backupDir, quarantineDir: dirs.quarantineDir, journalPath: dirs.journalPath };
 }
 
 export async function backupSession(
@@ -59,8 +122,7 @@ export async function backupSession(
 ): Promise<SessionBackupResult> {
   const session = await resolveSession(sessionId, agent, options.home);
   const plan = await buildSessionPlan("backup", session, options);
-  const root = operationRoot(options);
-  const backupDir = path.join(root, "backups", `${safeStamp(plan.createdAt)}-${session.agent}-${safeName(session.sessionId)}`);
+  const { backupDir } = operationDirectories(plan, options);
   const filesRoot = path.join(backupDir, "files");
   await fs.promises.mkdir(filesRoot, { recursive: true });
 
@@ -82,19 +144,27 @@ export async function backupSession(
     copiedManifestFiles.push({ ...copied, backupRelativePath: relative });
   }
 
+  const databaseBundles = session.agent === "codex" ? await exportCodexDatabaseBundles(session.sessionId, options.home, backupDir) : [];
   const manifestPath = path.join(backupDir, "manifest.json");
-  const manifest = {
+  const manifest: BackupManifest = {
     schemaVersion: 1,
-    kind: "AgentScope Session Backup",
+    kind: backupKind,
     createdAt: plan.createdAt,
     agent: session.agent,
     sessionId: session.sessionId,
     sourceHome: options.home ?? userHome(),
-    copiedFiles: copiedManifestFiles,
+    copiedFiles: copiedManifestFiles.map((file) => ({ ...file })),
+    databaseBundles,
     plan
   };
   await writeJson(manifestPath, manifest);
-  return { plan: { ...plan, files: copiedFiles }, backupDir, manifestPath, copiedFiles };
+  return {
+    plan: { ...plan, files: copiedFiles },
+    backupDir,
+    manifestPath,
+    copiedFiles,
+    databaseBundlePaths: databaseBundles.map((bundle) => path.join(backupDir, bundle.relativePath))
+  };
 }
 
 export async function deleteSession(
@@ -107,30 +177,100 @@ export async function deleteSession(
   if (plan.blockers.length && !options.allowActive) {
     throw new Error(plan.blockers.join(" "));
   }
-  const backup = await backupSession(session.sessionId, session.agent, options);
-  const quarantineDir = path.join(
-    operationRoot(options),
-    "quarantine",
-    `${safeStamp(plan.createdAt)}-${session.agent}-${safeName(session.sessionId)}`
-  );
+  const { backupDir, quarantineDir, journalPath } = operationDirectories(plan, options);
   await fs.promises.mkdir(quarantineDir, { recursive: true });
+  const journal = await createDeleteJournal(plan, backupDir, quarantineDir, journalPath);
   const movedFiles: SessionOperationFile[] = [];
   const patchedFiles: SessionOperationFile[] = [];
-  for (const file of plan.files) {
-    if (!file.exists) continue;
-    if (file.action === "delete") {
-      const target = path.join(quarantineDir, relativeBackupPath(file.path));
-      await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      await movePath(file.path, target);
-      movedFiles.push({ ...file, action: "move", sha256: await hashPath(target) });
-    } else if (file.action === "patch") {
-      const patched = await patchSessionReferenceFile(file, session);
-      if (patched) patchedFiles.push(patched);
+  let backup: SessionBackupResult | undefined;
+  const databaseChanges: SessionOperationDatabaseChange[] = [];
+  try {
+    await appendJournalStep(journal, { phase: "backup", action: "backupSession", status: "started", path: backupDir });
+    backup = await backupSession(session.sessionId, session.agent, options);
+    await appendJournalStep(journal, {
+      phase: "backup",
+      action: "backupSession",
+      status: "succeeded",
+      path: backup.manifestPath,
+      detail: `Copied ${backup.copiedFiles.length} file(s).`
+    });
+
+    if (session.agent === "codex") {
+      await backupCodexDatabases(options.home, quarantineDir, journal);
+      databaseChanges.push(...applyCodexDatabaseDelete(plan, options.home, journal));
     }
+
+    for (const file of plan.files) {
+      if (!file.exists) continue;
+      if (file.action === "delete") {
+        const target = path.join(quarantineDir, relativeBackupPath(file.path));
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        await appendJournalStep(journal, {
+          phase: "file",
+          action: "move",
+          status: "started",
+          role: file.role,
+          path: file.path,
+          targetPath: target,
+          evidence: file.evidence
+        });
+        await movePath(file.path, target);
+        const moved: SessionOperationFile = { ...file, action: "move", sha256: await hashPath(target) };
+        movedFiles.push(moved);
+        await appendJournalStep(journal, {
+          phase: "file",
+          action: "move",
+          status: "succeeded",
+          role: file.role,
+          path: file.path,
+          targetPath: target,
+          sha256: moved.sha256,
+          evidence: file.evidence
+        });
+      } else if (file.action === "patch") {
+        await appendJournalStep(journal, {
+          phase: "patch",
+          action: "patch",
+          status: "started",
+          role: file.role,
+          path: file.path,
+          evidence: file.evidence
+        });
+        const patched = await patchSessionReferenceFile(file, session);
+        if (patched) {
+          patchedFiles.push(patched);
+          await appendJournalStep(journal, {
+            phase: "patch",
+            action: "patch",
+            status: "succeeded",
+            role: file.role,
+            path: file.path,
+            sha256: patched.sha256,
+            evidence: patched.evidence
+          });
+        } else {
+          await appendJournalStep(journal, {
+            phase: "patch",
+            action: "patch",
+            status: "skipped",
+            role: file.role,
+            path: file.path,
+            detail: "No exact session reference found to patch.",
+            evidence: file.evidence
+          });
+        }
+      }
+    }
+    return { plan, backup, quarantineDir, journalPath, movedFiles, patchedFiles, databaseChanges };
+  } catch (error) {
+    await appendJournalStep(journal, {
+      phase: "operation",
+      action: "deleteSession",
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error)
+    }).catch(() => undefined);
+    throw withOperationPaths(error, backupDir, quarantineDir, journalPath);
   }
-  if (session.agent === "codex") await backupCodexDatabases(options.home, quarantineDir);
-  const databaseChanges = session.agent === "codex" ? applyCodexDatabaseDelete(plan, options.home) : [];
-  return { plan, backup, quarantineDir, movedFiles, patchedFiles, databaseChanges };
 }
 
 export async function importSessionBackup(
@@ -140,27 +280,24 @@ export async function importSessionBackup(
   const planResult = await planSessionImport(backupDir, options);
   const plan = planResult.plan;
   if (plan.blockers.length) throw new Error(plan.blockers.join(" "));
-  if (plan.target) throw new Error("A session with this id already exists locally; delete or archive it before importing.");
   const manifest = await readBackupManifest(backupDir);
   const copiedFiles = manifestCopiedFiles(manifest);
   if (!copiedFiles.length) throw new Error("Backup manifest has no copied files to import.");
   const importedFiles: SessionOperationFile[] = [];
   const filesRoot = path.join(backupDir, "files");
+  await assertImportTargetsAbsent(copiedFiles);
+  if (plan.target) throw new Error("A session with this id already exists locally; delete or archive it before importing.");
   for (const file of copiedFiles) {
     const originalPath = typeof file.path === "string" ? file.path : undefined;
     const backupRelativePath = typeof file.backupRelativePath === "string" ? file.backupRelativePath : undefined;
     if (!originalPath || !backupRelativePath) continue;
-    if (backupRelativePath.includes("..") || path.isAbsolute(backupRelativePath)) {
-      throw new Error(`Unsafe backup relative path: ${backupRelativePath}`);
-    }
-    const source = path.join(filesRoot, backupRelativePath);
+    const source = resolveSafeRelative(filesRoot, backupRelativePath);
     if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
     const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
     const actualSha = await hashPath(source);
     if (expectedSha && actualSha && expectedSha !== actualSha) {
       throw new Error(`Backup checksum mismatch: ${source}`);
     }
-    if (await pathExists(originalPath)) throw new Error(`Import target already exists: ${originalPath}`);
     await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
     const stat = await fs.promises.stat(source);
     if (stat.isDirectory()) {
@@ -184,7 +321,8 @@ export async function importSessionBackup(
       ]
     });
   }
-  return { plan, backupDir, importedFiles };
+  const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home) : [];
+  return { plan, backupDir, importedFiles, databaseChanges };
 }
 
 export async function planSessionImport(
@@ -202,9 +340,15 @@ export async function planSessionImport(
 
   try {
     manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
-    agent = asAgent(manifest.agent) ?? "unknown";
-    sessionId = typeof manifest.sessionId === "string" ? manifest.sessionId : sessionId;
-    if (agent === "unknown") blockers.push("Backup manifest does not contain a supported agent.");
+    try {
+      validateBackupManifest(manifest);
+      agent = manifest.agent;
+      sessionId = manifest.sessionId;
+    } catch (error) {
+      blockers.push(error instanceof Error ? error.message : String(error));
+      agent = asAgent(manifest.agent) ?? "unknown";
+      sessionId = typeof manifest.sessionId === "string" ? manifest.sessionId : sessionId;
+    }
   } catch (error) {
     blockers.push(`Cannot read backup manifest: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -266,7 +410,7 @@ export async function researchLocalAgentStores(home = userHome()): Promise<Recor
         path.join(claudeRoot, "settings.json"),
         path.join(claudeRoot, "settings.local.json")
       ],
-      destructiveActions: "AgentScope generates plans only unless a future explicit --force workflow is added."
+      destructiveActions: "AgentScope blocks active or child sessions by default; delete writes a backup, quarantine journal, row-level SQLite changes, and quarantined files."
     }
   };
 }
@@ -488,7 +632,11 @@ function importDatabasePlan(agent: AgentKind, sessionId: string, home: string | 
     const root = codexHome(home);
     return [
       dbChange(path.join(root, "state_5.sqlite"), "threads", `id = ${jsonQuote(sessionId)}`, "insert", "agentscope.import.codex"),
-      dbChange(path.join(root, "state_5.sqlite"), "thread_spawn_edges", `parent/child references ${jsonQuote(sessionId)}`, "insert", "agentscope.import.codex")
+      dbChange(path.join(root, "state_5.sqlite"), "thread_spawn_edges", `parent/child references ${jsonQuote(sessionId)}`, "insert", "agentscope.import.codex"),
+      dbChange(path.join(root, "state_5.sqlite"), "thread_dynamic_tools", `thread_id = ${jsonQuote(sessionId)}`, "insert", "agentscope.import.codex"),
+      dbChange(path.join(root, "goals_1.sqlite"), "thread_goals", `thread_id = ${jsonQuote(sessionId)}`, "insert", "agentscope.import.codex"),
+      dbChange(path.join(root, "memories_1.sqlite"), "stage1_outputs", `thread_id = ${jsonQuote(sessionId)}`, "insert", "agentscope.import.codex"),
+      dbChange(path.join(root, "logs_2.sqlite"), "logs", `thread_id = ${jsonQuote(sessionId)}`, "skip", "agentscope.import.codex")
     ];
   }
   if (agent === "claude") {
@@ -583,8 +731,21 @@ function claudeSidecarPath(claudeRoot: string, session: AgentSession): string | 
 
 function activeSessionBlockers(session: AgentSession): string[] {
   const blockers: string[] = [];
-  if (session.pid !== undefined && (session.processName || session.commandLine || session.path)) {
+  if (session.childSessionIds.length > 0) {
+    blockers.push("Session has child sessions; destructive operations are blocked until an explicit include-children or detach workflow exists.");
+  }
+  const hasHeuristicActiveProcess = session.agent === "codex" && session.evidence.some((item) => item.source === "process.heuristic");
+  const hasExactActivePid =
+    session.pid !== undefined &&
+    !hasHeuristicActiveProcess &&
+    (session.processName !== undefined ||
+      session.commandLine !== undefined ||
+      session.path !== undefined ||
+      session.evidence.some((item) => item.source === "process.match" && item.detail.includes("Active process matched")));
+  if (hasExactActivePid) {
     blockers.push(`Session has an exact active PID mapping (${session.pid}); destructive operations must wait until the process exits.`);
+  } else if (hasHeuristicActiveProcess) {
+    blockers.push(`Session is attached to a high-confidence active Codex process candidate (${session.pid}); destructive operations are blocked because Codex PID-to-thread mapping is heuristic.`);
   }
   return blockers;
 }
@@ -593,10 +754,10 @@ function riskWarnings(session: AgentSession, operation: "backup" | "delete"): st
   const warnings: string[] = [];
   if (session.agent === "codex") {
     warnings.push("Codex has no reliable PID-to-thread exact map yet; process links may be heuristic.");
-    if (operation === "delete") warnings.push("Codex SQLite writes are internal and risky while Codex is running; this version only plans them.");
+    if (operation === "delete") warnings.push("Codex SQLite writes use internal tables; delete backs up databases and journals each row-level step before quarantining files.");
   }
   if (session.agent === "claude" && operation === "delete") {
-    warnings.push("Claude history, daemon, job, and global-state sidecars may reference the session; plan lists patch targets but does not edit them.");
+    warnings.push("Claude history, daemon, job, and global-state sidecars may reference the session; delete patches only exact session-id references and journals the result.");
   }
   if (operation === "backup" && session.pid !== undefined) {
     warnings.push("The session appears active; backup is point-in-time and may not include writes that happen after copying starts.");
@@ -712,7 +873,8 @@ async function patchClaudeDaemonRoster(
 
 function applyCodexDatabaseDelete(
   plan: SessionOperationPlan,
-  home: string | undefined
+  home: string | undefined,
+  journal?: DeleteJournal | undefined
 ): SessionOperationDatabaseChange[] {
   const root = codexHome(home);
   const applied: SessionOperationDatabaseChange[] = [];
@@ -724,11 +886,28 @@ function applyCodexDatabaseDelete(
       db.pragma("busy_timeout = 5000");
       db.pragma("foreign_keys = ON");
       const transaction = db.transaction(() => {
-        applied.push(deleteRows(db, statePath, "thread_spawn_edges", "parent_thread_id = ? OR child_thread_id = ?", [plan.sessionId, plan.sessionId], "codex.sqlite.thread_spawn_edges"));
-        applied.push(deleteRows(db, statePath, "thread_dynamic_tools", "thread_id = ?", [plan.sessionId], "codex.sqlite.thread_dynamic_tools"));
-        applied.push(deleteRows(db, statePath, "threads", "id = ?", [plan.sessionId], "codex.sqlite.threads"));
+        if (plannedDbAction(plan, statePath, "thread_spawn_edges") === "delete") {
+          applied.push(deleteRows(db, statePath, "thread_spawn_edges", "parent_thread_id = ? OR child_thread_id = ?", [plan.sessionId, plan.sessionId], "codex.sqlite.thread_spawn_edges"));
+        }
+        if (plannedDbAction(plan, statePath, "thread_dynamic_tools") === "delete") {
+          applied.push(deleteRows(db, statePath, "thread_dynamic_tools", "thread_id = ?", [plan.sessionId], "codex.sqlite.thread_dynamic_tools"));
+        }
+        if (plannedDbAction(plan, statePath, "threads") === "delete") {
+          applied.push(deleteRows(db, statePath, "threads", "id = ?", [plan.sessionId], "codex.sqlite.threads"));
+        }
       });
+      appendJournalStepSync(journal, { phase: "sqlite_delete", action: "transaction", status: "started", database: statePath });
       transaction();
+      appendJournalStepSync(journal, { phase: "sqlite_delete", action: "transaction", status: "succeeded", database: statePath });
+    } catch (error) {
+      appendJournalStepSync(journal, {
+        phase: "sqlite_delete",
+        action: "transaction",
+        status: "failed",
+        database: statePath,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
     } finally {
       stateDb.close();
     }
@@ -742,15 +921,44 @@ function applyCodexDatabaseDelete(
     if (!db) continue;
     try {
       db.pragma("busy_timeout = 5000");
-      applied.push(deleteRows(db, dbPath, table, where, [plan.sessionId], source));
+      if (plannedDbAction(plan, dbPath, table) !== "delete") continue;
+      appendJournalStepSync(journal, { phase: "sqlite_delete", action: "transaction", status: "started", database: dbPath, table });
+      const transaction = db.transaction(() => {
+        applied.push(deleteRows(db, dbPath, table, where, [plan.sessionId], source));
+      });
+      transaction();
+      appendJournalStepSync(journal, { phase: "sqlite_delete", action: "transaction", status: "succeeded", database: dbPath, table });
+    } catch (error) {
+      appendJournalStepSync(journal, {
+        phase: "sqlite_delete",
+        action: "transaction",
+        status: "failed",
+        database: dbPath,
+        table,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
     } finally {
       db.close();
     }
   }
-  return applied.filter((change) => change.estimatedRows !== 0);
+  const result = applied.filter((change) => change.estimatedRows !== 0);
+  for (const change of result) {
+    appendJournalStepSync(journal, {
+      phase: "sqlite_delete",
+      action: change.action,
+      status: change.action === "skip" ? "skipped" : "succeeded",
+      database: change.database,
+      table: change.table,
+      where: change.where,
+      estimatedRows: change.estimatedRows,
+      evidence: change.evidence
+    });
+  }
+  return result;
 }
 
-async function backupCodexDatabases(home: string | undefined, quarantineDir: string): Promise<void> {
+async function backupCodexDatabases(home: string | undefined, quarantineDir: string, journal?: DeleteJournal | undefined): Promise<void> {
   const root = codexHome(home);
   const backupDir = path.join(quarantineDir, "sqlite-backup");
   await fs.promises.mkdir(backupDir, { recursive: true });
@@ -759,7 +967,23 @@ async function backupCodexDatabases(home: string | undefined, quarantineDir: str
     for (const suffix of ["", "-wal", "-shm"]) {
       const candidate = `${source}${suffix}`;
       if (!(await pathExists(candidate))) continue;
-      await fs.promises.copyFile(candidate, path.join(backupDir, `${name}${suffix}`));
+      const target = path.join(backupDir, `${name}${suffix}`);
+      await appendJournalStep(journal, {
+        phase: "sqlite_backup",
+        action: "copy",
+        status: "started",
+        path: candidate,
+        targetPath: target
+      });
+      await fs.promises.copyFile(candidate, target);
+      await appendJournalStep(journal, {
+        phase: "sqlite_backup",
+        action: "copy",
+        status: "succeeded",
+        path: candidate,
+        targetPath: target,
+        sha256: await hashPath(target)
+      });
     }
   }
 }
@@ -774,12 +998,349 @@ function deleteRows(
 ): SessionOperationDatabaseChange {
   const columns = tableColumns(db, table);
   if (!columns.size) return dbChange(dbPath, table, where, "skip", source);
+  if (!whereColumnsExist(columns, where)) return dbChange(dbPath, table, where, "skip", source);
   const before = countRows(db, table, where, params);
   if (before > 0) db.prepare(`DELETE FROM ${quoteIdentifier(table)} WHERE ${where}`).run(...params);
   return {
     ...dbChange(dbPath, table, where, "delete", source),
     estimatedRows: before
   };
+}
+
+function whereColumnsExist(columns: Set<string>, where: string): boolean {
+  const matches = where.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*=/g);
+  for (const match of matches) {
+    const column = match[1];
+    if (column && !columns.has(column)) return false;
+  }
+  return true;
+}
+
+function plannedDbAction(
+  plan: SessionOperationPlan,
+  dbPath: string,
+  table: string
+): SessionOperationDatabaseChange["action"] | undefined {
+  const normalizedDbPath = path.resolve(dbPath).toLowerCase();
+  return plan.databaseChanges.find(
+    (change) => path.resolve(change.database).toLowerCase() === normalizedDbPath && change.table === table
+  )?.action;
+}
+
+function operationDirectories(plan: SessionOperationPlan, options: SessionOperationOptions): OperationDirectories {
+  const name = `${safeStamp(plan.createdAt)}-${plan.agent}-${safeName(plan.sessionId)}`;
+  const root = operationRoot(options);
+  const backupDir = path.join(root, "backups", name);
+  const quarantineDir = path.join(root, "quarantine", name);
+  return {
+    backupDir,
+    quarantineDir,
+    journalPath: path.join(quarantineDir, "journal.json")
+  };
+}
+
+async function createDeleteJournal(
+  plan: SessionOperationPlan,
+  backupDir: string,
+  quarantineDir: string,
+  journalPath: string
+): Promise<DeleteJournal> {
+  const journal: DeleteJournal = {
+    schemaVersion: 1,
+    kind: deleteJournalKind,
+    createdAt: plan.createdAt,
+    updatedAt: plan.createdAt,
+    agent: plan.agent,
+    sessionId: plan.sessionId,
+    backupDir,
+    quarantineDir,
+    journalPath,
+    steps: []
+  };
+  await writeJson(journalPath, journal);
+  return journal;
+}
+
+async function appendJournalStep(journal: DeleteJournal | undefined, step: DeleteJournalStep): Promise<void> {
+  if (!journal) return;
+  journal.updatedAt = new Date().toISOString();
+  journal.steps.push({ ...step, at: step.at ?? journal.updatedAt });
+  await writeJson(journal.journalPath, journal);
+}
+
+function appendJournalStepSync(journal: DeleteJournal | undefined, step: DeleteJournalStep): void {
+  if (!journal) return;
+  journal.updatedAt = new Date().toISOString();
+  journal.steps.push({ ...step, at: step.at ?? journal.updatedAt });
+  fs.mkdirSync(path.dirname(journal.journalPath), { recursive: true });
+  fs.writeFileSync(journal.journalPath, `${JSON.stringify(journal, null, 2)}\n`, "utf8");
+}
+
+function withOperationPaths(
+  error: unknown,
+  backupDir: string,
+  quarantineDir: string,
+  journalPath: string
+): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const wrapped = new Error(`${message} backupDir=${backupDir} quarantineDir=${quarantineDir} journalPath=${journalPath}`);
+  if (error instanceof Error && error.stack) wrapped.stack = error.stack;
+  return wrapped;
+}
+
+async function exportCodexDatabaseBundles(
+  sessionId: string,
+  home: string | undefined,
+  backupDir: string
+): Promise<CodexDatabaseBundleManifest[]> {
+  const bundles: CodexDatabaseBundleManifest[] = [];
+  const dbRoot = path.join(backupDir, "db");
+  const codexRoot = codexHome(home);
+  const specs = codexBundleSpecs(sessionId, codexRoot);
+  for (const spec of specs) {
+    const rows = spec.summary ? exportCodexLogSummary(spec.dbPath, sessionId) : exportRows(spec.dbPath, spec.table, spec.where, spec.params);
+    if (!rows.length) continue;
+    const relativePath = path.join("db", `${spec.databaseName}-${spec.table}.json`);
+    const target = path.join(backupDir, relativePath);
+    const payload = {
+      schemaVersion: 1,
+      kind: "AgentScope Codex SQLite Row Bundle",
+      createdAt: new Date().toISOString(),
+      agent: "codex",
+      sessionId,
+      databaseName: spec.databaseName,
+      table: spec.table,
+      action: spec.summary ? "summary" : "restore",
+      sourceDatabase: spec.dbPath,
+      rows
+    };
+    await fs.promises.mkdir(dbRoot, { recursive: true });
+    await writeJson(target, payload);
+    bundles.push({
+      role: spec.role,
+      databaseName: spec.databaseName,
+      table: spec.table,
+      relativePath,
+      action: spec.summary ? "summary" : "restore",
+      rowCount: rows.length,
+      sha256: await hashPath(target)
+    });
+  }
+  return bundles;
+}
+
+function importCodexDatabaseBundles(
+  manifest: BackupManifest,
+  backupDir: string,
+  home: string | undefined
+): SessionOperationDatabaseChange[] {
+  const bundles = manifest.databaseBundles ?? [];
+  if (!bundles.length) return [];
+  const codexRoot = codexHome(home);
+  const changes: SessionOperationDatabaseChange[] = [];
+  const grouped = new Map<string, CodexDatabaseBundleManifest[]>();
+  for (const bundle of bundles) {
+    if (bundle.action !== "restore") {
+      changes.push(dbChange(path.join(codexRoot, bundle.databaseName), bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, "skip", "agentscope.import.codex.logs-summary"));
+      continue;
+    }
+    const existing = grouped.get(bundle.databaseName) ?? [];
+    existing.push(bundle);
+    grouped.set(bundle.databaseName, existing);
+  }
+  for (const [databaseName, databaseBundles] of grouped) {
+    const dbPath = path.join(codexRoot, databaseName);
+    const db = openWritableDb(dbPath);
+    if (!db) {
+      for (const bundle of databaseBundles) {
+        changes.push(dbChange(dbPath, bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, "skip", "agentscope.import.codex.missing-db"));
+      }
+      continue;
+    }
+    try {
+      db.pragma("busy_timeout = 5000");
+      db.pragma("foreign_keys = ON");
+      const transaction = db.transaction(() => {
+        for (const bundle of databaseBundles) {
+          const source = resolveSafeRelative(backupDir, bundle.relativePath);
+          const expectedSha = bundle.sha256;
+          const actualSha = fs.existsSync(source) ? hashPathSync(source) : undefined;
+          if (!fs.existsSync(source)) throw new Error(`Codex row bundle is missing: ${source}`);
+          if (expectedSha && actualSha && expectedSha !== actualSha) throw new Error(`Codex row bundle checksum mismatch: ${source}`);
+          const payload = JSON.parse(fs.readFileSync(source, "utf8")) as Record<string, unknown>;
+          const rows = Array.isArray(payload.rows) ? payload.rows.filter(isObjectValue) : [];
+          const inserted = insertBundleRows(db, bundle.table, rows, manifest.sessionId);
+          changes.push({
+            ...dbChange(dbPath, bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, inserted ? "insert" : "skip", "agentscope.import.codex"),
+            estimatedRows: inserted
+          });
+        }
+      });
+      transaction();
+    } finally {
+      db.close();
+    }
+  }
+  return changes.filter((change) => change.estimatedRows !== 0 || change.action === "skip");
+}
+
+function codexBundleSpecs(sessionId: string, codexRoot: string): Array<{
+  role: string;
+  databaseName: string;
+  dbPath: string;
+  table: string;
+  where: string;
+  params: unknown[];
+  summary?: boolean;
+}> {
+  return [
+    {
+      role: "codex.db.state_threads",
+      databaseName: "state_5.sqlite",
+      dbPath: path.join(codexRoot, "state_5.sqlite"),
+      table: "threads",
+      where: "id = ?",
+      params: [sessionId]
+    },
+    {
+      role: "codex.db.state_spawn_edges",
+      databaseName: "state_5.sqlite",
+      dbPath: path.join(codexRoot, "state_5.sqlite"),
+      table: "thread_spawn_edges",
+      where: "parent_thread_id = ? OR child_thread_id = ?",
+      params: [sessionId, sessionId]
+    },
+    {
+      role: "codex.db.state_dynamic_tools",
+      databaseName: "state_5.sqlite",
+      dbPath: path.join(codexRoot, "state_5.sqlite"),
+      table: "thread_dynamic_tools",
+      where: "thread_id = ?",
+      params: [sessionId]
+    },
+    {
+      role: "codex.db.goals_thread_goals",
+      databaseName: "goals_1.sqlite",
+      dbPath: path.join(codexRoot, "goals_1.sqlite"),
+      table: "thread_goals",
+      where: "thread_id = ?",
+      params: [sessionId]
+    },
+    {
+      role: "codex.db.memories_stage1_outputs",
+      databaseName: "memories_1.sqlite",
+      dbPath: path.join(codexRoot, "memories_1.sqlite"),
+      table: "stage1_outputs",
+      where: "thread_id = ?",
+      params: [sessionId]
+    },
+    {
+      role: "codex.db.logs_summary",
+      databaseName: "logs_2.sqlite",
+      dbPath: path.join(codexRoot, "logs_2.sqlite"),
+      table: "logs",
+      where: "thread_id = ?",
+      params: [sessionId],
+      summary: true
+    }
+  ];
+}
+
+function exportRows(
+  dbPath: string,
+  table: string,
+  where: string,
+  params: unknown[]
+): Record<string, unknown>[] {
+  const db = openReadableDb(dbPath);
+  if (!db) return [];
+  try {
+    db.pragma("busy_timeout = 5000");
+    const columns = tableColumns(db, table);
+    if (!columns.size || !whereColumnsExist(columns, where)) return [];
+    return db.prepare(`SELECT * FROM ${quoteIdentifier(table)} WHERE ${where}`).all(...params) as Record<string, unknown>[];
+  } finally {
+    db.close();
+  }
+}
+
+function exportCodexLogSummary(dbPath: string, sessionId: string): Record<string, unknown>[] {
+  const db = openReadableDb(dbPath);
+  if (!db) return [];
+  try {
+    db.pragma("busy_timeout = 5000");
+    const columns = tableColumns(db, "logs");
+    if (!columns.has("thread_id")) return [];
+    const selectParts = [
+      "COUNT(*) AS row_count",
+      columnAggregate(columns, "level", "SUM(CASE WHEN upper(level) = 'WARN' THEN 1 ELSE 0 END) AS warn_count"),
+      columnAggregate(columns, "level", "SUM(CASE WHEN upper(level) = 'ERROR' THEN 1 ELSE 0 END) AS error_count"),
+      columnAggregate(columns, "ts", "MIN(ts) AS first_ts"),
+      columnAggregate(columns, "ts", "MAX(ts) AS last_ts"),
+      columnAggregate(columns, "process_uuid", "COUNT(DISTINCT process_uuid) AS process_uuid_count")
+    ].filter(Boolean).join(", ");
+    const row = db.prepare(`SELECT ${selectParts} FROM ${quoteIdentifier("logs")} WHERE thread_id = ?`).get(sessionId) as Record<string, unknown> | undefined;
+    const count = Number(row?.row_count ?? 0);
+    return count > 0 && row ? [{ thread_id: sessionId, ...row }] : [];
+  } finally {
+    db.close();
+  }
+}
+
+function columnAggregate(columns: Set<string>, column: string, expression: string): string {
+  return columns.has(column) ? expression : `NULL AS ${column}_unavailable`;
+}
+
+function insertBundleRows(
+  db: Database.Database,
+  table: string,
+  rows: Record<string, unknown>[],
+  sessionId: string
+): number {
+  const tableColumnInfo = db.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all() as Array<{ name: string; pk?: number }>;
+  const columns = new Set(tableColumnInfo.map((row) => row.name));
+  if (!columns.size || !rows.length) return 0;
+  const identity = bundleIdentity(table, columns);
+  if (identity && rowExists(db, table, identity, sessionId)) throw new Error(`Import target already exists in ${table}: ${sessionId}`);
+  let inserted = 0;
+  for (const row of rows) {
+    const sourceColumns = Object.keys(row);
+    const missingColumns = sourceColumns.filter((column) => !columns.has(column));
+    if (missingColumns.length) {
+      throw new Error(`Codex SQLite schema is incompatible for ${table}; missing column(s): ${missingColumns.join(", ")}`);
+    }
+    const rowColumns = sourceColumns.filter((column) => columns.has(column));
+    if (!rowColumns.length) continue;
+    const placeholders = rowColumns.map(() => "?").join(",");
+    const sql = `INSERT INTO ${quoteIdentifier(table)} (${rowColumns.map(quoteIdentifier).join(",")}) VALUES (${placeholders})`;
+    db.prepare(sql).run(...rowColumns.map((column) => row[column]));
+    inserted += 1;
+  }
+  return inserted;
+}
+
+function bundleIdentity(table: string, columns: Set<string>): { where: string; params: unknown[] } | undefined {
+  if (table === "threads" && columns.has("id")) return { where: "id = ?", params: [] };
+  return undefined;
+}
+
+function rowExists(
+  db: Database.Database,
+  table: string,
+  identity: { where: string; params: unknown[] },
+  sessionId: string
+): boolean {
+  const params = identity.params.length ? identity.params : [sessionId];
+  return countRows(db, table, identity.where, params) > 0;
+}
+
+function openReadableDb(dbPath: string): Database.Database | undefined {
+  if (!fs.existsSync(dbPath)) return undefined;
+  try {
+    return new Database(dbPath, { readonly: true, fileMustExist: true });
+  } catch {
+    return undefined;
+  }
 }
 
 function openWritableDb(dbPath: string): Database.Database | undefined {
@@ -856,15 +1417,15 @@ function removeMatchingJsonValues(value: unknown, target: string): number {
 
 function backupNotes(agent: AgentKind): string[] {
   const common = ["Credentials, settings, and global config are excluded from session backups."];
-  if (agent === "codex") return [...common, "Codex global SQLite databases are inspected but not copied by default; manifest records planned row-level references."];
+  if (agent === "codex") return [...common, "Codex row-level SQLite bundles are exported for compatible restore; logs_2.sqlite is backed up as summary only."];
   if (agent === "claude") return [...common, "Claude session transcript and session-keyed sidecar directories are copied when present."];
   return common;
 }
 
 function deleteNotes(agent: AgentKind): string[] {
-  const common = ["Delete is plan-only. Future execute mode must require an explicit force flag and a verified backup."];
-  if (agent === "codex") return [...common, "Rollout JSONL should be quarantined after SQLite transaction commit, never permanently removed first."];
-  if (agent === "claude") return [...common, "History and .claude.json changes must be patch-based and hash-guarded."];
+  const common = ["Delete writes an AgentScope backup first, then records each destructive step in quarantine/journal.json."];
+  if (agent === "codex") return [...common, "Codex SQLite rows are deleted in transactions before rollout files are quarantined; logs_2.sqlite log bodies are not deleted."];
+  if (agent === "claude") return [...common, "History and .claude.json changes are patch-based and exact session-id only."];
   return common;
 }
 
@@ -895,14 +1456,31 @@ async function listBackupFiles(backupDir: string): Promise<SessionOperationFile[
   return out;
 }
 
-async function readBackupManifest(backupDir: string): Promise<Record<string, unknown>> {
+async function readBackupManifest(backupDir: string): Promise<BackupManifest> {
   const manifestPath = path.join(backupDir, "manifest.json");
-  return JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  const manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  validateBackupManifest(manifest);
+  return manifest;
 }
 
-function manifestCopiedFiles(manifest: Record<string, unknown>): Array<Record<string, unknown>> {
+function validateBackupManifest(manifest: Record<string, unknown>): asserts manifest is BackupManifest {
+  if (manifest.schemaVersion !== 1) throw new Error("Backup manifest has an unsupported schema version.");
+  if (manifest.kind !== backupKind) throw new Error("Backup manifest is not an AgentScope session backup.");
+  if (!asAgent(manifest.agent)) throw new Error("Backup manifest does not contain a supported agent.");
+  if (typeof manifest.sessionId !== "string" || !manifest.sessionId.trim()) throw new Error("Backup manifest is missing a session id.");
+  if (!Array.isArray(manifest.copiedFiles)) throw new Error("Backup manifest copiedFiles must be an array.");
+}
+
+function manifestCopiedFiles(manifest: BackupManifest): Array<Record<string, unknown>> {
   const copiedFiles = manifest.copiedFiles;
   return Array.isArray(copiedFiles) ? copiedFiles.filter(isObjectValue) : [];
+}
+
+async function assertImportTargetsAbsent(copiedFiles: Array<Record<string, unknown>>): Promise<void> {
+  for (const file of copiedFiles) {
+    const originalPath = typeof file.path === "string" ? file.path : undefined;
+    if (originalPath && await pathExists(originalPath)) throw new Error(`Import target already exists: ${originalPath}`);
+  }
 }
 
 async function describeTree(root: string, depth: number): Promise<Record<string, unknown>> {
@@ -975,6 +1553,27 @@ async function hashPath(filePath: string): Promise<string | undefined> {
     stream.on("end", resolve);
   });
   return hash.digest("hex");
+}
+
+function hashPathSync(filePath: string): string | undefined {
+  const stat = fs.statSync(filePath, { throwIfNoEntry: false });
+  if (!stat?.isFile()) return undefined;
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function resolveSafeRelative(root: string, relativePath: string): string {
+  if (!relativePath || path.isAbsolute(relativePath)) throw new Error(`Unsafe backup relative path: ${relativePath}`);
+  const normalizedRelative = path.normalize(relativePath);
+  if (normalizedRelative === ".." || normalizedRelative.startsWith(`..${path.sep}`) || normalizedRelative.includes(`${path.sep}..${path.sep}`)) {
+    throw new Error(`Unsafe backup relative path: ${relativePath}`);
+  }
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(resolvedRoot, normalizedRelative);
+  const relative = path.relative(resolvedRoot, resolved);
+  if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`Unsafe backup relative path: ${relativePath}`);
+  }
+  return resolved;
 }
 
 function relativeBackupPath(filePath: string): string {

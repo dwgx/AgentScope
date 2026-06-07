@@ -196,17 +196,22 @@ export interface SessionBackupResult {
   backupDir: string;
   manifestPath: string;
   copiedFiles: SessionOperationFile[];
+  databaseBundlePaths?: string[] | undefined;
 }
 
 export interface SessionOperationPlanResult {
   plan: SessionOperationPlan;
   path: string;
+  backupDir?: string | undefined;
+  quarantineDir?: string | undefined;
+  journalPath?: string | undefined;
 }
 
 export interface SessionDeleteResult {
   plan: SessionOperationPlan;
   backup: SessionBackupResult;
   quarantineDir: string;
+  journalPath: string;
   movedFiles: SessionOperationFile[];
   patchedFiles: SessionOperationFile[];
   databaseChanges: SessionOperationDatabaseChange[];
@@ -216,4 +221,5 @@ export interface SessionImportResult {
   plan: SessionOperationPlan;
   backupDir: string;
   importedFiles: SessionOperationFile[];
+  databaseChanges?: SessionOperationDatabaseChange[] | undefined;
 }

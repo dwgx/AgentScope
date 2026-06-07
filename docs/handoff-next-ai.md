@@ -139,9 +139,9 @@ Current behavior:
 
 Known limitations:
 
-- Import restores files only; it does not reinsert Codex `threads`, `thread_spawn_edges`, `thread_dynamic_tools`, `thread_goals`, or `stage1_outputs`.
-- Delete moves files before applying Codex DB deletes. If DB mutation fails after file quarantine, recovery requires using backup/quarantine manually. A future implementation should improve the transaction choreography.
-- Parent/child deletion policy is not strict enough. Deleting a parent with children should block or require an explicit detach/include-children mode.
+- Import restores copied files and compatible Codex row bundles for `threads`, `thread_spawn_edges`, `thread_dynamic_tools`, `thread_goals`, and `stage1_outputs`. `logs_2.sqlite` remains summary-only and log bodies are not restored.
+- Delete writes `quarantine/<id>/journal.json`, backs up SQLite files, applies Codex DB deletes before moving rollout files, and reports `backupDir`, `quarantineDir`, and `journalPath` on failure.
+- Parent/child deletion is blocked by default until an explicit detach/include-children mode exists.
 - `riskWarnings()` still contains older wording that suggests planning-only behavior for some actions. Audit wording when extending.
 - `planSessionImport()` writes an import plan as a side effect. This is acceptable today but should be revisited if planning should be pure.
 
@@ -154,13 +154,12 @@ Never delete:
 
 Priority order:
 
-1. Add tests for active heuristic Codex deletion blocking and parent/child deletion blocking.
-2. Make Codex delete operation transactional at the workflow level: DB transaction first with rollback strategy, then quarantine rollout, or journal every step for recovery.
-3. Implement full import for Codex SQLite rows from backup manifest/db row exports.
-4. Add keyboard access to session context menu with `Shift+F10`.
-5. Add notification actions that jump to a session/index row in the UI, not only reveal/open paths.
-6. Add a proper UI smoke harness using Playwright or Electron testing dependency. Current package smoke is lightweight.
-7. Update README whenever safety behavior changes.
+1. Add keyboard access to session context menu with `Shift+F10`.
+2. Add notification actions that jump to a session/index row in the UI, not only reveal/open paths.
+3. Add a proper UI smoke harness using Playwright or Electron testing dependency. Current package smoke is lightweight.
+4. Extend Codex row restore coverage if future Codex schema adds required tables; keep schema drift rejected by default.
+5. Design explicit child-session delete modes (`include children` or `detach`) before lifting the default blocker.
+6. Update README whenever safety behavior changes.
 
 ## Review Checklist
 
@@ -209,4 +208,3 @@ Write a short Markdown update rather than relying on chat memory. Include:
 - exact tests run.
 - any unverified assumptions.
 - next concrete task.
-

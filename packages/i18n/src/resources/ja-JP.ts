@@ -14,6 +14,7 @@ export const jaJP = {
       clear: "消去",
       cancel: "キャンセル",
       reveal: "場所を表示",
+      revealJournal: "journal を表示",
       show: "表示",
       hide: "非表示"
     },
@@ -476,6 +477,6 @@ export const jaJP = {
   confirm: {
     deleteSessionTitle: "セッションを削除",
     deleteSession:
-      "このセッションを削除しますか?\n\n{{title}}\n\nAgentScope は先にバックアップし、セッションファイルを隔離へ移動し、検証済みのローカル参照だけを削除します。正確な PID が残るアクティブセッションはブロックされます。"
+      "このセッションを削除しますか?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope は先にバックアップして journal を書き込み、検証済みのローカル参照を削除してからセッションファイルを隔離へ移動します。正確な PID と信頼度の高い Codex プロセス候補はブロックされます。"
   }
 } satisfies ResourceTree;

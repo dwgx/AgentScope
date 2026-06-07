@@ -77,10 +77,17 @@ Do not treat all of these as stable public APIs.
 `packages/core/src/sessionOps.ts`:
 
 - Plans Codex session backup/delete around rollout JSONL and selected SQLite rows.
+- Exports row-level backup bundles for `state_5.threads`,
+  `state_5.thread_spawn_edges`, `state_5.thread_dynamic_tools`,
+  `goals_1.thread_goals`, and `memories_1.stage1_outputs`.
+- Exports only aggregate `logs_2.sqlite` summary metadata; log body rows are not
+  restored or deleted by default.
 - Deletes rows from `state_5.sqlite` tables `thread_spawn_edges`, `thread_dynamic_tools`, `threads`.
 - Deletes rows from `goals_1.sqlite.thread_goals` and `memories_1.sqlite.stage1_outputs`.
 - Backs up `state_5`, `goals_1`, `memories_1`, and `logs_2` SQLite files plus WAL/SHM to quarantine before DB mutation.
 - Does not delete `logs_2.sqlite.logs` rows in execution; plan marks logs as skip.
+- Writes `quarantine/<id>/journal.json` for delete execution, including backup,
+  file move, patch, SQLite backup, and SQLite delete steps.
 
 ### Codex Risk Notes
 
@@ -88,7 +95,8 @@ Do not treat all of these as stable public APIs.
 - Active Codex process candidates need careful blocking before destructive actions.
 - SQLite files may be live and have WAL/SHM. Always use `busy_timeout` and tolerate missing tables/columns.
 - Never delete global `history.jsonl` for one session. At most patch a known per-session reference with tests.
-- Import is incomplete until backup includes row-level exports and restore can reinsert rows transactionally.
+- Import restores Codex row bundles only when target DB schema/table/columns are
+  compatible and target rows do not already exist.
 
 ## Claude Code Store
 
@@ -182,6 +190,8 @@ Known subdirectories:
 - `backups/`: session backups created before delete or by explicit backup.
 - `plans/`: dry-run operation plans.
 - `quarantine/`: files moved by delete operations.
+- `quarantine/<id>/journal.json`: delete journal with paths, hashes, roles,
+  actions, and evidence; it must not include transcript body text.
 
 Backup manifest shape:
 
@@ -192,6 +202,7 @@ Backup manifest shape:
 - `sessionId`
 - `sourceHome`
 - `copiedFiles[]`
+- `databaseBundles[]` for Codex row bundles and log summaries
 - `plan`
 
 Each copied file should include:
@@ -224,4 +235,3 @@ Related process detection includes:
 - Whether Claude Code formally documents `.claude/sessions/*.json` and daemon/job state. Treat as local internal until documented.
 - How to reconstruct Codex SQLite rows during import without corrupting newer schema versions.
 - Whether session deletion should support child session modes: block, include children, or detach.
-
