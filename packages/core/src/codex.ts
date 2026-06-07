@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type { AgentSession, IndexRecord, Relation, Transcript } from "@agentscope/shared";
+import { analyzeTranscriptActivity } from "./activity.js";
 import { codexHome, normalizeWindowsPath } from "./paths.js";
 import { iterateJsonl } from "./jsonl.js";
 
@@ -21,18 +22,34 @@ export function loadCodexIndex(home?: string): {
   if (!opened) return { sessions: [], records: [], relations: [] };
   const { db, evidencePath } = opened;
   try {
+    const logMetadata = loadCodexLogMetadata(codexHome(home));
     const rows = selectExistingColumns(db, "threads", [
       "id",
       "rollout_path",
       "cwd",
       "title",
       "source",
+      "created_at",
+      "created_at_ms",
       "updated_at",
+      "updated_at_ms",
       "cli_version",
+      "model_provider",
+      "model",
+      "reasoning_effort",
+      "tokens_used",
+      "sandbox_policy",
+      "approval_mode",
+      "git_sha",
+      "git_branch",
+      "archived",
+      "archived_at",
+      "has_user_event",
+      "memory_mode",
       "agent_nickname",
+      "agent_role",
       "agent_path",
-      "thread_source",
-      "preview"
+      "thread_source"
     ]);
     const sessions: AgentSession[] = [];
     const records: IndexRecord[] = [];
@@ -47,9 +64,11 @@ export function loadCodexIndex(home?: string): {
           source: "codex.sqlite.threads",
           detail: "Codex thread record loaded from state_5.sqlite threads table.",
           path: evidencePath,
-          field: "id,rollout_path,cwd,title,source,updated_at,cli_version,agent_nickname,agent_path,thread_source,preview"
+          field: Object.keys(row).join(",")
         }
       ];
+      const metadata = safeCodexThreadMetadata(row);
+      const mergedMetadata = compactMetadata({ ...metadata, ...(logMetadata.get(sessionId) ?? {}) });
       sessions.push({
         agent: "codex",
         sessionId,
@@ -59,8 +78,9 @@ export function loadCodexIndex(home?: string): {
         childSessionIds: [],
         confidence: "indexed",
         title: stringValue(row.title),
-        startedAt,
+        startedAt: stringValue(row.created_at) ?? startedAt,
         updatedAt: stringValue(row.updated_at),
+        indexMetadata: mergedMetadata,
         evidence
       });
       records.push({
@@ -70,16 +90,9 @@ export function loadCodexIndex(home?: string): {
         path: rolloutPath,
         cwd,
         title: stringValue(row.title),
-        startedAt,
+        startedAt: stringValue(row.created_at) ?? startedAt,
         updatedAt: stringValue(row.updated_at),
-        preview: stringValue(row.preview),
-        metadata: {
-          source: row.source,
-          cli_version: row.cli_version,
-          agent_nickname: row.agent_nickname,
-          agent_path: row.agent_path,
-          thread_source: row.thread_source
-        },
+        metadata: mergedMetadata,
         evidence
       });
     }
@@ -110,6 +123,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
     const sessionId = rolloutThreadId(filePath);
     if (!sessionId) continue;
     const metadata = await readRolloutMetadata(filePath);
+    const activity = await analyzeTranscriptActivity("codex", filePath);
     const cwd = normalizeWindowsPath(stringValue(metadata.cwd));
     const startedAt = rolloutStartedAt(filePath);
     const updatedAt = fs.statSync(filePath).mtime.toISOString();
@@ -121,7 +135,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
         field: "filename,cwd,jsonl"
       }
     ];
-    transcripts.push({ agent: "codex", sessionId, path: filePath, cwd, updatedAt, evidence });
+    transcripts.push({ agent: "codex", sessionId, path: filePath, cwd, updatedAt, activity, evidence });
     sessions.push({
       agent: "codex",
       sessionId,
@@ -133,6 +147,8 @@ export async function scanCodexRollouts(home?: string): Promise<{
       title: stringValue(metadata.title),
       startedAt,
       updatedAt,
+      indexMetadata: { activity_line_count: activity.lineCount },
+      activity,
       evidence
     });
     records.push({
@@ -144,7 +160,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
       title: stringValue(metadata.title),
       startedAt,
       updatedAt,
-      metadata,
+      metadata: { ...metadata, activity },
       evidence
     });
   }
@@ -220,6 +236,98 @@ function selectExistingColumns(
   }
 }
 
+function safeCodexThreadMetadata(row: Record<string, unknown>): Record<string, unknown> {
+  return compactMetadata({
+    source: row.source,
+    cli_version: row.cli_version,
+    model_provider: row.model_provider,
+    model: row.model,
+    reasoning_effort: row.reasoning_effort,
+    tokens_used: row.tokens_used,
+    sandbox_policy: row.sandbox_policy,
+    approval_mode: row.approval_mode,
+    git_sha: row.git_sha,
+    git_branch: row.git_branch,
+    archived: row.archived,
+    archived_at: row.archived_at,
+    has_user_event: row.has_user_event,
+    memory_mode: row.memory_mode,
+    agent_nickname: row.agent_nickname,
+    agent_role: row.agent_role,
+    agent_path: row.agent_path,
+    thread_source: row.thread_source,
+    created_at_ms: row.created_at_ms,
+    updated_at_ms: row.updated_at_ms
+  });
+}
+
+function compactMetadata(values: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => value !== undefined && value !== null && value !== "")
+  );
+}
+
+function loadCodexLogMetadata(codexRoot: string): Map<string, Record<string, unknown>> {
+  const dbPath = path.join(codexRoot, "logs_2.sqlite");
+  if (!fs.existsSync(dbPath)) return new Map();
+  const opened = openCodexDb(dbPath);
+  if (!opened) return new Map();
+  try {
+    const rows = opened.db
+      .prepare(
+        `SELECT thread_id,
+                COUNT(*) AS log_count,
+                SUM(CASE WHEN upper(level) = 'WARN' THEN 1 ELSE 0 END) AS warn_count,
+                SUM(CASE WHEN upper(level) = 'ERROR' THEN 1 ELSE 0 END) AS error_count,
+                MIN(ts) AS first_log_ts,
+                MAX(ts) AS last_log_ts,
+                COUNT(DISTINCT process_uuid) AS process_uuid_count
+         FROM logs
+         WHERE thread_id IS NOT NULL AND thread_id != ''
+         GROUP BY thread_id`
+      )
+      .all() as Array<Record<string, unknown>>;
+    const targetRows = opened.db
+      .prepare(
+        `SELECT thread_id, target, COUNT(*) AS count
+         FROM logs
+         WHERE thread_id IS NOT NULL AND thread_id != '' AND target IS NOT NULL AND target != ''
+         GROUP BY thread_id, target
+         ORDER BY thread_id, count DESC`
+      )
+      .all() as Array<Record<string, unknown>>;
+    const targets = new Map<string, string>();
+    for (const row of targetRows) {
+      const threadId = stringValue(row.thread_id);
+      if (threadId && !targets.has(threadId)) targets.set(threadId, stringValue(row.target) ?? "");
+    }
+    return new Map(
+      rows.flatMap((row) => {
+        const threadId = stringValue(row.thread_id);
+        if (!threadId) return [];
+        return [
+          [
+            threadId,
+            compactMetadata({
+              log_count: row.log_count,
+              log_warn_count: row.warn_count,
+              log_error_count: row.error_count,
+              log_first_ts: row.first_log_ts,
+              log_last_ts: row.last_log_ts,
+              log_process_uuid_count: row.process_uuid_count,
+              log_top_target: targets.get(threadId)
+            })
+          ] as const
+        ];
+      })
+    );
+  } catch {
+    return new Map();
+  } finally {
+    opened.db.close();
+  }
+}
+
 function loadSpawnEdges(db: Database.Database, dbPath: string): Relation[] {
   const existing = tableColumns(db, "thread_spawn_edges");
   const parentCol = firstExisting(existing, ["parent_thread_id", "parent_id", "source_thread_id", "source_id", "parent"]);
@@ -281,25 +389,6 @@ function collectMetadata(value: Record<string, unknown>, metadata: Record<string
       if (metadata[nestedKey] === undefined && nestedValue !== undefined) metadata[nestedKey] = nestedValue;
     }
   }
-  if (metadata.title === undefined) {
-    const text = extractText(value);
-    if (text) metadata.title = text.slice(0, 120);
-  }
-}
-
-function extractText(value: Record<string, unknown>): string | undefined {
-  for (const key of ["text", "content", "preview"]) {
-    const text = stringValue(value[key]);
-    if (text) return text.trim();
-  }
-  const payload = value.payload;
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    for (const key of ["text", "content", "preview"]) {
-      const text = stringValue((payload as Record<string, unknown>)[key]);
-      if (text) return text.trim();
-    }
-  }
-  return undefined;
 }
 
 function walk(root: string, visitor: (filePath: string) => void): void {

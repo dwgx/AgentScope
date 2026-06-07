@@ -36,6 +36,7 @@ import type {
   Diagnostic,
   Evidence,
   Relation,
+  SessionActivity,
   ScopeSnapshot,
   SessionCandidate
 } from "@agentscope/shared";
@@ -48,7 +49,7 @@ type ThemeName = "graphite" | "blueprint" | "contrast" | "midnight";
 type DensityName = "compact" | "comfortable" | "spacious";
 type MotionName = "full" | "reduced" | "off";
 type StrongConfidence = "exact" | "indexed" | "heuristic";
-type SelectionKey = { type: "session"; id: string } | { type: "process"; pid: number } | null;
+type SelectionKey = { type: "session"; agent: AgentKind; id: string } | { type: "process"; pid: number } | null;
 type Selection =
   | { type: "session"; value: AgentSession }
   | { type: "process"; value: AgentProcess }
@@ -262,8 +263,8 @@ function App() {
             {view === "sessions" && (
               <SessionList
                 sessions={sessions}
-                selectedId={selected?.type === "session" ? selected.value.sessionId : undefined}
-                onSelect={(session) => setSelectionKey({ type: "session", id: session.sessionId })}
+                selectedKey={selected?.type === "session" ? sessionKey(selected.value) : undefined}
+                onSelect={(session) => setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId })}
               />
             )}
             {view === "graph" && <RelationList relations={relations} />}
@@ -801,11 +802,7 @@ function ProcessList(props: {
   );
 }
 
-function SessionList(props: {
-  sessions: AgentSession[];
-  selectedId?: string | undefined;
-  onSelect: (session: AgentSession) => void;
-}) {
+function SessionList(props: { sessions: AgentSession[]; selectedKey?: string | undefined; onSelect: (session: AgentSession) => void }) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
   if (!props.sessions.length) {
@@ -826,7 +823,7 @@ function SessionList(props: {
       <div className="rows">
         {props.sessions.map((session) => (
           <button
-            className={`sessionRow ${props.selectedId === session.sessionId ? "selected" : ""}`}
+            className={`sessionRow ${props.selectedKey === sessionKey(session) ? "selected" : ""}`}
             key={`${session.agent}:${session.sessionId}`}
             onClick={() => props.onSelect(session)}
           >
@@ -1506,6 +1503,8 @@ function Inspector(props: {
           long
         />
       </FieldGroup>
+      <MetadataSummary metadata={session.indexMetadata} />
+      <ActivitySummary activity={session.activity} locale={locale} />
       {related.length > 0 && (
         <FieldGroup title={t("inspector.relations")}>
           {related.map((relation, index) => (
@@ -1520,6 +1519,73 @@ function Inspector(props: {
       )}
       <EvidenceList evidence={session.evidence} />
     </aside>
+  );
+}
+
+function ActivitySummary(props: { activity?: SessionActivity | undefined; locale?: string }) {
+  const { t } = useTranslation();
+  const activity = props.activity;
+  if (!activity) {
+    return (
+      <FieldGroup title={t("inspector.activity")}>
+        <p className="muted">{t("inspector.noActivity")}</p>
+      </FieldGroup>
+    );
+  }
+  const usage = activity.tokenUsage;
+  return (
+    <FieldGroup title={t("inspector.activity")}>
+      <Field label={t("inspector.fields.lines")} value={formatNumber(activity.lineCount, props.locale)} />
+      <Field label={t("inspector.fields.bytes")} value={formatBytes(activity.byteSize, props.locale)} />
+      <Field label={t("inspector.fields.firstEvent")} value={formatMaybeDate(activity.firstTimestamp, props.locale)} />
+      <Field label={t("inspector.fields.lastEvent")} value={formatMaybeDate(activity.lastTimestamp, props.locale)} />
+      <Field label={t("inspector.fields.cliVersion")} value={activity.cliVersion} />
+      <Field label={t("inspector.fields.gitBranch")} value={activity.gitBranch} />
+      <Field label={t("inspector.fields.permission")} value={activity.permissionMode} />
+      <Field label={t("inspector.fields.mode")} value={activity.mode} />
+      <Field label={t("inspector.fields.compacted")} value={activity.compactedCount} />
+      <Field label={t("inspector.fields.sidechain")} value={activity.sidechainCount} />
+      <Field label={t("inspector.fields.parseErrors")} value={activity.parseErrors} />
+      <StatChips title={t("inspector.topEvents")} values={activity.eventCounts} />
+      <StatChips title={t("inspector.models")} values={activity.modelCounts} />
+      <StatChips title={t("inspector.topTools")} values={activity.toolCounts} />
+      {usage && (
+        <div className="activityBlock">
+          <h4>{t("inspector.tokens")}</h4>
+          <div className="statChips">
+            <StatChip label={t("inspector.fields.inputTokens")} value={usage.inputTokens} locale={props.locale} />
+            <StatChip label={t("inspector.fields.outputTokens")} value={usage.outputTokens} locale={props.locale} />
+            <StatChip label={t("inspector.fields.cacheRead")} value={usage.cacheReadInputTokens} locale={props.locale} />
+            <StatChip label={t("inspector.fields.cacheWrite")} value={usage.cacheCreationInputTokens} locale={props.locale} />
+          </div>
+        </div>
+      )}
+    </FieldGroup>
+  );
+}
+
+function StatChips(props: { title: string; values?: Record<string, number> | undefined }) {
+  const entries = topEntries(props.values, 8);
+  if (!entries.length) return null;
+  return (
+    <div className="activityBlock">
+      <h4>{props.title}</h4>
+      <div className="statChips">
+        {entries.map(([label, value]) => (
+          <StatChip key={label} label={label} value={value} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StatChip(props: { label: string; value?: number | undefined; locale?: string | undefined }) {
+  if (props.value === undefined) return null;
+  return (
+    <span className="statChip">
+      <span>{props.label}</span>
+      <strong>{formatNumber(props.value, props.locale)}</strong>
+    </span>
   );
 }
 
@@ -1546,13 +1612,16 @@ function CandidateList(props: { candidates: SessionCandidate[]; showUnknown: boo
             {candidate.cwd || candidate.transcriptPath || t("common.path.noPath")}
           </span>
           <div className="reasonList">
-            {candidate.reasons.slice(0, 4).map((reason, index) => (
-              <Badge
-                key={`${reason.source}:${index}`}
-                text={reason.source.replace("process.match.", "")}
-                tone={reason.source.endsWith("pid") ? "ok" : undefined}
-              />
-            ))}
+            {(candidate.scoreParts ?? candidate.reasons.map((reason) => ({ ...reason, points: 0 }))).map(
+              (reason, index) => (
+                <div className="scorePart" key={`${reason.source}:${index}`}>
+                  <strong>{reason.points ? `+${reason.points}` : ""}</strong>
+                  <span>{reason.source.replace("process.match.", "")}</span>
+                  {reason.field && <em>{reason.field}</em>}
+                  <p>{reason.detail}</p>
+                </div>
+              )
+            )}
             {candidate.confidence === "unknown" && (
               <Badge text={t("views.processes.weakEvidence")} />
             )}
@@ -1623,6 +1692,24 @@ function EvidenceList(props: { evidence: Evidence[] }) {
   );
 }
 
+function MetadataSummary(props: { metadata?: Record<string, unknown> | undefined }) {
+  const { t } = useTranslation();
+  const entries = Object.entries(props.metadata ?? {}).filter(([, value]) => value !== undefined && value !== null && value !== "");
+  if (!entries.length) return null;
+  return (
+    <FieldGroup title={t("inspector.indexMetadata")}>
+      <div className="metadataGrid">
+        {entries.slice(0, 18).map(([key, value]) => (
+          <span className="metadataItem" key={key}>
+            <em>{key}</em>
+            <strong className={typeof value === "number" ? "" : "mono"}>{String(value)}</strong>
+          </span>
+        ))}
+      </div>
+    </FieldGroup>
+  );
+}
+
 function SearchResults(props: { results: Record<string, unknown>[]; onPick: () => void }) {
   return (
     <section className="results">
@@ -1631,7 +1718,7 @@ function SearchResults(props: { results: Record<string, unknown>[]; onPick: () =
           <AgentPill agent={String(result.agent ?? "unknown")} />
           <span>{String(result.source ?? "")}</span>
           <span className="mono">{short(String(result.sessionId ?? ""))}</span>
-          <strong>{String(result.title ?? result.text ?? result.path ?? "")}</strong>
+          <strong>{searchResultTitle(result)}</strong>
         </button>
       ))}
     </section>
@@ -1711,7 +1798,10 @@ function EvidenceSummary(props: { evidence: Evidence[] }) {
 
 function firstSelectionKey(snapshot: ScopeSnapshot): SelectionKey {
   if (snapshot.processes.length) return { type: "process", pid: snapshot.processes[0]!.pid };
-  if (snapshot.sessions.length) return { type: "session", id: snapshot.sessions.at(-1)!.sessionId };
+  if (snapshot.sessions.length) {
+    const session = snapshot.sessions.at(-1)!;
+    return { type: "session", agent: session.agent, id: session.sessionId };
+  }
   return null;
 }
 
@@ -1725,14 +1815,28 @@ function resolveSelection(
     return process ? { type: "process", value: process } : null;
   }
   if (key?.type === "session") {
-    const session = sessions.find((item) => item.sessionId === key.id);
+    const session = sessions.find((item) => item.agent === key.agent && item.sessionId === key.id);
     return session ? { type: "session", value: session } : null;
   }
   return null;
 }
 
+function sessionKey(session: AgentSession): string {
+  return `${session.agent}:${session.sessionId}`;
+}
+
 function candidateTitle(candidate: SessionCandidate) {
   return candidate.title || short(candidate.sessionId);
+}
+
+function searchResultTitle(result: Record<string, unknown>): string {
+  if (result.title) return String(result.title);
+  const eventType = result.eventType ? String(result.eventType) : "jsonl";
+  const line = result.line ? `line ${String(result.line)}` : "";
+  const fields = Array.isArray(result.matchedFields) && result.matchedFields.length
+    ? `fields ${result.matchedFields.map(String).join(", ")}`
+    : "";
+  return [eventType, line, fields, result.path ? String(result.path) : ""].filter(Boolean).join(" · ");
 }
 
 function selectedTranscriptPath(selection: Selection): string | undefined {
@@ -1751,6 +1855,21 @@ function selectedCwdPath(selection: Selection): string | undefined {
 function short(value?: string) {
   if (!value) return "";
   return value.length > 28 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
+}
+
+function topEntries(values: Record<string, number> | undefined, limit: number): Array<[string, number]> {
+  return Object.entries(values ?? {})
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit);
+}
+
+function formatNumber(value: number | undefined, locale?: string): string | undefined {
+  return value === undefined ? undefined : new Intl.NumberFormat(locale).format(value);
+}
+
+function formatBytes(value: number | undefined, locale?: string): string | undefined {
+  if (value === undefined) return undefined;
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value / 1024) + " KB";
 }
 
 function formatDate(value: string, locale?: string) {

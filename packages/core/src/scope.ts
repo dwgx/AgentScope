@@ -1,4 +1,15 @@
-import type { AgentProcess, AgentSession, Confidence, Evidence, Relation, ScopeSnapshot, SessionCandidate, Transcript } from "@agentscope/shared";
+import type {
+  AgentProcess,
+  AgentSession,
+  Confidence,
+  Evidence,
+  Relation,
+  ScopeSnapshot,
+  SessionCandidate,
+  SessionCandidateScorePart,
+  Transcript
+} from "@agentscope/shared";
+import { mergeActivity } from "./activity.js";
 import { loadClaudeIndexRecords, loadClaudeSessions, loadClaudeTranscripts } from "./claude.js";
 import { appendEvidenceUnique, loadCodexIndex, scanCodexRollouts } from "./codex.js";
 import { containsNormalizedPath } from "./paths.js";
@@ -7,15 +18,15 @@ import { listProcesses } from "./processes.js";
 export async function buildSnapshot(home?: string, includeProcesses = true): Promise<ScopeSnapshot> {
   const processes = includeProcesses ? await listProcesses(false) : [];
   const claudeSessions = loadClaudeSessions(home);
-  const claudeTranscripts = loadClaudeTranscripts(home);
+  const claudeTranscriptIndex = await loadClaudeTranscripts(home);
   const claudeRecords = loadClaudeIndexRecords(home);
   const codex = loadCodexIndex(home);
   const rollouts = await scanCodexRollouts(home);
 
   const sessions = mergeSessions([...claudeSessions, ...codex.sessions, ...rollouts.sessions]);
-  const transcripts = [...claudeTranscripts, ...rollouts.transcripts];
+  const transcripts = [...claudeTranscriptIndex.transcripts, ...rollouts.transcripts];
   const indexRecords = [...claudeRecords, ...codex.records, ...rollouts.records];
-  const relations = [...codex.relations];
+  const relations = [...codex.relations, ...claudeTranscriptIndex.relations];
 
   attachTranscripts(sessions, transcripts);
   attachProcesses(sessions, processes, relations);
@@ -26,8 +37,12 @@ export async function buildSnapshot(home?: string, includeProcesses = true): Pro
   return { processes, sessions, transcripts, indexRecords, relations };
 }
 
-export function findSession(snapshot: ScopeSnapshot, sessionId: string): AgentSession | undefined {
-  return snapshot.sessions.find((session) => session.sessionId.toLowerCase() === sessionId.toLowerCase());
+export function findSession(snapshot: ScopeSnapshot, sessionId: string, agent?: string): AgentSession | undefined {
+  return snapshot.sessions.find(
+    (session) =>
+      session.sessionId.toLowerCase() === sessionId.toLowerCase() &&
+      (agent === undefined || session.agent === agent)
+  );
 }
 
 export function findProcess(snapshot: ScopeSnapshot, pid: number): AgentProcess | undefined {
@@ -72,6 +87,14 @@ export function mergeSessions(items: AgentSession[]): AgentSession[] {
 
 function attachTranscripts(sessions: AgentSession[], transcripts: Transcript[]): void {
   for (const transcript of transcripts) {
+    if (transcript.transcriptKind === "subagent") {
+      const parent = transcript.parentSessionId
+        ? sessions.find((item) => item.agent === transcript.agent && item.sessionId === transcript.parentSessionId)
+        : undefined;
+      if (parent && !parent.childSessionIds.includes(transcript.sessionId)) parent.childSessionIds.push(transcript.sessionId);
+      if (parent) parent.evidence = appendEvidenceUnique(parent.evidence, transcript.evidence);
+      continue;
+    }
     const session = sessions.find((item) => item.agent === transcript.agent && item.sessionId === transcript.sessionId);
     if (!session) {
       sessions.push({
@@ -83,6 +106,7 @@ function attachTranscripts(sessions: AgentSession[], transcripts: Transcript[]):
         childSessionIds: [],
         confidence: "indexed",
         updatedAt: transcript.updatedAt,
+        activity: transcript.activity,
         evidence: transcript.evidence
       });
       continue;
@@ -90,6 +114,7 @@ function attachTranscripts(sessions: AgentSession[], transcripts: Transcript[]):
     session.transcriptPath ||= transcript.path;
     session.cwd ||= transcript.cwd;
     session.updatedAt = maxText(session.updatedAt, transcript.updatedAt);
+    session.activity = mergeActivity(session.activity, transcript.activity);
     session.confidence = bestConfidence(session.confidence, "indexed");
     session.evidence = appendEvidenceUnique(session.evidence, transcript.evidence);
   }
@@ -145,7 +170,7 @@ function attachProcesses(sessions: AgentSession[], processes: AgentProcess[], re
 
 function applyRelations(sessions: AgentSession[], relations: Relation[]): void {
   for (const relation of relations) {
-    if (relation.kind !== "parent_child") continue;
+    if (relation.kind !== "parent_child" && relation.kind !== "subagent") continue;
     const parent = sessions.find((session) => session.sessionId === relation.sourceId);
     const child = sessions.find((session) => session.sessionId === relation.targetId);
     if (parent && !parent.childSessionIds.includes(relation.targetId)) parent.childSessionIds.push(relation.targetId);
@@ -173,6 +198,8 @@ function mergeSession(target: AgentSession, source: AgentSession): void {
   target.title ||= source.title;
   target.startedAt ||= source.startedAt;
   target.updatedAt = maxText(target.updatedAt, source.updatedAt);
+  target.indexMetadata = mergeMetadata(target.indexMetadata, source.indexMetadata);
+  target.activity = mergeActivity(target.activity, source.activity);
   target.confidence = bestConfidence(target.confidence, source.confidence);
   target.evidence = appendEvidenceUnique(target.evidence, source.evidence);
 }
@@ -180,9 +207,11 @@ function mergeSession(target: AgentSession, source: AgentSession): void {
 function scoreSessionForProcess(process: AgentProcess, session: AgentSession): SessionCandidate {
   let score = 0;
   const reasons: Evidence[] = [];
+  const scoreParts: SessionCandidateScorePart[] = [];
   const add = (points: number, evidence: Evidence): void => {
     score += points;
     reasons.push(evidence);
+    scoreParts.push({ ...evidence, points });
   };
 
   if (session.pid !== undefined && session.pid === process.pid) {
@@ -255,6 +284,7 @@ function scoreSessionForProcess(process: AgentProcess, session: AgentSession): S
     transcriptPath: session.transcriptPath,
     confidence: candidateConfidence(process, session, reasons),
     score,
+    scoreParts,
     startedAt: session.startedAt,
     updatedAt: session.updatedAt,
     reasons
@@ -314,6 +344,15 @@ function maxText(left?: string, right?: string): string | undefined {
   if (!left) return right;
   if (!right) return left;
   return left > right ? left : right;
+}
+
+function mergeMetadata(
+  left?: Record<string, unknown>,
+  right?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return { ...right, ...left };
 }
 
 function parseTime(value?: string): number | undefined {

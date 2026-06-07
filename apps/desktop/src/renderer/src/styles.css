@@ -847,6 +847,43 @@ button {
   white-space: nowrap;
 }
 
+.scorePart {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 42px minmax(70px, auto) minmax(0, 1fr);
+  gap: 6px 8px;
+  align-items: baseline;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.scorePart strong {
+  color: color-mix(in srgb, var(--accent) 78%, #ffffff);
+  font-weight: 750;
+}
+
+.scorePart span {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.scorePart em {
+  min-width: 0;
+  color: var(--muted2);
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.scorePart p {
+  grid-column: 2 / -1;
+  margin: 0;
+  color: color-mix(in srgb, var(--text) 58%, var(--muted));
+  line-height: 1.35;
+}
+
 .evidenceItem {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -920,6 +957,82 @@ button {
   grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
   padding: 6px 0;
   color: color-mix(in srgb, var(--text) 64%, var(--muted));
+}
+
+.activityBlock {
+  margin-top: 10px;
+}
+
+.activityBlock h4 {
+  margin: 0 0 7px;
+  color: var(--muted2);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.statChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.statChip {
+  max-width: 100%;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.statChip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statChip strong {
+  flex: none;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.metadataGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.metadataItem {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 7px 8px;
+  background: var(--surface);
+}
+
+.metadataItem em {
+  color: var(--muted2);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.metadataItem strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .arrow {

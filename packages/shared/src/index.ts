@@ -2,7 +2,7 @@ export type AgentKind = "codex" | "claude" | "unknown";
 
 export type Confidence = "exact" | "indexed" | "heuristic" | "unknown";
 
-export type RelationKind = "parent_child" | "process_parent" | "transcript";
+export type RelationKind = "parent_child" | "process_parent" | "transcript" | "subagent";
 
 export interface Evidence {
   source: string;
@@ -34,9 +34,14 @@ export interface SessionCandidate {
   transcriptPath?: string | undefined;
   confidence: Confidence;
   score: number;
+  scoreParts?: SessionCandidateScorePart[] | undefined;
   startedAt?: string | undefined;
   updatedAt?: string | undefined;
   reasons: Evidence[];
+}
+
+export interface SessionCandidateScorePart extends Evidence {
+  points: number;
 }
 
 export interface Transcript {
@@ -45,6 +50,9 @@ export interface Transcript {
   path: string;
   cwd?: string | undefined;
   updatedAt?: string | undefined;
+  parentSessionId?: string | undefined;
+  transcriptKind?: "session" | "subagent" | undefined;
+  activity?: SessionActivity | undefined;
   evidence: Evidence[];
 }
 
@@ -89,7 +97,37 @@ export interface AgentSession {
   title?: string | undefined;
   startedAt?: string | undefined;
   updatedAt?: string | undefined;
+  indexMetadata?: Record<string, unknown> | undefined;
+  activity?: SessionActivity | undefined;
   evidence: Evidence[];
+}
+
+export interface SessionActivity {
+  lineCount: number;
+  byteSize?: number | undefined;
+  eventCounts: Record<string, number>;
+  roleCounts?: Record<string, number> | undefined;
+  modelCounts?: Record<string, number> | undefined;
+  toolCounts?: Record<string, number> | undefined;
+  tokenUsage?: TokenUsage | undefined;
+  gitBranch?: string | undefined;
+  cliVersion?: string | undefined;
+  permissionMode?: string | undefined;
+  mode?: string | undefined;
+  cwd?: string | undefined;
+  firstTimestamp?: string | undefined;
+  lastTimestamp?: string | undefined;
+  compactedCount?: number | undefined;
+  sidechainCount?: number | undefined;
+  parseErrors?: number | undefined;
+}
+
+export interface TokenUsage {
+  inputTokens?: number | undefined;
+  outputTokens?: number | undefined;
+  cacheCreationInputTokens?: number | undefined;
+  cacheReadInputTokens?: number | undefined;
+  serverToolUse?: Record<string, number> | undefined;
 }
 
 export interface Diagnostic {

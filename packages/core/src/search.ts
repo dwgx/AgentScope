@@ -34,7 +34,7 @@ function searchCodexSqlite(query: string, home: string, limit: number): Record<s
       sessionId: row.id,
       path: row.rollout_path,
       title: row.title,
-      preview: row.preview,
+      matchedFields: sqliteMatchedFields(row, query),
       cwd: row.cwd,
       updatedAt: row.updated_at
     }));
@@ -43,6 +43,11 @@ function searchCodexSqlite(query: string, home: string, limit: number): Record<s
   } finally {
     db.close();
   }
+}
+
+function sqliteMatchedFields(row: Record<string, unknown>, query: string): string[] {
+  const needle = query.toLowerCase();
+  return ["title", "preview", "cwd"].filter((field) => String(row[field] ?? "").toLowerCase().includes(needle));
 }
 
 async function searchJsonlRoots(query: string, home: string, limit: number): Promise<Record<string, unknown>[]> {

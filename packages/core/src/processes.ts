@@ -5,7 +5,7 @@ import { normalizeWindowsPath } from "./paths.js";
 
 const execFileAsync = promisify(execFile);
 
-const relatedNames = new Set(["codex.exe", "codex", "claude.exe", "claude", "node.exe", "node", "node_repl.exe", "node_repl"]);
+const relatedNames = new Set(["codex.exe", "codex", "claude.exe", "claude", "node_repl.exe", "node_repl"]);
 const relatedMarkers = ["codex", "claude", "node_repl", "app-server", "daemon"];
 
 interface Win32ProcessRow {
@@ -77,6 +77,7 @@ export function isRelatedProcess(process: AgentProcess): boolean {
   const name = process.processName.toLowerCase();
   if (relatedNames.has(name)) return true;
   const haystack = `${process.commandLine ?? ""} ${process.executablePath ?? ""}`.toLowerCase();
+  if (name === "node.exe" || name === "node") return relatedMarkers.some((marker) => haystack.includes(marker));
   return relatedMarkers.some((marker) => haystack.includes(marker));
 }
 
