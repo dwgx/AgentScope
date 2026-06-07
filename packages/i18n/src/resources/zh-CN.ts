@@ -1,0 +1,275 @@
+import { enUS } from "./en-US.js";
+import type { ResourceTree } from "../types.js";
+
+export const zhCN = {
+  ...enUS,
+  app: { tagline: "控制 + 追踪层" },
+  common: {
+    ...enUS.common,
+    agent: { codex: "codex", claude: "claude", unknown: "unknown" },
+    action: { open: "打开", refresh: "刷新", reset: "重置", show: "显示", hide: "隐藏" },
+    status: {
+      ...enUS.common.status,
+      ok: "正常",
+      warn: "警告",
+      local: "本地",
+      read: "可读",
+      stream: "流式",
+      indexed: "已索引",
+      exact: "精确",
+      resolved: "已解析",
+      on: "开启",
+      scored: "已评分",
+      evidence: "证据",
+      readOnly: "只读"
+    },
+    confidence: { exact: "精确", indexed: "索引", heuristic: "推断", unknown: "未知" },
+    date: { started: "启动 {{date}}", updated: "更新 {{date}}" },
+    path: {
+      noCommandLine: "没有命令行",
+      noPathEvidence: "没有路径证据",
+      noPath: "没有路径",
+      loading: "正在加载路径"
+    }
+  },
+  nav: {
+    processes: "进程",
+    sessions: "会话",
+    relations: "关系",
+    doctor: "诊断",
+    settings: "设置",
+    system: "系统",
+    refreshIndex: "刷新索引"
+  },
+  menu: {
+    file: {
+      label: "文件",
+      exportSnapshot: "导出快照",
+      openAppData: "打开应用数据",
+      openCodexHome: "打开 Codex 目录",
+      openClaudeHome: "打开 Claude 目录",
+      reloadWindow: "重载窗口",
+      quit: "退出 AgentScope"
+    },
+    view: {
+      label: "视图",
+      graphiteTheme: "石墨主题",
+      blueprintTheme: "蓝图主题",
+      highContrast: "高对比度",
+      midnightTheme: "午夜主题",
+      toggleInspector: "切换检查器"
+    },
+    trace: {
+      label: "追踪",
+      refreshIndex: "刷新索引",
+      showWeakCandidates: "显示弱候选",
+      openSelectedTranscript: "打开所选转录",
+      revealSelectedTranscript: "定位所选转录",
+      openSelectedCwd: "打开所选工作目录",
+      revealCodexSqlite: "定位 Codex SQLite"
+    },
+    help: {
+      label: "帮助",
+      githubRepository: "GitHub 仓库",
+      githubActions: "GitHub Actions",
+      issues: "Issues",
+      readme: "README"
+    },
+    detail: { json: "JSON", jsonl: "JSONL", logs: "日志", public: "公开" }
+  },
+  command: {
+    searchPlaceholder: "搜索会话、转录、命令行",
+    proc: "进程",
+    matched: "匹配",
+    warn: "警告",
+    refreshTitle: "刷新"
+  },
+  views: {
+    processes: {
+      emptyTitle: "没有相关进程",
+      emptyDetail: "未找到 Codex、Claude、node_repl、app-server 或 daemon 进程。",
+      subtitle_one: "{{count}} 个相关 Win32 进程",
+      subtitle_other: "{{count}} 个相关 Win32 进程",
+      noCandidate: "还没有会话候选",
+      weakEvidence: "弱证据",
+      candidate: "候选",
+      score: "评分 {{score}}"
+    },
+    sessions: {
+      emptyTitle: "没有索引到会话",
+      emptyDetail: "运行诊断以检查 Codex 和 Claude 本地路径。",
+      subtitle_one: "{{count}} 条 Claude + Codex 记录",
+      subtitle_other: "{{count}} 条 Claude + Codex 记录"
+    },
+    relations: {
+      emptyTitle: "没有关系",
+      emptyDetail: "索引到 Codex 派生边或进程关系后会显示在这里。",
+      subtitle_one: "{{count}} 条会话/进程图边",
+      subtitle_other: "{{count}} 条会话/进程图边"
+    },
+    doctor: {
+      emptyTitle: "诊断尚未运行",
+      emptyDetail: "刷新以运行本地环境检查。",
+      subtitle_one: "{{count}} 项环境检查",
+      subtitle_other: "{{count}} 项环境检查"
+    }
+  },
+  settings: {
+    ...enUS.settings,
+    title: "设置",
+    subtitle: "只读 Windows 追踪配置",
+    sections: {
+      general: "常规",
+      appearance: "外观",
+      indexing: "索引",
+      runtime: "运行时",
+      diagnostics: "诊断",
+      workspace: "工作区",
+      typography: "字体",
+      codex: "Codex",
+      claude: "Claude",
+      runtimeCapture: "运行时采集",
+      confidence: "置信度"
+    },
+    language: {
+      label: "语言",
+      detail: "立即切换 AgentScope 界面文字。",
+      system: "系统",
+      enUS: "English",
+      zhCN: "中文",
+      jaJP: "日本語",
+      koKR: "한국어"
+    },
+    controlMode: {
+      label: "控制模式",
+      detail: "只读；破坏性控制动作在显式 force 选项出现前只生成建议。"
+    },
+    defaultView: { label: "默认视图", detail: "AgentScope 打开时进入的视图。" },
+    inspector: {
+      label: "检查器",
+      detail: "右侧栏在切换主视图时保持运行时证据可见。",
+      right: "右侧",
+      hidden: "隐藏"
+    },
+    searchScope: {
+      label: "搜索范围",
+      detail: "SQLite 标题/预览，以及本地 Codex 和 Claude JSONL 转录。"
+    },
+    searchLimit: { label: "搜索结果数量", detail: "命令栏搜索返回的最大匹配数。" },
+    resetUi: {
+      label: "重置 UI 设置",
+      detail: "恢复主题、密度、动画、检查器、字号、语言和搜索数量。"
+    },
+    theme: {
+      label: "主题",
+      graphite: "石墨",
+      blueprint: "蓝色",
+      contrast: "高对比",
+      midnight: "午夜",
+      detail: {
+        graphite: "中性石墨金属质感，使用冷色状态强调。",
+        blueprint: "深蓝色运行工作区。",
+        contrast: "最高对比度黑色界面。",
+        midnight: "接近黑色的专注主题，面板更克制。"
+      }
+    },
+    density: {
+      label: "密度",
+      detail: "控制进程和会话列表的行间距。",
+      compact: "紧凑",
+      comfortable: "舒适",
+      spacious: "宽松"
+    },
+    accent: { label: "强调色", detail: "改变选中栏、按钮和状态焦点颜色。" },
+    motion: {
+      label: "动画",
+      detail: "控制过渡、行进入、悬停抬升和加载动画。",
+      full: "完整",
+      reduced: "减少",
+      off: "关闭"
+    },
+    uiScale: {
+      label: "界面缩放",
+      detail: "改变全局界面字号。",
+      small: "小",
+      normal: "正常",
+      large: "大"
+    },
+    codeFont: { label: "代码字体", detail: "Cascadia Code" },
+    links: {
+      githubLabel: "打开 GitHub",
+      githubDetail: "公开仓库，用于 issues、actions 和 releases。",
+      readmeLabel: "打开 README",
+      readmeDetail: "项目概览、CLI 命令和桌面端说明。"
+    },
+    indexing: {
+      sqliteLabel: "SQLite 索引",
+      codexHomeLabel: "打开 Codex 目录",
+      rolloutLabel: "Rollout JSONL",
+      spawnEdgesLabel: "派生边",
+      spawnEdgesDetail: "thread_spawn_edges 父子关系图。",
+      pidSessionsLabel: "PID 会话",
+      claudeHomeLabel: "打开 Claude 目录",
+      transcriptsLabel: "转录"
+    },
+    runtime: {
+      win32Label: "Win32_Process",
+      win32Detail_one: "{{count}} 条相关行；PID、PPID、路径、命令行、创建时间。",
+      win32Detail_other: "{{count}} 条相关行；PID、PPID、路径、命令行、创建时间。",
+      windowTitlesLabel: "窗口标题",
+      windowTitlesDetail: "在 Windows 暴露时读取 Get-Process MainWindowTitle。",
+      candidatesLabel: "会话候选",
+      candidatesDetail_one: "{{count}} 个已索引会话，按 PID、cwd、转录、标题和时间证据评分。",
+      candidatesDetail_other: "{{count}} 个已索引会话，按 PID、cwd、转录、标题和时间证据评分。"
+    },
+    confidence: {
+      exactDetail: "Claude PID 文件或未来 hook 映射。",
+      heuristicDetail: "强路径/标题证据，并显示评分和原因。",
+      unknownDetail: "弱时间证据候选仍可显示，但不会当作匹配。"
+    },
+    diagnostics: {
+      warningsLabel: "诊断警告",
+      warningsDetail_one: "{{count}} 个警告，覆盖 Codex、Claude、SQLite、JSONL 和进程扫描。",
+      warningsDetail_other: "{{count}} 个警告，覆盖 Codex、Claude、SQLite、JSONL 和进程扫描。"
+    }
+  },
+  inspector: {
+    nothingTitle: "未选择内容",
+    nothingDetail: "选择一个进程或会话以检查证据。",
+    likelySessions: "可能的会话",
+    runtime: "运行时",
+    identity: "身份",
+    transcript: "转录",
+    relations: "关系",
+    evidence: "证据",
+    noEvidence: "没有附加证据。",
+    noCandidate: "没有候选会话。没有 PID、cwd、转录、标题或时间证据时，AgentScope 不会猜测。",
+    noCwdEvidence: "没有 cwd 证据",
+    fields: {
+      pid: "PID",
+      ppid: "PPID",
+      title: "标题",
+      started: "启动",
+      executable: "可执行文件",
+      command: "命令",
+      session: "会话",
+      confidence: "置信度",
+      status: "状态",
+      updated: "更新",
+      name: "名称",
+      path: "路径",
+      index: "索引",
+      parent: "父级",
+      children: "子级"
+    }
+  },
+  toast: {
+    snapshotCanceled: "已取消导出",
+    snapshotExported: "快照已导出：{{path}}",
+    externalOpened: "已打开 {{url}}",
+    externalBlocked: "已阻止外部 URL：{{url}}",
+    openFailed: "打开失败：{{message}}",
+    pathOpened: "已打开 {{path}}",
+    pathRevealed: "已定位 {{path}}"
+  }
+} satisfies ResourceTree;

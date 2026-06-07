@@ -2,6 +2,7 @@ import type { Diagnostic, ScopeSnapshot } from "@agentscope/shared";
 
 export interface AppInfo {
   userData: string;
+  locale: string;
   home: string;
   codexHome: string;
   claudeHome: string;

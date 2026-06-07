@@ -212,6 +212,7 @@ function appInfo() {
   const home = process.env.USERPROFILE || os.homedir();
   return {
     userData: app.getPath("userData"),
+    locale: app.getLocale(),
     home,
     codexHome: path.join(home, ".codex"),
     claudeHome: path.join(home, ".claude"),

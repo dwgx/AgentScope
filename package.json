@@ -13,9 +13,10 @@
   ],
   "scripts": {
     "dev": "npm --workspace @agentscope/desktop run dev",
-    "build": "npm --workspace @agentscope/shared run build && npm --workspace @agentscope/core run build && npm --workspace @agentscope/desktop run build",
+    "build": "npm --workspace @agentscope/shared run build && npm --workspace @agentscope/i18n run build && npm --workspace @agentscope/core run build && npm --workspace @agentscope/desktop run build",
     "test": "vitest run",
-    "typecheck": "npm --workspace @agentscope/shared run typecheck && npm --workspace @agentscope/core run typecheck && npm --workspace @agentscope/desktop run typecheck",
+    "typecheck": "npm --workspace @agentscope/shared run typecheck && npm --workspace @agentscope/i18n run typecheck && npm --workspace @agentscope/core run typecheck && npm --workspace @agentscope/desktop run typecheck",
+    "i18n:check": "npm --workspace @agentscope/i18n run build && npm --workspace @agentscope/i18n run check",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
     "electron:repair": "node scripts/repair-electron.mjs",
