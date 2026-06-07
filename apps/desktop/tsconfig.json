@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "jsx": "react-jsx",
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@agentscope/shared": ["../../packages/shared/src/index.ts"],
+      "@agentscope/core": ["../../packages/core/src/index.ts"]
+    }
+  },
+  "references": [{ "path": "../../packages/shared" }, { "path": "../../packages/core" }],
+  "include": ["src"],
+  "exclude": ["vite.renderer.config.ts"]
+}

@@ -1,0 +1,292 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0f1419;
+  color: #d7dee8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  height: 100vh;
+}
+
+.sidebar {
+  background: #151b22;
+  border-right: 1px solid #28313a;
+  padding: 18px 12px;
+}
+
+.brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.brand p {
+  margin: 2px 0 0;
+  color: #8d9aaa;
+  font-size: 12px;
+}
+
+.navButton,
+.iconButton,
+.searchbar button {
+  border: 1px solid #34404d;
+  background: #1d2630;
+  color: #d7dee8;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.navButton {
+  width: 100%;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  margin-bottom: 7px;
+}
+
+.navButton.active {
+  background: #263548;
+  border-color: #4c6b8f;
+}
+
+.workspace {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 64px;
+  border-bottom: 1px solid #28313a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+}
+
+.metrics {
+  display: flex;
+  gap: 10px;
+}
+
+.metric {
+  min-width: 112px;
+  border: 1px solid #303945;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #141b22;
+}
+
+.metric span {
+  color: #8d9aaa;
+  font-size: 12px;
+}
+
+.metric strong {
+  display: block;
+  font-size: 18px;
+}
+
+.metric.ok strong {
+  color: #82d49b;
+}
+
+.metric.warn strong {
+  color: #f1c56b;
+}
+
+.iconButton {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.searchbar {
+  margin: 14px 18px 0;
+  height: 42px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 92px;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #303945;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #111820;
+}
+
+.searchbar input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #d7dee8;
+}
+
+.searchbar button {
+  height: 30px;
+}
+
+.results {
+  margin: 10px 18px 0;
+  border: 1px solid #303945;
+  border-radius: 6px;
+  background: #121920;
+  max-height: 138px;
+  overflow: auto;
+}
+
+.result {
+  display: grid;
+  grid-template-columns: 72px 180px 160px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #25303a;
+}
+
+.content {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  gap: 14px;
+  padding: 14px 18px 18px;
+}
+
+.primary,
+.inspect {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #303945;
+  border-radius: 6px;
+  background: #111820;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+th,
+td {
+  border-bottom: 1px solid #25303a;
+  text-align: left;
+  padding: 8px 10px;
+  vertical-align: middle;
+  max-width: 360px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: #18212a;
+  color: #95a4b7;
+  font-weight: 600;
+  z-index: 1;
+}
+
+tbody tr {
+  cursor: pointer;
+}
+
+tbody tr:hover {
+  background: #182330;
+}
+
+.path,
+.mono {
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid #394758;
+  background: #1d2630;
+  color: #bfd0e4;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.badge.ok {
+  color: #9ae6b4;
+  border-color: #3c6f50;
+}
+
+.badge.warn {
+  color: #ffd98a;
+  border-color: #82642b;
+}
+
+.inspect {
+  padding: 12px;
+}
+
+.inspect h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.inspect pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #c5d2e3;
+}
+
+.graphList {
+  padding: 10px;
+}
+
+.relation {
+  display: grid;
+  grid-template-columns: 132px 180px 32px 180px 90px;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 8px;
+  border-bottom: 1px solid #25303a;
+}

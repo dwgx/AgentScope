@@ -1,0 +1,36 @@
+{
+  "name": "agentscope",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows-native control and trace layer for local AI coding agents.",
+  "type": "module",
+  "os": [
+    "win32"
+  ],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace @agentscope/desktop run dev",
+    "build": "npm --workspace @agentscope/shared run build && npm --workspace @agentscope/core run build && npm --workspace @agentscope/desktop run build",
+    "test": "vitest run",
+    "typecheck": "npm --workspace @agentscope/shared run typecheck && npm --workspace @agentscope/core run typecheck && npm --workspace @agentscope/desktop run typecheck",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write .",
+    "electron:repair": "node scripts/repair-electron.mjs",
+    "desktop": "npm --workspace @agentscope/desktop run dev",
+    "package": "npm --workspace @agentscope/desktop run package"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "@vitejs/plugin-react": "^5.1.0",
+    "eslint": "^9.39.1",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.0",
+    "vite": "^7.2.6",
+    "vitest": "^4.0.15"
+  }
+}
