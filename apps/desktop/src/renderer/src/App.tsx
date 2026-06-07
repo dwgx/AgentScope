@@ -23,7 +23,7 @@ import {
   Workflow,
   X
 } from "lucide-react";
-import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import type { CSSProperties, MouseEvent, ReactNode, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -105,6 +105,7 @@ interface NoticeItem {
   value: string;
   path?: string | undefined;
   tone?: "ok" | "warn" | undefined;
+  onClick?: (() => void) | undefined;
 }
 
 interface ConfirmState {
@@ -414,7 +415,7 @@ function App() {
     showNotice({ message: opened ? t("toast.externalOpened") : t("toast.externalBlocked"), detail: url });
   }
 
-  async function openPath(targetPath?: string) {
+  async function openPath(targetPath?: string): Promise<void> {
     if (!targetPath) return;
     const result = await window.agentscope.openPath(targetPath);
     showNotice(
@@ -428,12 +429,12 @@ function App() {
     );
   }
 
-  async function revealPath(targetPath?: string) {
+  async function revealPath(targetPath?: string): Promise<void> {
     if (!targetPath) return;
-    const revealed = await window.agentscope.revealPath(targetPath);
-    if (!revealed) {
+    const result = await window.agentscope.revealPath(targetPath);
+    if (result) {
       showNotice({
-        message: t("toast.operationFailed", { message: t("common.path.notAllowed") }),
+        message: t("toast.operationFailed", { message: result }),
         items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }]
       });
       return;
@@ -529,7 +530,7 @@ function App() {
         actions: noticePathActions(firstManifest),
         ttlMs: uniqueSessions.length > 1 ? 30000 : undefined
       });
-      if (firstManifest) await window.agentscope.revealPath(firstManifest);
+      if (firstManifest) await revealPath(firstManifest);
     } catch (error) {
       showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
     }
@@ -660,31 +661,50 @@ function App() {
             ? t("toast.sessionDeleted")
             : t("toast.sessionsDeleted", { count: results.length, total: targets.length }),
         items: [
-          ...results.flatMap(({ session, result }) => [
-            { label: `${displayTitle(session)} journal`, value: result.journalPath, path: result.journalPath, tone: "ok" as const },
-            { label: `${displayTitle(session)} quarantine`, value: result.quarantineDir, path: result.quarantineDir }
+          ...results.flatMap<NoticeItem>(({ session, result }) => [
+            {
+              label: `${displayTitle(session)} journal`,
+              value: result.journalPath,
+              path: result.journalPath,
+              onClick: () => void openPath(result.journalPath),
+              tone: "ok" as const
+            },
+            {
+              label: `${displayTitle(session)} quarantine`,
+              value: result.quarantineDir,
+              path: result.quarantineDir,
+              onClick: () => void openPath(result.quarantineDir)
+            }
           ]),
           ...failures
         ],
         actions: firstResult
           ? [
+              { label: t("common.action.openJournal"), onClick: () => void openPath(firstResult.journalPath) },
               { label: t("common.action.revealJournal"), onClick: () => void revealPath(firstResult.journalPath) },
               ...noticePathActions(firstResult.quarantineDir)
             ]
           : undefined,
         ttlMs: targets.length > 1 || failures.length ? 30000 : undefined
       });
-      if (firstResult) await window.agentscope.revealPath(firstResult.quarantineDir);
+      if (firstResult) await openPath(firstResult.quarantineDir);
       await refresh();
     } catch (error) {
       const journalPath = journalPathFromError(errorMessage(error));
       showNotice({
         message: t("toast.operationFailed", { message: errorMessage(error) }),
         items: [
-          ...(journalPath ? [{ label: "Journal", value: journalPath, path: journalPath, tone: "warn" } as NoticeItem] : []),
+          ...(journalPath
+            ? [{ label: "Journal", value: journalPath, path: journalPath, onClick: () => void openPath(journalPath), tone: "warn" } as NoticeItem]
+            : []),
           ...operationPathsFromError(errorMessage(error)).map((item) => ({ ...item, tone: "warn" as const }))
         ],
-        actions: journalPath ? [{ label: t("common.action.revealJournal"), onClick: () => void revealPath(journalPath) }] : undefined
+        actions: journalPath
+          ? [
+              { label: t("common.action.openJournal"), onClick: () => void openPath(journalPath) },
+              { label: t("common.action.revealJournal"), onClick: () => void revealPath(journalPath) }
+            ]
+          : undefined
       });
     }
   }
@@ -920,7 +940,7 @@ function App() {
           )}
         </div>
       </section>
-      {notice && <Notification notice={notice} onClose={() => setNotice(null)} />}
+      {notice && <Notification notice={notice} onClose={() => setNotice(null)} onRevealPath={revealPath} />}
       {confirmDialog && (
         <ConfirmDialog
           value={confirmDialog}
@@ -1602,9 +1622,9 @@ function ProcessContextMenu(props: {
   onSelectSession: (candidate: SessionCandidate) => void;
 }) {
   const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
   const candidates = (props.process.sessionCandidates ?? []).slice(0, 5);
-  const left = clampMenuCoordinate(props.x, window.innerWidth, 326);
-  const top = clampMenuCoordinate(props.y, window.innerHeight, 280);
+  const position = useMeasuredMenuPosition(menuRef, props.x, props.y, 326, 280);
   useEffect(() => {
     const close = () => props.onClose();
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1619,8 +1639,9 @@ function ProcessContextMenu(props: {
   }, [props]);
   return (
     <div
+      ref={menuRef}
       className="contextMenu"
-      style={{ left, top } as CSSProperties}
+      style={{ left: position.left, top: position.top } as CSSProperties}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <button onClick={props.onInspect}>{t("views.processes.context.inspect")}</button>
@@ -1928,10 +1949,10 @@ function SessionContextMenu(props: {
   onRevealTranscript: () => void;
 }) {
   const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
   const primary = props.sessions[0]!;
   const multi = props.sessions.length > 1;
-  const left = clampMenuCoordinate(props.x, window.innerWidth, 320);
-  const top = clampMenuCoordinate(props.y, window.innerHeight, 230);
+  const position = useMeasuredMenuPosition(menuRef, props.x, props.y, 320, 230);
   useEffect(() => {
     const close = () => props.onClose();
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1946,8 +1967,9 @@ function SessionContextMenu(props: {
   }, [props]);
   return (
     <div
+      ref={menuRef}
       className="contextMenu sessionContextMenu"
-      style={{ left, top } as CSSProperties}
+      style={{ left: position.left, top: position.top } as CSSProperties}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <span>
@@ -4452,7 +4474,7 @@ function errorMessage(error: unknown): string {
 }
 
 function journalPathFromError(message: string): string | undefined {
-  const match = /\bjournalPath=([^\r\n]+)/.exec(message);
+  const match = /\bjournalPath=([^\r\n]+?)(?=\s+(?:backupDir|quarantineDir|journalPath)=|$)/.exec(message);
   return match?.[1]?.trim();
 }
 
@@ -4504,6 +4526,36 @@ function clampMenuCoordinate(value: number, viewport: number, size: number): num
   return Math.max(8, Math.min(value, viewport - size - 8));
 }
 
+function useMeasuredMenuPosition(
+  ref: RefObject<HTMLElement | null>,
+  x: number,
+  y: number,
+  fallbackWidth: number,
+  fallbackHeight: number
+): { left: number; top: number } {
+  const [position, setPosition] = useState(() => ({
+    left: clampMenuCoordinate(x, window.innerWidth, fallbackWidth),
+    top: clampMenuCoordinate(y, window.innerHeight, fallbackHeight)
+  }));
+
+  useEffect(() => {
+    const update = () => {
+      const rect = ref.current?.getBoundingClientRect();
+      const width = rect?.width || fallbackWidth;
+      const height = rect?.height || fallbackHeight;
+      setPosition({
+        left: clampMenuCoordinate(x, window.innerWidth, width),
+        top: clampMenuCoordinate(y, window.innerHeight, height)
+      });
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [fallbackHeight, fallbackWidth, ref, x, y]);
+
+  return position;
+}
+
 function displayTitle(session: AgentSession) {
   const title = session.title || inferredSessionTitle(session) || short(session.sessionId);
   return title.length > 160 ? `${title.slice(0, 157)}...` : title;
@@ -4537,7 +4589,7 @@ function cleanTitle(value: string): string {
   return value.replaceAll("_", " ").replace(/\s+/g, " ").trim();
 }
 
-function Notification(props: { notice: NoticeState; onClose: () => void }) {
+function Notification(props: { notice: NoticeState; onClose: () => void; onRevealPath: (targetPath: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     setExpanded(false);
@@ -4564,8 +4616,8 @@ function Notification(props: { notice: NoticeState; onClose: () => void }) {
                 key={`${item.label ?? ""}:${item.value}:${index}`}
                 type="button"
                 className={`notificationItem ${item.tone ?? ""}`}
-                onClick={() => item.path && void window.agentscope.revealPath(item.path)}
-                disabled={!item.path}
+                onClick={item.onClick ?? (() => item.path && void props.onRevealPath(item.path))}
+                disabled={!item.path && !item.onClick}
                 title={item.value}
               >
                 {item.label && <span>{item.label}</span>}

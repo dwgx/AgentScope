@@ -31,7 +31,7 @@ export interface AgentScopeApi {
   quitApp(): Promise<boolean>;
   openExternal(url: string): Promise<boolean>;
   openPath(targetPath: string): Promise<string>;
-  revealPath(targetPath: string): Promise<boolean>;
+  revealPath(targetPath: string): Promise<string>;
   inspectPid(pid: number): Promise<Record<string, unknown>>;
   inspectSession(sessionId: string): Promise<Record<string, unknown>>;
   repairDiagnostic(name: string): Promise<{

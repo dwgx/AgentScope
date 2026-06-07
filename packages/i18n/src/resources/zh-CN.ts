@@ -14,6 +14,7 @@ export const zhCN = {
       clear: "清空",
       cancel: "取消",
       reveal: "定位",
+      openJournal: "打开 journal",
       revealJournal: "定位 journal",
       repair: "修复",
       restart: "重启",

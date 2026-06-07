@@ -15,6 +15,7 @@ export const enUS = {
       clear: "Clear",
       cancel: "Cancel",
       reveal: "Reveal",
+      openJournal: "Open journal",
       revealJournal: "Reveal journal",
       repair: "Repair",
       restart: "Restart",

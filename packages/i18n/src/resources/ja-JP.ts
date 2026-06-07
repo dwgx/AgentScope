@@ -14,6 +14,7 @@ export const jaJP = {
       clear: "消去",
       cancel: "キャンセル",
       reveal: "場所を表示",
+      openJournal: "journal を開く",
       revealJournal: "journal を表示",
       repair: "修復",
       restart: "再起動",

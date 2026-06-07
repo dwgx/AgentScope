@@ -172,7 +172,7 @@ export async function deleteSession(
   agent?: AgentKind,
   options: SessionOperationOptions = {}
 ): Promise<SessionDeleteResult> {
-  const session = await resolveSession(sessionId, agent, options.home, true);
+  const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses ?? true);
   const plan = await buildSessionPlan("delete", session, options);
   if (plan.blockers.length && !options.allowActive) {
     throw new Error(plan.blockers.join(" "));

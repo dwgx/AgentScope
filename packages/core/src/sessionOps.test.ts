@@ -175,6 +175,7 @@ describe("session operations", () => {
       deleteSession(sessionId, "codex", {
         home,
         outputRoot,
+        includeProcesses: false,
         now: new Date("2026-06-07T06:00:00Z")
       })
     ).rejects.toThrow(/backupDir=.*quarantineDir=.*journalPath=/);

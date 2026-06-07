@@ -14,6 +14,7 @@ export const koKR = {
       clear: "지우기",
       cancel: "취소",
       reveal: "위치 표시",
+      openJournal: "journal 열기",
       revealJournal: "journal 표시",
       repair: "수리",
       restart: "다시 시작",

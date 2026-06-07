@@ -100,12 +100,14 @@ ipcMain.handle("shell:openExternal", async (_event, url: string) => {
 });
 ipcMain.handle("shell:openPath", async (_event, targetPath: string) => {
   if (!(await isAllowedLocalPath(targetPath))) return "Path is not in AgentScope's local trace allowlist";
+  if (!fs.existsSync(targetPath)) return "Path does not exist";
   return shell.openPath(targetPath);
 });
 ipcMain.handle("shell:revealPath", async (_event, targetPath: string) => {
-  if (!(await isAllowedLocalPath(targetPath))) return false;
+  if (!(await isAllowedLocalPath(targetPath))) return "Path is not in AgentScope's local trace allowlist";
+  if (!fs.existsSync(targetPath)) return "Path does not exist";
   shell.showItemInFolder(targetPath);
-  return true;
+  return "";
 });
 ipcMain.handle("inspect:pid", async (_event, pid: number) => {
   const snapshot = await buildSnapshot();
