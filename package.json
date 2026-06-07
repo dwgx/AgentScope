@@ -20,8 +20,10 @@
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
     "electron:repair": "node scripts/repair-electron.mjs",
+    "native:rebuild": "node scripts/rebuild-native.mjs",
+    "native:restore": "node scripts/rebuild-native.mjs node",
     "desktop": "npm --workspace @agentscope/desktop run dev",
-    "package": "npm --workspace @agentscope/desktop run package"
+    "package": "node scripts/package-desktop.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

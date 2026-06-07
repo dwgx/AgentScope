@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { useTranslation } from "react-i18next";
 import type { LanguageSetting } from "@agentscope/i18n";
@@ -52,10 +53,13 @@ type DensityName = "compact" | "comfortable" | "spacious";
 type MotionName = "full" | "reduced" | "off";
 type FontMode = "language" | "unified" | "custom";
 type FontPreset = "windows" | "language" | "claude" | "japaneseTextbook" | "dense" | "custom";
+type ControlMode = "safe" | "readOnly";
 type StrongConfidence = "exact" | "indexed" | "heuristic";
 type ProcessSortMode = "time" | "memory" | "runtime" | "score" | "tree";
 type ProcessGroupMode = "agent" | "parent" | "cwd" | "none";
 type SessionGroupMode = "agent" | "cwd" | "parent" | "none";
+type RelationKindFilter = "all" | Relation["kind"];
+type RelationConfidenceFilter = "all" | Relation["confidence"];
 type SelectionKey =
   | { type: "session"; agent: AgentKind; id: string }
   | { type: "process"; pid: number }
@@ -91,7 +95,16 @@ interface NoticeState {
   id: number;
   message: string;
   detail?: string | undefined;
+  items?: NoticeItem[] | undefined;
   actions?: NoticeAction[] | undefined;
+  ttlMs?: number | undefined;
+}
+
+interface NoticeItem {
+  label?: string | undefined;
+  value: string;
+  path?: string | undefined;
+  tone?: "ok" | "warn" | undefined;
 }
 
 interface ConfirmState {
@@ -115,6 +128,8 @@ interface RelationEndpointDisplay {
   title: string;
   detail?: string;
   raw: string;
+  session?: AgentSession | undefined;
+  path?: string | undefined;
 }
 
 interface AppInfo {
@@ -139,6 +154,7 @@ interface AppSettings {
   runtimeWindowTitlesEnabled: boolean;
   runtimeCandidatesEnabled: boolean;
   defaultView: Exclude<View, "settings">;
+  controlMode: ControlMode;
   inspector: "right" | "hidden";
   fontScale: "small" | "normal" | "large";
   fontMode: FontMode;
@@ -154,6 +170,7 @@ interface AppSettings {
   suggestionsEnabled: boolean;
   transcriptPreviewEnabled: boolean;
   showUnknownCandidates: boolean;
+  notificationTtlMs: number;
 }
 
 const settingsKey = "agentscope.settings.v2";
@@ -167,6 +184,7 @@ const defaultSettings: AppSettings = {
   runtimeWindowTitlesEnabled: true,
   runtimeCandidatesEnabled: true,
   defaultView: "processes",
+  controlMode: "safe",
   inspector: "right",
   fontScale: "normal",
   fontMode: "language",
@@ -181,7 +199,8 @@ const defaultSettings: AppSettings = {
   searchLimit: 24,
   suggestionsEnabled: true,
   transcriptPreviewEnabled: true,
-  showUnknownCandidates: true
+  showUnknownCandidates: true,
+  notificationTtlMs: 12000
 };
 const themeValues: ThemeName[] = ["graphite", "blueprint", "contrast", "midnight"];
 const languageValues: LanguageSetting[] = ["system", "en-US", "zh-CN", "ja-JP", "ko-KR"];
@@ -193,6 +212,7 @@ const defaultViewValues: AppSettings["defaultView"][] = [
   "graph",
   "doctor"
 ];
+const controlModeValues: ControlMode[] = ["safe", "readOnly"];
 const inspectorValues: AppSettings["inspector"][] = ["right", "hidden"];
 const fontScaleValues: AppSettings["fontScale"][] = ["small", "normal", "large"];
 const fontModeValues: FontMode[] = ["language", "unified", "custom"];
@@ -233,6 +253,43 @@ function App() {
       saveSettings(next);
       return next;
     });
+  }
+
+  function resetAppearanceSettings() {
+    updateSettings({
+      theme: defaultSettings.theme,
+      density: defaultSettings.density,
+      motion: defaultSettings.motion,
+      accent: defaultSettings.accent,
+      fontScale: defaultSettings.fontScale,
+      fontMode: defaultSettings.fontMode,
+      fontPreset: defaultSettings.fontPreset,
+      unifiedFont: defaultSettings.unifiedFont,
+      latinFont: defaultSettings.latinFont,
+      chineseFont: defaultSettings.chineseFont,
+      japaneseFont: defaultSettings.japaneseFont,
+      koreanFont: defaultSettings.koreanFont,
+      codeFont: defaultSettings.codeFont,
+      uiLineHeight: defaultSettings.uiLineHeight
+    });
+    showNotice({ message: t("toast.settingsReset"), detail: t("settings.resetAppearance.detail") });
+  }
+
+  async function clearAppCache() {
+    try {
+      const result = await window.agentscope.clearCache();
+      showNotice({
+        message: t("toast.cacheCleared"),
+        items: result.directories.map((directory) => ({
+          label: t("common.path.directory"),
+          value: directory,
+          path: directory,
+          tone: "ok"
+        }))
+      });
+    } catch (error) {
+      showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+    }
   }
 
   function navigateView(nextView: View) {
@@ -363,44 +420,188 @@ function App() {
     showNotice(
       result
         ? { message: t("toast.openFailed", { message: result }) }
-        : { message: t("toast.pathOpened"), detail: targetPath, actions: noticePathActions(targetPath) }
+        : {
+            message: t("toast.pathOpened"),
+            items: [{ label: t("common.path.path"), value: targetPath, path: targetPath }],
+            actions: noticePathActions(targetPath)
+          }
     );
   }
 
   async function revealPath(targetPath?: string) {
     if (!targetPath) return;
-    await window.agentscope.revealPath(targetPath);
-    showNotice({ message: t("toast.pathRevealed"), detail: targetPath, actions: noticePathActions(targetPath) });
+    const revealed = await window.agentscope.revealPath(targetPath);
+    if (!revealed) {
+      showNotice({
+        message: t("toast.operationFailed", { message: t("common.path.notAllowed") }),
+        items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }]
+      });
+      return;
+    }
+    showNotice({
+      message: t("toast.pathRevealed"),
+      items: [{ label: t("common.path.path"), value: targetPath, path: targetPath }],
+      actions: noticePathActions(targetPath)
+    });
+  }
+
+  async function repairDiagnostic(name: string) {
+    try {
+      const result = await window.agentscope.repairDiagnostic(name);
+      showNotice({
+        message: result.ok ? t("toast.diagnosticRepairComplete") : t("toast.operationFailed", { message: result.message }),
+        detail: result.message,
+        items: [
+          ...result.directories.map((directory) => ({
+            label: t("common.path.directory"),
+            value: directory,
+            path: directory,
+            tone: result.ok ? "ok" as const : "warn" as const
+          })),
+          ...result.files.map((file) => ({
+            label: t("common.path.file"),
+            value: file,
+            path: file,
+            tone: result.ok ? "ok" as const : "warn" as const
+          }))
+        ],
+        actions: [
+          ...(result.directories[0] ? noticePathActions(result.directories[0]) : []),
+          ...(result.restartRequired ? [{ label: t("common.action.restart"), onClick: () => void window.agentscope.reloadApp() }] : [])
+        ],
+        ttlMs: 30000
+      });
+      await refresh();
+    } catch (error) {
+      showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+    }
   }
 
   async function backupSelectedSession(session: AgentSession) {
+    await backupSelectedSessions([session]);
+  }
+
+  async function backupSelectedSessions(targetSessions: AgentSession[]) {
+    if (settings.controlMode === "readOnly") {
+      showNotice({ message: t("toast.operationFailed", { message: t("settings.controlMode.readOnlyBlocked") }) });
+      return;
+    }
+    const uniqueSessions = uniqueSessionList(targetSessions);
+    if (!uniqueSessions.length) return;
     try {
-      const result = await window.agentscope.backupSession(session.agent, session.sessionId);
+      const results = [];
+      const failures: NoticeItem[] = [];
+      for (const session of uniqueSessions) {
+        try {
+          const result = await window.agentscope.backupSession(session.agent, session.sessionId);
+          results.push({ session, result });
+        } catch (error) {
+          failures.push({
+            label: displayTitle(session),
+            value: errorMessage(error),
+            tone: "warn"
+          });
+        }
+      }
+      const firstManifest = results[0]?.result.manifestPath;
+      if (!results.length) {
+        showNotice({
+          message: t("toast.operationFailed", { message: t("toast.noSessionsBackedUp") }),
+          items: failures,
+          ttlMs: 30000
+        });
+        return;
+      }
       showNotice({
-        message: t("toast.sessionBackedUp"),
-        detail: result.backupDir,
-        actions: noticePathActions(result.manifestPath)
+        message:
+          uniqueSessions.length === 1
+            ? t("toast.sessionBackedUp")
+            : t("toast.sessionsBackedUp", { count: results.length, total: uniqueSessions.length }),
+        items: [
+          ...results.map(({ session, result }) => ({
+            label: displayTitle(session),
+            value: result.manifestPath,
+            path: result.manifestPath,
+            tone: "ok" as const
+          })),
+          ...failures
+        ],
+        actions: noticePathActions(firstManifest),
+        ttlMs: uniqueSessions.length > 1 ? 30000 : undefined
       });
-      await window.agentscope.revealPath(result.manifestPath);
+      if (firstManifest) await window.agentscope.revealPath(firstManifest);
     } catch (error) {
       showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
     }
   }
 
   async function deleteSelectedSession(session: AgentSession) {
+    await deleteSelectedSessions([session]);
+  }
+
+  async function deleteSelectedSessions(targetSessions: AgentSession[]) {
+    if (settings.controlMode === "readOnly") {
+      showNotice({ message: t("toast.operationFailed", { message: t("settings.controlMode.readOnlyBlocked") }) });
+      return;
+    }
+    const uniqueSessions = uniqueSessionList(targetSessions);
+    if (!uniqueSessions.length) return;
     try {
-      const planResult = await window.agentscope.writeDeletePlan(session.agent, session.sessionId);
+      const planResults: Array<{ session: AgentSession; planResult: SessionOperationPlanResult }> = [];
+      const planFailures: NoticeItem[] = [];
+      for (const session of uniqueSessions) {
+        try {
+          const planResult = await window.agentscope.writeDeletePlan(session.agent, session.sessionId);
+          planResults.push({ session, planResult });
+        } catch (error) {
+          planFailures.push({
+            label: displayTitle(session),
+            value: errorMessage(error),
+            tone: "warn"
+          });
+        }
+      }
+      if (!planResults.length) {
+        showNotice({
+          message: t("toast.operationFailed", { message: t("toast.deletePlanUnavailable") }),
+          items: planFailures,
+          ttlMs: 30000
+        });
+        return;
+      }
+      if (planFailures.length) {
+        showNotice({
+          message: t("toast.deletePlanPartial", { count: planResults.length, total: uniqueSessions.length }),
+          items: planFailures,
+          ttlMs: 30000
+        });
+      }
+      const first = planResults[0]!;
       setConfirmDialog({
-        title: t("confirm.deleteSessionTitle"),
-        detail: t("confirm.deleteSession", {
-          title: displayTitle(session),
-          backupDir: planResult.backupDir ?? "",
-          quarantineDir: planResult.quarantineDir ?? "",
-          journalPath: planResult.journalPath ?? ""
-        }),
-        confirmLabel: t("inspector.actions.deleteSession"),
+        title:
+          planResults.length === 1
+            ? t("confirm.deleteSessionTitle")
+            : t("confirm.deleteSessionsTitle", { count: planResults.length }),
+        detail:
+          planResults.length === 1
+            ? t("confirm.deleteSession", {
+                title: displayTitle(first.session),
+                backupDir: first.planResult.backupDir ?? "",
+                quarantineDir: first.planResult.quarantineDir ?? "",
+                journalPath: first.planResult.journalPath ?? ""
+              })
+            : t("confirm.deleteSessions", {
+                count: planResults.length,
+                backupDir: first.planResult.backupDir ?? "",
+                quarantineDir: first.planResult.quarantineDir ?? "",
+                journalPath: first.planResult.journalPath ?? ""
+              }),
+        confirmLabel:
+          planResults.length === 1
+            ? t("inspector.actions.deleteSession")
+            : t("inspector.actions.deleteSessions", { count: planResults.length }),
         danger: true,
-        onConfirm: () => void executeDeleteSession(session, planResult)
+        onConfirm: () => void executeDeleteSessions(planResults)
       });
     } catch (error) {
       showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
@@ -408,29 +609,91 @@ function App() {
   }
 
   async function executeDeleteSession(session: AgentSession, planResult?: SessionOperationPlanResult) {
+    await executeDeleteSessions([{ session, planResult }]);
+  }
+
+  async function executeDeleteSessions(
+    targets: Array<{ session: AgentSession; planResult: SessionOperationPlanResult | undefined }>
+  ) {
     try {
-      const result = await window.agentscope.deleteSession(session.agent, session.sessionId, planResult?.plan.createdAt);
+      const results = [];
+      const failures: NoticeItem[] = [];
+      for (const target of targets) {
+        try {
+          const result = await window.agentscope.deleteSession(
+            target.session.agent,
+            target.session.sessionId,
+            target.planResult?.plan.createdAt
+          );
+          results.push({ session: target.session, result });
+        } catch (error) {
+          const message = errorMessage(error);
+          const journalPath = journalPathFromError(message);
+          failures.push({
+            label: displayTitle(target.session),
+            value: message,
+            ...(journalPath ? { path: journalPath } : {}),
+            tone: "warn"
+          });
+          failures.push(
+            ...operationPathsFromError(message).map((item) => ({
+              ...item,
+              label: item.label ?? displayTitle(target.session),
+              tone: "warn" as const
+            }))
+          );
+        }
+      }
+      const firstResult = results[0]?.result;
+      if (!results.length) {
+        showNotice({
+          message: t("toast.operationFailed", { message: t("toast.noSessionsDeleted") }),
+          items: failures,
+          ttlMs: 30000
+        });
+        await refresh();
+        return;
+      }
       showNotice({
-        message: t("toast.sessionDeleted"),
-        detail: result.journalPath,
-        actions: [
-          { label: t("common.action.revealJournal"), onClick: () => void window.agentscope.revealPath(result.journalPath) },
-          ...noticePathActions(result.quarantineDir)
-        ]
+        message:
+          targets.length === 1
+            ? t("toast.sessionDeleted")
+            : t("toast.sessionsDeleted", { count: results.length, total: targets.length }),
+        items: [
+          ...results.flatMap(({ session, result }) => [
+            { label: `${displayTitle(session)} journal`, value: result.journalPath, path: result.journalPath, tone: "ok" as const },
+            { label: `${displayTitle(session)} quarantine`, value: result.quarantineDir, path: result.quarantineDir }
+          ]),
+          ...failures
+        ],
+        actions: firstResult
+          ? [
+              { label: t("common.action.revealJournal"), onClick: () => void revealPath(firstResult.journalPath) },
+              ...noticePathActions(firstResult.quarantineDir)
+            ]
+          : undefined,
+        ttlMs: targets.length > 1 || failures.length ? 30000 : undefined
       });
-      await window.agentscope.revealPath(result.quarantineDir);
+      if (firstResult) await window.agentscope.revealPath(firstResult.quarantineDir);
       await refresh();
     } catch (error) {
       const journalPath = journalPathFromError(errorMessage(error));
       showNotice({
         message: t("toast.operationFailed", { message: errorMessage(error) }),
-        detail: journalPath,
-        actions: journalPath ? [{ label: t("common.action.revealJournal"), onClick: () => void window.agentscope.revealPath(journalPath) }] : undefined
+        items: [
+          ...(journalPath ? [{ label: "Journal", value: journalPath, path: journalPath, tone: "warn" } as NoticeItem] : []),
+          ...operationPathsFromError(errorMessage(error)).map((item) => ({ ...item, tone: "warn" as const }))
+        ],
+        actions: journalPath ? [{ label: t("common.action.revealJournal"), onClick: () => void revealPath(journalPath) }] : undefined
       });
     }
   }
 
   async function chooseImportSession() {
+    if (settings.controlMode === "readOnly") {
+      showNotice({ message: t("toast.operationFailed", { message: t("settings.controlMode.readOnlyBlocked") }) });
+      return;
+    }
     try {
       const result = await window.agentscope.chooseImportSession();
       if ("backupDir" in result) {
@@ -451,13 +714,14 @@ function App() {
   function noticePathActions(targetPath?: string): NoticeAction[] {
     if (!targetPath) return [];
     return [
-      { label: t("common.action.reveal"), onClick: () => void window.agentscope.revealPath(targetPath) },
+      { label: t("common.action.reveal"), onClick: () => void revealPath(targetPath) },
       { label: t("common.action.open"), onClick: () => void openPath(targetPath) }
     ];
   }
 
   function showNotice(next: Omit<NoticeState, "id">) {
-    setNotice({ id: Date.now(), ...next });
+    const { ttlMs, ...rest } = next;
+    setNotice({ id: Date.now(), ...rest, ttlMs: ttlMs ?? settings.notificationTtlMs });
   }
 
   const sessions = snapshot?.sessions ?? [];
@@ -487,7 +751,10 @@ function App() {
     }),
     [sessions, processes, matchedProcesses, doctor]
   );
-  const resetSettings = () => updateSettings(defaultSettings);
+  const resetSettings = () => {
+    updateSettings(defaultSettings);
+    showNotice({ message: t("toast.settingsReset"), detail: t("settings.resetUi.detail") });
+  };
   const suggestions = useMemo(
     () =>
       buildSearchSuggestions(view, selected, sessions, processes, relations, doctor, (key, options) =>
@@ -593,25 +860,46 @@ function App() {
                   setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId })
                 }
                 onBackupSession={(session) => void backupSelectedSession(session)}
+                onBackupSessions={(targetSessions) => void backupSelectedSessions(targetSessions)}
                 onDeleteSession={(session) => void deleteSelectedSession(session)}
+                onDeleteSessions={(targetSessions) => void deleteSelectedSessions(targetSessions)}
                 onRevealTranscript={(session) => void revealPath(session.transcriptPath)}
               />
             )}
             {view === "graph" && (
-            <RelationList relations={relations} sessions={sessions} loading={initialLoading} />
+              <RelationList
+                relations={relations}
+                sessions={sessions}
+                loading={initialLoading}
+                onSelectSession={(session) => {
+                  setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId });
+                  navigateView("sessions");
+                }}
+                onRevealPath={(targetPath) => void revealPath(targetPath)}
+              />
             )}
-            {view === "doctor" && <DoctorPanel checks={doctor} loading={initialLoading} />}
+            {view === "doctor" && (
+              <DoctorPanel
+                checks={doctor}
+                loading={initialLoading}
+                onRepair={(name) => void repairDiagnostic(name)}
+                onRevealPath={(targetPath) => void revealPath(targetPath)}
+              />
+            )}
             {view === "settings" && (
               <SettingsPanel
                 appInfo={appInfo}
                 settings={settings}
                 updateSettings={updateSettings}
                 resetSettings={resetSettings}
+                resetAppearance={resetAppearanceSettings}
+                clearCache={() => void clearAppCache()}
                 doctor={doctor}
                 processes={rawProcesses}
                 sessions={sessions}
                 installedFonts={installedFonts}
                 onOpenPath={(targetPath) => void openPath(targetPath)}
+                onRepairDiagnostic={(name) => void repairDiagnostic(name)}
                 onOpenExternal={(url) => void openExternal(url)}
               />
             )}
@@ -1224,7 +1512,8 @@ function ProcessList(props: {
           );
         })}
       </div>
-      {contextMenu && (
+      {contextMenu &&
+        createPortal(
         <ProcessContextMenu
           process={contextMenu.process}
           x={contextMenu.x}
@@ -1238,7 +1527,8 @@ function ProcessList(props: {
             props.onSelectSession(candidate);
             setContextMenu(null);
           }}
-        />
+        />,
+        document.body
       )}
     </>
   );
@@ -1389,15 +1679,19 @@ function SessionList(props: {
   onImportSession: () => void;
   onSelect: (session: AgentSession) => void;
   onBackupSession: (session: AgentSession) => void;
+  onBackupSessions: (sessions: AgentSession[]) => void;
   onDeleteSession: (session: AgentSession) => void;
+  onDeleteSessions: (sessions: AgentSession[]) => void;
   onRevealTranscript: (session: AgentSession) => void;
 }) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
   const [groupMode, setGroupMode] = useState<SessionGroupMode>("none");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [selectedSessionKeys, setSelectedSessionKeys] = useState<Set<string>>(() => new Set());
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{
-    session: AgentSession;
+    sessions: AgentSession[];
     x: number;
     y: number;
   } | null>(null);
@@ -1405,9 +1699,24 @@ function SessionList(props: {
     () => groupSessions(props.sessions, groupMode),
     [props.sessions, groupMode]
   );
+  const visibleSessions = useMemo(
+    () =>
+      groupMode === "none"
+        ? (groups[0]?.items ?? [])
+        : groups.flatMap((group) => (collapsed.has(group.key) ? [] : group.items)),
+    [collapsed, groupMode, groups]
+  );
+  const visibleSessionKeys = useMemo(() => visibleSessions.map(sessionKey), [visibleSessions]);
   const highlightedKey = props.highlightTarget
     ? `${props.highlightTarget.agent ?? ""}:${props.highlightTarget.sessionId ?? ""}`
     : undefined;
+  useEffect(() => {
+    setSelectedSessionKeys((current) => {
+      const available = new Set(visibleSessionKeys);
+      const next = new Set([...current].filter((key) => available.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleSessionKeys]);
   const toggleGroup = (key: string) => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -1415,6 +1724,34 @@ function SessionList(props: {
       else next.add(key);
       return next;
     });
+  };
+  const selectSession = (session: AgentSession, index: number, event?: MouseEvent<HTMLButtonElement>) => {
+    const key = sessionKey(session);
+    props.onSelect(session);
+    setSelectedSessionKeys((current) => {
+      if (event?.shiftKey && lastSelectedIndex !== null) {
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        return new Set(visibleSessions.slice(start, end + 1).map(sessionKey));
+      }
+      if (event?.ctrlKey || event?.metaKey) {
+        const next = new Set(current);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next.size ? next : new Set([key]);
+      }
+      return new Set([key]);
+    });
+    setLastSelectedIndex(index);
+  };
+  const contextSessions = (session: AgentSession, index: number): AgentSession[] => {
+    const key = sessionKey(session);
+    if (!selectedSessionKeys.has(key)) {
+      selectSession(session, index);
+      return [session];
+    }
+    const selected = visibleSessions.filter((item) => selectedSessionKeys.has(sessionKey(item)));
+    return selected.length ? selected : [session];
   };
   if (props.loading) return <LoadingState />;
   if (!props.sessions.length) {
@@ -1443,16 +1780,21 @@ function SessionList(props: {
       </div>
       <div className="rows">
         {groupMode === "none"
-          ? groups[0]?.items.map((session) => (
+          ? groups[0]?.items.map((session, index) => (
               <SessionRow
                 key={`${session.agent}:${session.sessionId}`}
                 session={session}
                 selected={props.selectedKey === sessionKey(session)}
+                multiSelected={selectedSessionKeys.has(sessionKey(session))}
                 highlighted={highlightedKey === sessionKey(session)}
                 locale={locale}
-                onSelect={() => props.onSelect(session)}
+                onSelect={(event) => selectSession(session, index, event)}
                 onContextMenu={(event) =>
-                  setContextMenu({ session, x: event.clientX, y: event.clientY })
+                  setContextMenu({
+                    sessions: contextSessions(session, index),
+                    x: event.clientX,
+                    y: event.clientY
+                  })
                 }
               />
             ))
@@ -1466,42 +1808,54 @@ function SessionList(props: {
                 <span>{t("views.sessions.groupCount", { count: group.items.length })}</span>
               </button>
               {!isCollapsed &&
-                group.items.map((session) => (
-                  <SessionRow
-                    key={`${session.agent}:${session.sessionId}`}
-                    session={session}
-                    selected={props.selectedKey === sessionKey(session)}
-                    highlighted={highlightedKey === sessionKey(session)}
-                    locale={locale}
-                    onSelect={() => props.onSelect(session)}
-                    onContextMenu={(event) =>
-                      setContextMenu({ session, x: event.clientX, y: event.clientY })
-                    }
-                  />
-                ))}
+                group.items.map((session) => {
+                  const index = visibleSessions.findIndex((item) => sessionKey(item) === sessionKey(session));
+                  return (
+                    <SessionRow
+                      key={`${session.agent}:${session.sessionId}`}
+                      session={session}
+                      selected={props.selectedKey === sessionKey(session)}
+                      multiSelected={selectedSessionKeys.has(sessionKey(session))}
+                      highlighted={highlightedKey === sessionKey(session)}
+                      locale={locale}
+                      onSelect={(event) => selectSession(session, index, event)}
+                      onContextMenu={(event) =>
+                        setContextMenu({
+                          sessions: contextSessions(session, index),
+                          x: event.clientX,
+                          y: event.clientY
+                        })
+                      }
+                    />
+                  );
+                })}
             </section>
           );
         })}
       </div>
-      {contextMenu && (
+      {contextMenu &&
+        createPortal(
         <SessionContextMenu
-          session={contextMenu.session}
+          sessions={contextMenu.sessions}
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={() => setContextMenu(null)}
           onBackup={() => {
-            props.onBackupSession(contextMenu.session);
+            if (contextMenu.sessions.length === 1) props.onBackupSession(contextMenu.sessions[0]!);
+            else props.onBackupSessions(contextMenu.sessions);
             setContextMenu(null);
           }}
           onDelete={() => {
-            props.onDeleteSession(contextMenu.session);
+            if (contextMenu.sessions.length === 1) props.onDeleteSession(contextMenu.sessions[0]!);
+            else props.onDeleteSessions(contextMenu.sessions);
             setContextMenu(null);
           }}
           onRevealTranscript={() => {
-            props.onRevealTranscript(contextMenu.session);
+            props.onRevealTranscript(contextMenu.sessions[0]!);
             setContextMenu(null);
           }}
-        />
+        />,
+        document.body
       )}
     </>
   );
@@ -1510,9 +1864,10 @@ function SessionList(props: {
 function SessionRow(props: {
   session: AgentSession;
   selected: boolean;
+  multiSelected: boolean;
   highlighted: boolean;
   locale?: string;
-  onSelect: () => void;
+  onSelect: (event: MouseEvent<HTMLButtonElement>) => void;
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { t } = useTranslation();
@@ -1525,7 +1880,9 @@ function SessionRow(props: {
   return (
     <button
       ref={rowRef}
-      className={`sessionRow ${props.selected ? "selected" : ""} ${props.highlighted ? "highlighted" : ""}`}
+      className={`sessionRow ${props.selected ? "selected" : ""} ${props.multiSelected ? "multiSelected" : ""} ${
+        props.highlighted ? "highlighted" : ""
+      }`}
       onClick={props.onSelect}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -1562,7 +1919,7 @@ function SessionRow(props: {
 }
 
 function SessionContextMenu(props: {
-  session: AgentSession;
+  sessions: AgentSession[];
   x: number;
   y: number;
   onClose: () => void;
@@ -1571,7 +1928,9 @@ function SessionContextMenu(props: {
   onRevealTranscript: () => void;
 }) {
   const { t } = useTranslation();
-  const left = clampMenuCoordinate(props.x, window.innerWidth, 300);
+  const primary = props.sessions[0]!;
+  const multi = props.sessions.length > 1;
+  const left = clampMenuCoordinate(props.x, window.innerWidth, 320);
   const top = clampMenuCoordinate(props.y, window.innerHeight, 230);
   useEffect(() => {
     const close = () => props.onClose();
@@ -1591,26 +1950,45 @@ function SessionContextMenu(props: {
       style={{ left, top } as CSSProperties}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <span>{displayTitle(props.session)}</span>
+      <span>
+        {multi ? t("views.sessions.context.selectedCount", { count: props.sessions.length }) : displayTitle(primary)}
+      </span>
       <button onClick={props.onBackup}>
         <Download size={15} />
-        <strong>{t("inspector.actions.backupSession")}</strong>
+        <strong>
+          {multi ? t("inspector.actions.backupSessions", { count: props.sessions.length }) : t("inspector.actions.backupSession")}
+        </strong>
       </button>
-      <button disabled={!props.session.transcriptPath} onClick={props.onRevealTranscript}>
+      <button disabled={multi || !primary.transcriptPath} onClick={props.onRevealTranscript}>
         <FolderOpen size={15} />
         <strong>{t("inspector.actions.revealTranscript")}</strong>
       </button>
       <div className="menuDivider" />
       <button className="dangerItem" onClick={props.onDelete}>
         <AlertTriangle size={15} />
-        <strong>{t("inspector.actions.deleteSession")}</strong>
+        <strong>
+          {multi ? t("inspector.actions.deleteSessions", { count: props.sessions.length }) : t("inspector.actions.deleteSession")}
+        </strong>
       </button>
     </div>
   );
 }
 
-function RelationList(props: { relations: Relation[]; sessions: AgentSession[]; loading: boolean }) {
+function RelationList(props: {
+  relations: Relation[];
+  sessions: AgentSession[];
+  loading: boolean;
+  onSelectSession: (session: AgentSession) => void;
+  onRevealPath: (targetPath: string) => void;
+}) {
   const { t } = useTranslation();
+  const [kindFilter, setKindFilter] = useState<RelationKindFilter>("all");
+  const [confidenceFilter, setConfidenceFilter] = useState<RelationConfidenceFilter>("all");
+  const [relationQuery, setRelationQuery] = useState("");
+  const filteredRelations = useMemo(
+    () => filterRelations(props.relations, props.sessions, kindFilter, confidenceFilter, relationQuery),
+    [confidenceFilter, kindFilter, props.relations, props.sessions, relationQuery]
+  );
   if (props.loading) return <LoadingState />;
   if (!props.relations.length) {
     return (
@@ -1625,10 +2003,37 @@ function RelationList(props: { relations: Relation[]; sessions: AgentSession[]; 
     <>
       <PaneHeader
         title={t("nav.relations")}
-        subtitle={t("views.relations.subtitle", { count: props.relations.length })}
+        subtitle={t("views.relations.subtitle", { count: filteredRelations.length })}
       />
+      <div className="listToolbar relationToolbar">
+        <ToolbarControl label={t("views.relations.filter.kind")}>
+          <MiniSegmentedControl
+            value={kindFilter}
+            values={["all", "parent_child", "process_parent", "transcript", "subagent"]}
+            label={(value) => (value === "all" ? t("views.relations.filter.all") : t(`relations.kind.${value}`))}
+            onChange={setKindFilter}
+          />
+        </ToolbarControl>
+        <ToolbarControl label={t("views.relations.filter.confidence")}>
+          <MiniSegmentedControl
+            value={confidenceFilter}
+            values={["all", "exact", "indexed", "heuristic", "unknown"]}
+            label={(value) => (value === "all" ? t("views.relations.filter.all") : t(`common.confidence.${value}`))}
+            onChange={setConfidenceFilter}
+          />
+        </ToolbarControl>
+        <div className="relationSearch">
+          <Search size={14} />
+          <input
+            value={relationQuery}
+            onChange={(event) => setRelationQuery(event.target.value)}
+            placeholder={t("views.relations.filter.search")}
+            spellCheck={false}
+          />
+        </div>
+      </div>
       <div className="relationList">
-        {props.relations.map((relation, index) => {
+        {filteredRelations.map((relation, index) => {
           const sourceLabel = t(`relations.endpoint.${relation.kind}.source`);
           const targetLabel = t(`relations.endpoint.${relation.kind}.target`);
           const source = relationEndpointDisplay(props.sessions, relation, "source", sourceLabel);
@@ -1636,17 +2041,33 @@ function RelationList(props: { relations: Relation[]; sessions: AgentSession[]; 
           return (
             <div
               className="relationItem"
-              key={`${relation.kind}:${relation.sourceId}:${relation.targetId}:${index}`}
+                key={`${relation.kind}:${relation.sourceId}:${relation.targetId}:${index}`}
             >
               <div className="relationKind">
                 <Badge text={t(`relations.kind.${relation.kind}`)} />
               </div>
-              <RelationEndpoint label={sourceLabel} endpoint={source} />
+              <RelationEndpoint
+                label={sourceLabel}
+                endpoint={source}
+                onSelectSession={props.onSelectSession}
+                onRevealPath={props.onRevealPath}
+              />
               <span className="arrow">{"->"}</span>
-              <RelationEndpoint label={targetLabel} endpoint={target} />
+              <RelationEndpoint
+                label={targetLabel}
+                endpoint={target}
+                onSelectSession={props.onSelectSession}
+                onRevealPath={props.onRevealPath}
+              />
               <ConfidenceBadge value={relation.confidence} />
               <div className="relationEvidence">
-                {relation.evidence[0]?.source ?? t("inspector.noEvidence")}
+                {relation.evidence.slice(0, 3).map((item, evidenceIndex) => (
+                  <span key={`${item.source}:${item.path}:${evidenceIndex}`}>
+                    <strong>{item.source}</strong>
+                    {item.path ? <em className="mono">{item.path}</em> : item.detail}
+                  </span>
+                ))}
+                {!relation.evidence.length && t("inspector.noEvidence")}
               </div>
             </div>
           );
@@ -1656,9 +2077,15 @@ function RelationList(props: { relations: Relation[]; sessions: AgentSession[]; 
   );
 }
 
-function RelationEndpoint(props: { label: string; endpoint: RelationEndpointDisplay }) {
-  return (
-    <div className="relationEndpoint">
+function RelationEndpoint(props: {
+  label: string;
+  endpoint: RelationEndpointDisplay;
+  onSelectSession: (session: AgentSession) => void;
+  onRevealPath: (targetPath: string) => void;
+}) {
+  const clickable = props.endpoint.session || props.endpoint.path;
+  const body = (
+    <>
       <span>{props.label}</span>
       <strong title={props.endpoint.raw}>{props.endpoint.title}</strong>
       {props.endpoint.detail && (
@@ -1666,11 +2093,35 @@ function RelationEndpoint(props: { label: string; endpoint: RelationEndpointDisp
           {props.endpoint.detail}
         </em>
       )}
+    </>
+  );
+  if (clickable) {
+    return (
+      <button
+        className="relationEndpoint relationEndpointButton"
+        type="button"
+        onClick={() => {
+          if (props.endpoint.session) props.onSelectSession(props.endpoint.session);
+          else if (props.endpoint.path) props.onRevealPath(props.endpoint.path);
+        }}
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className="relationEndpoint">
+      {body}
     </div>
   );
 }
 
-function DoctorPanel(props: { checks: Diagnostic[]; loading: boolean }) {
+function DoctorPanel(props: {
+  checks: Diagnostic[];
+  loading: boolean;
+  onRepair: (name: string) => void;
+  onRevealPath: (targetPath: string) => void;
+}) {
   const { t } = useTranslation();
   if (props.loading) return <LoadingState />;
   if (!props.checks.length) {
@@ -1696,7 +2147,19 @@ function DoctorPanel(props: { checks: Diagnostic[]; loading: boolean }) {
               <strong>{check.name}</strong>
               <span>{check.detail}</span>
             </div>
-            <Badge text={check.status} tone={check.status === "ok" ? "ok" : "warn"} />
+            <div className="doctorActions">
+              {check.status === "warn" && repairableDiagnostic(check.name) && (
+                <button type="button" onClick={() => props.onRepair(check.name)}>
+                  {t("common.action.repair")}
+                </button>
+              )}
+              {firstPathInText(check.detail) && (
+                <button type="button" onClick={() => props.onRevealPath(firstPathInText(check.detail)!)}>
+                  {t("common.action.reveal")}
+                </button>
+              )}
+              <Badge text={check.status} tone={check.status === "ok" ? "ok" : "warn"} />
+            </div>
           </div>
         ))}
       </div>
@@ -1709,11 +2172,14 @@ function SettingsPanel(props: {
   settings: AppSettings;
   updateSettings: (patch: Partial<AppSettings>) => void;
   resetSettings: () => void;
+  resetAppearance: () => void;
+  clearCache: () => void;
   doctor: Diagnostic[];
   processes: AgentProcess[];
   sessions: AgentSession[];
   installedFonts: string[];
   onOpenPath: (targetPath?: string) => void;
+  onRepairDiagnostic: (name: string) => void;
   onOpenExternal: (url: string) => void;
 }) {
   const { t } = useTranslation();
@@ -1781,7 +2247,14 @@ function SettingsPanel(props: {
                   label={t("settings.controlMode.label")}
                   detail={t("settings.controlMode.detail")}
                 >
-                  <Badge text={t("common.status.readOnly")} />
+                  <SegmentedControl
+                    value={props.settings.controlMode}
+                    values={[
+                      ["safe", t("settings.controlMode.safe")],
+                      ["readOnly", t("settings.controlMode.readOnly")]
+                    ]}
+                    onChange={(value) => props.updateSettings({ controlMode: value as ControlMode })}
+                  />
                 </SettingRow>
                 <SettingRow
                   label={t("settings.defaultView.label")}
@@ -1836,6 +2309,20 @@ function SettingsPanel(props: {
                   />
                 </SettingRow>
                 <SettingRow
+                  label={t("settings.notifications.label")}
+                  detail={t("settings.notifications.detail")}
+                >
+                  <SegmentedControl
+                    value={String(props.settings.notificationTtlMs)}
+                    values={[
+                      ["8000", "8s"],
+                      ["12000", "12s"],
+                      ["30000", "30s"]
+                    ]}
+                    onChange={(value) => props.updateSettings({ notificationTtlMs: Number(value) })}
+                  />
+                </SettingRow>
+                <SettingRow
                   label={t("settings.suggestions.label")}
                   detail={t("settings.suggestions.detail")}
                 >
@@ -1874,6 +2361,12 @@ function SettingsPanel(props: {
                   detail={t("settings.resetUi.detail")}
                 >
                   <ActionButton label={t("common.action.reset")} onClick={props.resetSettings} />
+                </SettingRow>
+                <SettingRow
+                  label={t("settings.clearCache.label")}
+                  detail={t("settings.clearCache.detail")}
+                >
+                  <ActionButton label={t("common.action.clear")} onClick={props.clearCache} />
                 </SettingRow>
               </SettingGroup>
             </>
@@ -1926,6 +2419,12 @@ function SettingsPanel(props: {
                     ]}
                     onChange={(value) => props.updateSettings({ motion: value as MotionName })}
                   />
+                </SettingRow>
+                <SettingRow
+                  label={t("settings.resetAppearance.label")}
+                  detail={t("settings.resetAppearance.detail")}
+                >
+                  <ActionButton label={t("common.action.reset")} onClick={props.resetAppearance} />
                 </SettingRow>
               </SettingGroup>
               <SettingGroup title={t("settings.sections.typography")}>
@@ -2209,7 +2708,12 @@ function SettingsPanel(props: {
               </SettingRow>
               {props.doctor.map((check) => (
                 <SettingRow key={check.name} label={check.name} detail={check.detail}>
-                  <Badge text={check.status} tone={check.status === "ok" ? "ok" : "warn"} />
+                  <div className="settingInlineActions">
+                    {check.status === "warn" && repairableDiagnostic(check.name) && (
+                      <ActionButton label={t("common.action.repair")} onClick={() => props.onRepairDiagnostic(check.name)} />
+                    )}
+                    <Badge text={check.status} tone={check.status === "ok" ? "ok" : "warn"} />
+                  </div>
                 </SettingRow>
               ))}
             </SettingGroup>
@@ -2303,12 +2807,20 @@ function FontSettingRow(props: {
   label: string;
   detail: string;
   value: string;
+  defaultValue?: string | undefined;
   fonts: string[];
   onChange: (value: string) => void;
 }) {
   return (
     <SettingRow label={props.label} detail={props.detail}>
-      <FontComboBox value={props.value} fonts={props.fonts} onChange={props.onChange} />
+      <div className="fontSettingControl">
+        <FontComboBox value={props.value} fonts={props.fonts} onChange={props.onChange} />
+        {props.defaultValue && props.value !== props.defaultValue && (
+          <button type="button" className="iconTextButton" onClick={() => props.onChange(props.defaultValue!)}>
+            <RefreshCw size={13} />
+          </button>
+        )}
+      </div>
     </SettingRow>
   );
 }
@@ -2324,12 +2836,16 @@ function FontComboBox(props: {
   const comboRef = useRef<HTMLDivElement | null>(null);
   const options = useMemo(() => {
     const query = filter.trim().toLowerCase();
-    return fontOptions(props.fonts)
-      .filter((font) => !query || font.toLowerCase().includes(query))
-      .slice(0, 12);
-  }, [filter, props.fonts]);
+    const all = fontOptions(props.fonts, props.value);
+    const filtered = all.filter((font) => !query || font.toLowerCase().includes(query));
+    if (query || filtered.includes(props.value)) return filtered.slice(0, 18);
+    return [props.value, ...filtered.filter((font) => font !== props.value).slice(0, 17)];
+  }, [filter, props.fonts, props.value]);
 
-  useEffect(() => setHighlightedIndex(0), [filter, open]);
+  useEffect(() => {
+    const currentIndex = options.findIndex((font) => font === props.value);
+    setHighlightedIndex(currentIndex >= 0 ? currentIndex : 0);
+  }, [filter, open, options, props.value]);
   useEffect(() => {
     if (!open) return undefined;
     const close = (event: PointerEvent) => {
@@ -2442,7 +2958,7 @@ function TypographyPreviewClean(props: { settings: AppSettings }) {
   );
 }
 
-function fontOptions(installedFonts: string[]): string[] {
+function fontOptions(installedFonts: string[], current?: string): string[] {
   const preferred = [
     "Segoe UI Variable Text",
     "Segoe UI",
@@ -2469,9 +2985,20 @@ function fontOptions(installedFonts: string[]): string[] {
     "Consolas",
     "SFMono-Regular"
   ];
-  return [...new Set([...preferred, ...installedFonts])].sort((left, right) =>
-    left.localeCompare(right)
-  );
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (font: string | undefined) => {
+    const cleaned = font?.trim();
+    if (!cleaned) return;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(cleaned);
+  };
+  add(current);
+  for (const font of preferred) add(font);
+  for (const font of [...installedFonts].sort((left, right) => left.localeCompare(right))) add(font);
+  return out;
 }
 
 function fontPresetSettings(preset: FontPreset): Partial<AppSettings> {
@@ -3522,6 +4049,18 @@ function sessionKey(session: AgentSession): string {
   return `${session.agent}:${session.sessionId}`;
 }
 
+function uniqueSessionList(sessions: AgentSession[]): AgentSession[] {
+  const seen = new Set<string>();
+  const out: AgentSession[] = [];
+  for (const session of sessions) {
+    const key = sessionKey(session);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(session);
+  }
+  return out;
+}
+
 function candidateTitle(candidate: SessionCandidate) {
   return candidate.title || short(candidate.sessionId);
 }
@@ -3663,7 +4202,8 @@ function relationEndpointDisplay(
     return {
       title: displayTitle(session),
       detail: session.cwd || short(session.sessionId),
-      raw: session.sessionId
+      raw: session.sessionId,
+      session
     };
   }
 
@@ -3671,7 +4211,8 @@ function relationEndpointDisplay(
     return {
       title: id.split("\\").pop() || label,
       detail: short(id),
-      raw: id
+      raw: id,
+      path: id
     };
   }
 
@@ -3681,6 +4222,37 @@ function relationEndpointDisplay(
     ...(fallbackDetail ? { detail: fallbackDetail } : {}),
     raw: id
   };
+}
+
+function filterRelations(
+  relations: Relation[],
+  sessions: AgentSession[],
+  kindFilter: RelationKindFilter,
+  confidenceFilter: RelationConfidenceFilter,
+  query: string
+): Relation[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  return relations.filter((relation) => {
+    if (kindFilter !== "all" && relation.kind !== kindFilter) return false;
+    if (confidenceFilter !== "all" && relation.confidence !== confidenceFilter) return false;
+    if (!normalizedQuery) return true;
+    const sourceSession = sessions.find((session) => session.sessionId === relation.sourceId);
+    const targetSession = sessions.find((session) => session.sessionId === relation.targetId);
+    const haystack = [
+      relation.kind,
+      relation.confidence,
+      relation.sourceId,
+      relation.targetId,
+      sourceSession ? displayTitle(sourceSession) : "",
+      sourceSession?.cwd ?? "",
+      targetSession ? displayTitle(targetSession) : "",
+      targetSession?.cwd ?? "",
+      ...relation.evidence.flatMap((item) => [item.source, item.detail, item.path ?? "", item.field ?? ""])
+    ]
+      .join("\n")
+      .toLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
 }
 
 function searchResultTitle(result: Record<string, unknown>): string {
@@ -3884,6 +4456,29 @@ function journalPathFromError(message: string): string | undefined {
   return match?.[1]?.trim();
 }
 
+function operationPathsFromError(message: string): NoticeItem[] {
+  return ["backupDir", "quarantineDir", "journalPath"].flatMap((label) => {
+    const match = new RegExp(`\\b${label}=([^\\r\\n]+?)(?=\\s+(?:backupDir|quarantineDir|journalPath)=|$)`).exec(message);
+    const value = match?.[1]?.trim();
+    return value ? [{ label, value, path: value }] : [];
+  });
+}
+
+function firstPathInText(value: string): string | undefined {
+  const match = /([A-Za-z]:\\[^\r\n]+|\\\\[^ \r\n]+)/.exec(value);
+  return match?.[1]?.trim().replace(/[)'".,;]+$/, "");
+}
+
+function repairableDiagnostic(name: string): boolean {
+  return [
+    "native.better_sqlite3",
+    "codex.sqlite.readable",
+    "codex.logs.tables",
+    "codex.goals.tables",
+    "codex.memories.tables"
+  ].includes(name);
+}
+
 function formatDuration(startTime: string, locale?: string): string {
   const start = parseDate(startTime);
   if (!start) return "";
@@ -3943,15 +4538,47 @@ function cleanTitle(value: string): string {
 }
 
 function Notification(props: { notice: NoticeState; onClose: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
-    const timer = window.setTimeout(props.onClose, 7800);
+    setExpanded(false);
+  }, [props.notice.id]);
+  useEffect(() => {
+    const timer = window.setTimeout(props.onClose, props.notice.ttlMs ?? 8000);
     return () => window.clearTimeout(timer);
-  }, [props.notice.id, props.onClose]);
+  }, [props.notice.id, props.notice.ttlMs, props.onClose]);
+  const items = props.notice.items
+    ? [...(props.notice.detail ? [{ value: props.notice.detail }] : []), ...props.notice.items]
+    : props.notice.detail
+      ? [{ value: props.notice.detail }]
+      : [];
+  const visibleItems = expanded ? items : items.slice(0, 3);
+  const hasMore = items.length > visibleItems.length;
   return (
-    <section className="notification" role="status" aria-live="polite">
-      <div>
+    <section className={`notification ${expanded ? "expanded" : ""}`} role="status" aria-live="polite">
+      <div className="notificationBody">
         <strong>{props.notice.message}</strong>
-        {props.notice.detail && <span className="mono">{props.notice.detail}</span>}
+        {visibleItems.length ? (
+          <div className="notificationItems">
+            {visibleItems.map((item, index) => (
+              <button
+                key={`${item.label ?? ""}:${item.value}:${index}`}
+                type="button"
+                className={`notificationItem ${item.tone ?? ""}`}
+                onClick={() => item.path && void window.agentscope.revealPath(item.path)}
+                disabled={!item.path}
+                title={item.value}
+              >
+                {item.label && <span>{item.label}</span>}
+                <em className="mono">{item.value}</em>
+              </button>
+            ))}
+            {hasMore && (
+              <button className="notificationMore" type="button" onClick={() => setExpanded(true)}>
+                {`+${items.length - visibleItems.length}`}
+              </button>
+            )}
+          </div>
+        ) : null}
       </div>
       {props.notice.actions?.length ? (
         <div className="notificationActions">
@@ -4039,6 +4666,7 @@ function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
       defaultSettings.runtimeCandidatesEnabled
     ),
     defaultView: pickEnum(settings.defaultView, defaultViewValues, defaultSettings.defaultView),
+    controlMode: pickEnum(settings.controlMode, controlModeValues, defaultSettings.controlMode),
     inspector: pickEnum(settings.inspector, inspectorValues, defaultSettings.inspector),
     fontScale: pickEnum(settings.fontScale, fontScaleValues, defaultSettings.fontScale),
     fontMode: pickEnum(settings.fontMode, fontModeValues, defaultSettings.fontMode),
@@ -4059,6 +4687,12 @@ function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     showUnknownCandidates: pickBoolean(
       settings.showUnknownCandidates,
       defaultSettings.showUnknownCandidates
+    ),
+    notificationTtlMs: clampNumber(
+      settings.notificationTtlMs,
+      8000,
+      30000,
+      defaultSettings.notificationTtlMs
     )
   };
 }

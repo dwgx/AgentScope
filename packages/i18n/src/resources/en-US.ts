@@ -16,6 +16,8 @@ export const enUS = {
       cancel: "Cancel",
       reveal: "Reveal",
       revealJournal: "Reveal journal",
+      repair: "Repair",
+      restart: "Restart",
       show: "Show",
       hide: "Hide"
     },
@@ -48,7 +50,11 @@ export const enUS = {
       noCommandLine: "No command line",
       noPathEvidence: "No path evidence",
       noPath: "No path",
-      loading: "Loading path"
+      loading: "Loading path",
+      path: "Path",
+      directory: "Directory",
+      file: "File",
+      notAllowed: "Path is not in AgentScope's local trace allowlist"
     }
   },
   nav: {
@@ -182,6 +188,9 @@ export const enUS = {
       groupCount_other: "{{count}} sessions",
       children_one: "{{count}} child",
       children_other: "{{count}} children",
+      context: {
+        selectedCount: "{{count}} sessions selected"
+      },
       group: {
         cwd: "cwd",
         parent: "Parent",
@@ -193,7 +202,13 @@ export const enUS = {
       emptyTitle: "No relations found",
       emptyDetail: "Codex spawn edges or process relations will appear here when indexed.",
       subtitle_one: "{{count}} session/process graph edge",
-      subtitle_other: "{{count}} session/process graph edges"
+      subtitle_other: "{{count}} session/process graph edges",
+      filter: {
+        kind: "Kind",
+        confidence: "Confidence",
+        all: "All",
+        search: "Filter sessions, paths, evidence"
+      }
     },
     doctor: {
       emptyTitle: "Doctor has not run",
@@ -233,7 +248,10 @@ export const enUS = {
     },
     controlMode: {
       label: "Control mode",
-      detail: "Read-only; control actions stay suggested until explicit force options exist."
+      detail: "Safe mode allows backed-up session controls; read-only blocks backup, delete, import, and repair actions.",
+      safe: "Safe",
+      readOnly: "Read-only",
+      readOnlyBlocked: "Control mode is read-only."
     },
     defaultView: {
       label: "Default view",
@@ -252,6 +270,10 @@ export const enUS = {
     searchLimit: {
       label: "Search result limit",
       detail: "Maximum matches returned by the command bar search."
+    },
+    notifications: {
+      label: "Notification retention",
+      detail: "How long operation notifications stay visible before auto-close."
     },
     searchHistory: {
       label: "Search history",
@@ -278,6 +300,10 @@ export const enUS = {
     resetUi: {
       label: "Reset UI settings",
       detail: "Restores theme, density, motion, inspector, font scale, language, and search limit."
+    },
+    clearCache: {
+      label: "Clear app cache",
+      detail: "Clears Electron renderer cache under the AgentScope app data directory."
     },
     theme: {
       label: "Theme",
@@ -309,6 +335,10 @@ export const enUS = {
       full: "Full",
       reduced: "Reduced",
       off: "Off"
+    },
+    resetAppearance: {
+      label: "Reset appearance",
+      detail: "Restores theme, density, motion, accent, font preset, font families, and line height."
     },
     uiScale: {
       label: "UI scale",
@@ -433,7 +463,9 @@ export const enUS = {
       openTranscript: "Open transcript",
       revealTranscript: "Reveal transcript",
       backupSession: "Back up session",
+      backupSessions: "Back up {{count}} sessions",
       deleteSession: "Delete session",
+      deleteSessions: "Delete {{count}} sessions",
       importSession: "Import session",
       writeDeletePlan: "Write delete plan",
       planImport: "Plan import"
@@ -489,16 +521,28 @@ export const enUS = {
     pathOpened: "Opened path",
     pathRevealed: "Revealed path",
     sessionBackedUp: "Session backup written",
+    sessionsBackedUp: "Backed up {{count}}/{{total}} sessions",
+    noSessionsBackedUp: "No sessions were backed up",
     sessionDeleted: "Session moved to quarantine",
+    sessionsDeleted: "Moved {{count}}/{{total}} sessions to quarantine",
+    noSessionsDeleted: "No sessions were deleted",
     sessionImported: "Session imported from backup",
     deletePlanWritten: "Delete plan written: {{path}}",
+    deletePlanUnavailable: "No delete plan could be written",
+    deletePlanPartial: "Delete plans written for {{count}}/{{total}} sessions",
     importPlanWritten: "Import plan written: {{path}}",
     importPlanCanceled: "Import planning canceled",
+    settingsReset: "Settings reset",
+    cacheCleared: "Application cache cleared",
+    diagnosticRepairComplete: "Diagnostic repair completed",
     operationFailed: "Operation failed: {{message}}"
   },
   confirm: {
     deleteSessionTitle: "Delete session",
+    deleteSessionsTitle: "Delete {{count}} sessions",
     deleteSession:
-      "Delete this session?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope will back it up first, write the journal, then remove verified local references and move session files to quarantine. Active exact PID and high-confidence Codex process candidates are blocked."
+      "Delete this session?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope will back it up first, write the journal, then remove verified local references and move session files to quarantine. Active exact PID and high-confidence Codex process candidates are blocked.",
+    deleteSessions:
+      "Delete {{count}} selected sessions?\n\nFirst backup:\n{{backupDir}}\n\nFirst quarantine:\n{{quarantineDir}}\n\nFirst journal:\n{{journalPath}}\n\nAgentScope will process each session with its own backup, quarantine directory, and journal. Core blockers still apply per session."
   }
 } as const;

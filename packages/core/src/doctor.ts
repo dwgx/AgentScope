@@ -29,12 +29,16 @@ export async function runDoctor(home = userHome()): Promise<Diagnostic[]> {
     checkOptionalDir("claude.file_history", path.join(claude, "file-history")),
     checkOptionalDir("claude.session_env", path.join(claude, "session-env")),
     checkOptionalDir("claude.shell_snapshots", path.join(claude, "shell-snapshots")),
-    nativeModuleCheck(),
-    ...sqliteChecks(path.join(codex, "state_5.sqlite")),
-    ...sqliteInventoryChecks(codex),
     check("codex.rollouts", countFiles(path.join(codex, "sessions"), /^rollout-.*\.jsonl$/i) > 0, `${countFiles(path.join(codex, "sessions"), /^rollout-.*\.jsonl$/i)} rollout jsonl files`),
     check("claude.transcripts", countFiles(path.join(claude, "projects"), /\.jsonl$/i) > 0, `${countFiles(path.join(claude, "projects"), /\.jsonl$/i)} transcript jsonl files`)
   ];
+  const native = nativeModuleCheck();
+  checks.push(native);
+  checks.push(
+    ...(native.status === "ok"
+      ? [...sqliteChecks(path.join(codex, "state_5.sqlite")), ...sqliteInventoryChecks(codex)]
+      : sqliteBlockedByNativeChecks(codex, native.detail))
+  );
   const processes = await listProcesses(false);
   checks.push(check("win32.process.scan", isWindows(), `${processes.length} related process rows`));
   return checks;
@@ -58,8 +62,23 @@ function nativeModuleCheck(): Diagnostic {
     db.close();
     return check("native.better_sqlite3", true, `available for Node ABI ${process.versions.modules}`);
   } catch (error) {
-    return check("native.better_sqlite3", false, error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    return check(
+      "native.better_sqlite3",
+      false,
+      `better-sqlite3 native addon failed for runtime ABI ${process.versions.modules}; SQLite checks are blocked until AgentScope is rebuilt for this Electron runtime. ${message}`
+    );
   }
+}
+
+function sqliteBlockedByNativeChecks(codex: string, detail: string): Diagnostic[] {
+  const blocked = `blocked by native.better_sqlite3: ${detail}`;
+  return [
+    check("codex.sqlite.readable", false, blocked),
+    check("codex.logs.tables", false, fs.existsSync(path.join(codex, "logs_2.sqlite")) ? blocked : `not found: ${path.join(codex, "logs_2.sqlite")}`),
+    check("codex.goals.tables", false, fs.existsSync(path.join(codex, "goals_1.sqlite")) ? blocked : `not found: ${path.join(codex, "goals_1.sqlite")}`),
+    check("codex.memories.tables", false, fs.existsSync(path.join(codex, "memories_1.sqlite")) ? blocked : `not found: ${path.join(codex, "memories_1.sqlite")}`)
+  ];
 }
 
 function sqliteInventoryChecks(codex: string): Diagnostic[] {

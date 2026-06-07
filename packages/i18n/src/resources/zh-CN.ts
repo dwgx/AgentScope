@@ -15,6 +15,8 @@ export const zhCN = {
       cancel: "取消",
       reveal: "定位",
       revealJournal: "定位 journal",
+      repair: "修复",
+      restart: "重启",
       show: "显示",
       hide: "隐藏"
     },
@@ -39,7 +41,11 @@ export const zhCN = {
       noCommandLine: "没有命令行",
       noPathEvidence: "没有路径证据",
       noPath: "没有路径",
-      loading: "正在加载路径"
+      loading: "正在加载路径",
+      path: "路径",
+      directory: "目录",
+      file: "文件",
+      notAllowed: "路径不在 AgentScope 本地追踪允许列表内"
     }
   },
   nav: {
@@ -168,6 +174,9 @@ export const zhCN = {
       groupCount_other: "{{count}} 个会话",
       children_one: "{{count}} 个子会话",
       children_other: "{{count}} 个子会话",
+      context: {
+        selectedCount: "已选择 {{count}} 个会话"
+      },
       group: {
         cwd: "cwd",
         parent: "父级",
@@ -179,7 +188,13 @@ export const zhCN = {
       emptyTitle: "没有关系",
       emptyDetail: "索引到 Codex 派生边或进程关系后会显示在这里。",
       subtitle_one: "{{count}} 条会话/进程图边",
-      subtitle_other: "{{count}} 条会话/进程图边"
+      subtitle_other: "{{count}} 条会话/进程图边",
+      filter: {
+        kind: "类型",
+        confidence: "置信度",
+        all: "全部",
+        search: "筛选会话、路径、证据"
+      }
     },
     doctor: {
       emptyTitle: "诊断尚未运行",
@@ -220,7 +235,10 @@ export const zhCN = {
     },
     controlMode: {
       label: "控制模式",
-      detail: "只读；破坏性控制动作在显式 force 选项出现前只生成建议。"
+      detail: "安全模式允许已备份的会话控制；只读模式会阻止备份、删除、导入和修复动作。",
+      safe: "安全",
+      readOnly: "只读",
+      readOnlyBlocked: "当前控制模式为只读。"
     },
     defaultView: { label: "默认视图", detail: "AgentScope 打开时进入的视图。" },
     inspector: {
@@ -234,6 +252,10 @@ export const zhCN = {
       detail: "SQLite 标题/预览，以及本地 Codex 和 Claude JSONL 转录。"
     },
     searchLimit: { label: "搜索结果数量", detail: "命令栏搜索返回的最大匹配数。" },
+    notifications: {
+      label: "通知留存",
+      detail: "操作通知自动关闭前的显示时长。"
+    },
     searchHistory: {
       label: "搜索历史",
       detail: "将最近搜索词保存在本机；处理敏感转录时建议关闭。",
@@ -259,6 +281,10 @@ export const zhCN = {
     resetUi: {
       label: "重置 UI 设置",
       detail: "恢复主题、密度、动画、检查器、字号、语言和搜索数量。"
+    },
+    clearCache: {
+      label: "清理软件缓存",
+      detail: "清理 AgentScope 应用数据目录下的 Electron 渲染缓存。"
     },
     theme: {
       label: "主题",
@@ -287,6 +313,10 @@ export const zhCN = {
       full: "完整",
       reduced: "减少",
       off: "关闭"
+    },
+    resetAppearance: {
+      label: "重置外观",
+      detail: "恢复主题、密度、动画、强调色、字体预设、字体族和行高。"
     },
     uiScale: {
       label: "界面缩放",
@@ -403,7 +433,9 @@ export const zhCN = {
       openTranscript: "打开转录",
       revealTranscript: "定位转录",
       backupSession: "备份会话",
+      backupSessions: "备份 {{count}} 个会话",
       deleteSession: "删除会话",
+      deleteSessions: "删除 {{count}} 个会话",
       importSession: "导入会话",
       writeDeletePlan: "生成删除计划",
       planImport: "生成导入计划"
@@ -459,16 +491,28 @@ export const zhCN = {
     pathOpened: "已打开路径",
     pathRevealed: "已定位路径",
     sessionBackedUp: "会话备份已写入",
+    sessionsBackedUp: "已备份 {{count}}/{{total}} 个会话",
+    noSessionsBackedUp: "没有会话完成备份",
     sessionDeleted: "会话已移入隔离区",
+    sessionsDeleted: "已将 {{count}}/{{total}} 个会话移入隔离区",
+    noSessionsDeleted: "没有会话被删除",
     sessionImported: "会话已从备份导入",
     deletePlanWritten: "删除计划已写入：{{path}}",
+    deletePlanUnavailable: "无法写入任何删除计划",
+    deletePlanPartial: "已为 {{count}}/{{total}} 个会话写入删除计划",
     importPlanWritten: "导入计划已写入：{{path}}",
     importPlanCanceled: "已取消导入计划",
+    settingsReset: "设置已重置",
+    cacheCleared: "软件缓存已清理",
+    diagnosticRepairComplete: "诊断修复已完成",
     operationFailed: "操作失败：{{message}}"
   },
   confirm: {
     deleteSessionTitle: "删除会话",
+    deleteSessionsTitle: "删除 {{count}} 个会话",
     deleteSession:
-      "删除这个会话？\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope 会先备份并写入 journal，再移除已验证的本地引用并把会话文件移入隔离区。精确 PID 和高置信 Codex 进程候选都会被阻止。"
+      "删除这个会话？\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope 会先备份并写入 journal，再移除已验证的本地引用并把会话文件移入隔离区。精确 PID 和高置信 Codex 进程候选都会被阻止。",
+    deleteSessions:
+      "删除这 {{count}} 个已选会话？\n\n首个 Backup:\n{{backupDir}}\n\n首个 Quarantine:\n{{quarantineDir}}\n\n首个 Journal:\n{{journalPath}}\n\nAgentScope 会逐个会话生成独立备份、隔离目录和 journal；核心 blocker 仍按会话逐条生效。"
   }
 } satisfies ResourceTree;

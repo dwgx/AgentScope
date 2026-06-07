@@ -27,12 +27,21 @@ export interface AgentScopeApi {
   getAppInfo(): Promise<AppInfo>;
   listFonts(): Promise<string[]>;
   reloadApp(): Promise<boolean>;
+  clearCache(): Promise<{ ok: boolean; directories: string[]; files: string[] }>;
   quitApp(): Promise<boolean>;
   openExternal(url: string): Promise<boolean>;
   openPath(targetPath: string): Promise<string>;
   revealPath(targetPath: string): Promise<boolean>;
   inspectPid(pid: number): Promise<Record<string, unknown>>;
   inspectSession(sessionId: string): Promise<Record<string, unknown>>;
+  repairDiagnostic(name: string): Promise<{
+    ok: boolean;
+    name: string;
+    message: string;
+    directories: string[];
+    files: string[];
+    restartRequired?: boolean;
+  }>;
   backupSession(agent: string, sessionId: string): Promise<SessionBackupResult>;
   deleteSession(agent: string, sessionId: string, createdAt?: string): Promise<SessionDeleteResult>;
   importSessionBackup(backupDir: string): Promise<SessionImportResult>;

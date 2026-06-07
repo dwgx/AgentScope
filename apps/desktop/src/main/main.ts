@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session as electronSession, shell } from "electron";
 import type { Evidence, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 
@@ -90,6 +90,9 @@ ipcMain.handle("app:quit", async () => {
   app.quit();
   return true;
 });
+ipcMain.handle("app:clearCache", async () => {
+  return clearAppCache();
+});
 ipcMain.handle("shell:openExternal", async (_event, url: string) => {
   if (!isAllowedExternalUrl(url)) return false;
   await shell.openExternal(url);
@@ -121,6 +124,7 @@ ipcMain.handle("inspect:session", async (_event, sessionId: string) => {
     indexRecords: snapshot.indexRecords.filter((record) => record.sessionId.toLowerCase() === sessionId.toLowerCase())
   };
 });
+ipcMain.handle("diagnostic:repair", async (_event, name: string) => repairDiagnostic(name));
 ipcMain.handle("session:backup", async (_event, agent: string, sessionId: string) => {
   const core = await loadCore();
   return core.backupSession(sessionId, asAgent(agent));
@@ -321,7 +325,20 @@ async function isAllowedLocalPath(targetPath: string): Promise<boolean> {
   const normalizedTarget = normalizeFsPath(targetPath);
   if (!normalizedTarget) return false;
   const allowedPaths = await allowedLocalPaths();
-  return allowedPaths.includes(normalizedTarget);
+  if (allowedPaths.includes(normalizedTarget)) return true;
+  return allowedLocalPathPrefixes().some(
+    (root) => normalizedTarget === root || normalizedTarget.startsWith(`${root}${path.sep}`)
+  );
+}
+
+function allowedLocalPathPrefixes(): string[] {
+  const info = appInfo();
+  const workspaceRoot = findWorkspaceRoot();
+  return [
+    normalizeFsPath(info.userData),
+    normalizeFsPath(path.join(os.homedir(), ".agentscope")),
+    normalizeFsPath(workspaceRoot)
+  ].filter((item): item is string => !!item);
 }
 
 async function allowedLocalPaths(): Promise<string[]> {
@@ -394,6 +411,120 @@ async function isAllowedAgentScopeOperationPath(targetPath: string): Promise<boo
     normalizeFsPath(path.join(app.getPath("userData"), "backups"))
   ].filter((item): item is string => !!item);
   return operationRoots.some((root) => normalizedTarget === root || normalizedTarget.startsWith(`${root}${path.sep}`));
+}
+
+async function clearAppCache(): Promise<{ ok: true; directories: string[]; files: string[] }> {
+  await electronSession.defaultSession.clearCache();
+  const userData = app.getPath("userData");
+  return {
+    ok: true,
+    directories: [
+      path.join(userData, "Cache"),
+      path.join(userData, "Code Cache"),
+      path.join(userData, "GPUCache")
+    ],
+    files: []
+  };
+}
+
+async function repairDiagnostic(name: string): Promise<{
+  ok: boolean;
+  name: string;
+  message: string;
+  directories: string[];
+  files: string[];
+  restartRequired?: boolean;
+}> {
+  if (!isNativeSqliteDiagnostic(name)) {
+    return {
+      ok: false,
+      name,
+      message: "No automatic repair is registered for this diagnostic.",
+      directories: [],
+      files: []
+    };
+  }
+  const root = findWorkspaceRoot();
+  if (!root) {
+    return {
+      ok: false,
+      name,
+      message: "Cannot find AgentScope workspace root for native rebuild.",
+      directories: [],
+      files: []
+    };
+  }
+  try {
+    await execNpm(["run", "package"], root, 420000);
+    const desktopOut = path.join(root, "apps", "desktop", "out", "win-unpacked");
+    return {
+      ok: true,
+      name,
+      message: "Rebuilt the unpacked desktop app and native better-sqlite3 module. Restart AgentScope to load the repaired native module.",
+      directories: [
+        desktopOut,
+        path.join(desktopOut, "resources", "app.asar.unpacked", "node_modules", "better-sqlite3")
+      ],
+      files: [
+        path.join(desktopOut, "resources", "app.asar.unpacked", "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node")
+      ],
+      restartRequired: true
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      name,
+      message: error instanceof Error ? error.message : String(error),
+      directories: [root],
+      files: []
+    };
+  }
+}
+
+function isNativeSqliteDiagnostic(name: string): boolean {
+  return [
+    "native.better_sqlite3",
+    "codex.sqlite.readable",
+    "codex.logs.tables",
+    "codex.goals.tables",
+    "codex.memories.tables"
+  ].includes(name);
+}
+
+function findWorkspaceRoot(): string | undefined {
+  for (const start of [process.cwd(), app.getAppPath(), __dirname]) {
+    let current = normalizeCandidateDir(start);
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      if (fs.existsSync(path.join(current, "package.json")) && fs.existsSync(path.join(current, "apps", "desktop", "package.json"))) {
+        return current;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+  return undefined;
+}
+
+function normalizeCandidateDir(candidate: string): string {
+  const cleaned = candidate.replace(/^\\\\\?\\/, "").replace(/\.asar($|\\.*$)/, "");
+  return fs.existsSync(cleaned) && fs.statSync(cleaned).isFile() ? path.dirname(cleaned) : cleaned;
+}
+
+function npmCommand(): string {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+async function execNpm(args: string[], cwd: string, timeout: number): Promise<void> {
+  const command = process.platform === "win32" ? "cmd.exe" : npmCommand();
+  const commandArgs =
+    process.platform === "win32" ? ["/d", "/s", "/c", [npmCommand(), ...args].join(" ")] : args;
+  await execFileAsync(command, commandArgs, {
+    cwd,
+    windowsHide: true,
+    timeout,
+    maxBuffer: 24 * 1024 * 1024
+  });
 }
 
 function asAgent(value: string): "codex" | "claude" | undefined {

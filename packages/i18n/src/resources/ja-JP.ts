@@ -15,6 +15,8 @@ export const jaJP = {
       cancel: "キャンセル",
       reveal: "場所を表示",
       revealJournal: "journal を表示",
+      repair: "修復",
+      restart: "再起動",
       show: "表示",
       hide: "非表示"
     },
@@ -39,7 +41,11 @@ export const jaJP = {
       noCommandLine: "コマンドラインなし",
       noPathEvidence: "パス証拠なし",
       noPath: "パスなし",
-      loading: "パスを読み込み中"
+      loading: "パスを読み込み中",
+      path: "パス",
+      directory: "ディレクトリ",
+      file: "ファイル",
+      notAllowed: "パスは AgentScope のローカルトレース許可リストにありません"
     }
   },
   nav: {
@@ -169,6 +175,9 @@ export const jaJP = {
       groupCount_other: "{{count}} 件のセッション",
       children_one: "{{count}} 件の子セッション",
       children_other: "{{count}} 件の子セッション",
+      context: {
+        selectedCount: "{{count}} セッションを選択中"
+      },
       group: {
         cwd: "cwd",
         parent: "親",
@@ -180,7 +189,13 @@ export const jaJP = {
       emptyTitle: "関係が見つかりません",
       emptyDetail: "Codex の spawn edge またはプロセス関係が索引されるとここに表示されます。",
       subtitle_one: "{{count}} 件のセッション/プロセスグラフ辺",
-      subtitle_other: "{{count}} 件のセッション/プロセスグラフ辺"
+      subtitle_other: "{{count}} 件のセッション/プロセスグラフ辺",
+      filter: {
+        kind: "種類",
+        confidence: "信頼度",
+        all: "すべて",
+        search: "セッション、パス、証拠を絞り込み"
+      }
     },
     doctor: {
       emptyTitle: "Doctor は未実行です",
@@ -222,7 +237,10 @@ export const jaJP = {
     controlMode: {
       label: "制御モード",
       detail:
-        "読み取り専用です。破壊的な制御は明示的な force オプションができるまで提案だけを出します。"
+        "安全モードではバックアップ済みのセッション制御を許可します。読み取り専用はバックアップ、削除、インポート、修復をブロックします。",
+      safe: "安全",
+      readOnly: "読み取り専用",
+      readOnlyBlocked: "現在の制御モードは読み取り専用です。"
     },
     defaultView: { label: "既定の表示", detail: "AgentScope 起動時に開くビューです。" },
     inspector: {
@@ -236,6 +254,10 @@ export const jaJP = {
       detail: "SQLite のタイトル/プレビューと、ローカル Codex/Claude JSONL 転写を検索します。"
     },
     searchLimit: { label: "検索結果数", detail: "コマンドバー検索で返す最大一致数です。" },
+    notifications: {
+      label: "通知の保持時間",
+      detail: "操作通知が自動で閉じるまでの表示時間です。"
+    },
     searchHistory: {
       label: "検索履歴",
       detail:
@@ -262,6 +284,10 @@ export const jaJP = {
     resetUi: {
       label: "UI 設定をリセット",
       detail: "テーマ、密度、動き、インスペクター、文字サイズ、言語、検索件数を復元します。"
+    },
+    clearCache: {
+      label: "アプリキャッシュを消去",
+      detail: "AgentScope アプリデータ内の Electron レンダラーキャッシュを消去します。"
     },
     theme: {
       label: "テーマ",
@@ -290,6 +316,10 @@ export const jaJP = {
       full: "通常",
       reduced: "低減",
       off: "オフ"
+    },
+    resetAppearance: {
+      label: "外観をリセット",
+      detail: "テーマ、密度、モーション、アクセント、フォントプリセット、フォントファミリー、行高を戻します。"
     },
     uiScale: {
       label: "UI スケール",
@@ -411,7 +441,9 @@ export const jaJP = {
       openTranscript: "転写を開く",
       revealTranscript: "転写の場所を表示",
       backupSession: "セッションをバックアップ",
+      backupSessions: "{{count}} セッションをバックアップ",
       deleteSession: "セッションを削除",
+      deleteSessions: "{{count}} セッションを削除",
       importSession: "セッションをインポート",
       writeDeletePlan: "削除計画を書き出す",
       planImport: "インポート計画"
@@ -467,16 +499,28 @@ export const jaJP = {
     pathOpened: "パスを開きました",
     pathRevealed: "パスを表示しました",
     sessionBackedUp: "セッションバックアップを書き出しました",
+    sessionsBackedUp: "{{count}}/{{total}} セッションをバックアップしました",
+    noSessionsBackedUp: "バックアップされたセッションはありません",
     sessionDeleted: "セッションを隔離へ移動しました",
+    sessionsDeleted: "{{count}}/{{total}} セッションを隔離へ移動しました",
+    noSessionsDeleted: "削除されたセッションはありません",
     sessionImported: "バックアップからセッションをインポートしました",
     deletePlanWritten: "削除計画を書き出しました: {{path}}",
+    deletePlanUnavailable: "削除計画を書き出せませんでした",
+    deletePlanPartial: "{{count}}/{{total}} セッションの削除計画を書き出しました",
     importPlanWritten: "インポート計画を書き出しました: {{path}}",
     importPlanCanceled: "インポート計画をキャンセルしました",
+    settingsReset: "設定をリセットしました",
+    cacheCleared: "アプリキャッシュを消去しました",
+    diagnosticRepairComplete: "診断修復が完了しました",
     operationFailed: "操作に失敗しました: {{message}}"
   },
   confirm: {
     deleteSessionTitle: "セッションを削除",
+    deleteSessionsTitle: "{{count}} セッションを削除",
     deleteSession:
-      "このセッションを削除しますか?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope は先にバックアップして journal を書き込み、検証済みのローカル参照を削除してからセッションファイルを隔離へ移動します。正確な PID と信頼度の高い Codex プロセス候補はブロックされます。"
+      "このセッションを削除しますか?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope は先にバックアップして journal を書き込み、検証済みのローカル参照を削除してからセッションファイルを隔離へ移動します。正確な PID と信頼度の高い Codex プロセス候補はブロックされます。",
+    deleteSessions:
+      "選択した {{count}} セッションを削除しますか?\n\n最初の Backup:\n{{backupDir}}\n\n最初の Quarantine:\n{{quarantineDir}}\n\n最初の Journal:\n{{journalPath}}\n\nAgentScope は各セッションを個別のバックアップ、隔離ディレクトリ、journal で処理します。コア blocker はセッションごとに適用されます。"
   }
 } satisfies ResourceTree;

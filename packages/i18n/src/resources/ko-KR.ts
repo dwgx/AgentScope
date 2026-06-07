@@ -15,6 +15,8 @@ export const koKR = {
       cancel: "취소",
       reveal: "위치 표시",
       revealJournal: "journal 표시",
+      repair: "수리",
+      restart: "다시 시작",
       show: "표시",
       hide: "숨기기"
     },
@@ -39,7 +41,11 @@ export const koKR = {
       noCommandLine: "명령줄 없음",
       noPathEvidence: "경로 증거 없음",
       noPath: "경로 없음",
-      loading: "경로 로드 중"
+      loading: "경로 로드 중",
+      path: "경로",
+      directory: "디렉터리",
+      file: "파일",
+      notAllowed: "경로가 AgentScope 로컬 추적 허용 목록에 없습니다"
     }
   },
   nav: {
@@ -168,6 +174,9 @@ export const koKR = {
       groupCount_other: "{{count}}개 세션",
       children_one: "{{count}}개 자식 세션",
       children_other: "{{count}}개 자식 세션",
+      context: {
+        selectedCount: "{{count}}개 세션 선택됨"
+      },
       group: {
         cwd: "cwd",
         parent: "부모",
@@ -179,7 +188,13 @@ export const koKR = {
       emptyTitle: "관계 없음",
       emptyDetail: "Codex spawn edge 또는 프로세스 관계가 색인되면 여기에 표시됩니다.",
       subtitle_one: "{{count}}개의 세션/프로세스 그래프 edge",
-      subtitle_other: "{{count}}개의 세션/프로세스 그래프 edge"
+      subtitle_other: "{{count}}개의 세션/프로세스 그래프 edge",
+      filter: {
+        kind: "종류",
+        confidence: "신뢰도",
+        all: "전체",
+        search: "세션, 경로, 증거 필터"
+      }
     },
     doctor: {
       emptyTitle: "Doctor가 아직 실행되지 않음",
@@ -220,7 +235,10 @@ export const koKR = {
     },
     controlMode: {
       label: "제어 모드",
-      detail: "읽기 전용입니다. 명시적 force 옵션이 생기기 전까지 제어 동작은 제안만 생성합니다."
+      detail: "안전 모드는 백업된 세션 제어를 허용합니다. 읽기 전용은 백업, 삭제, 가져오기, 수리를 차단합니다.",
+      safe: "안전",
+      readOnly: "읽기 전용",
+      readOnlyBlocked: "현재 제어 모드는 읽기 전용입니다."
     },
     defaultView: { label: "기본 보기", detail: "AgentScope가 열릴 때 사용할 시작 보기입니다." },
     inspector: {
@@ -234,6 +252,10 @@ export const koKR = {
       detail: "SQLite 제목/미리보기와 로컬 Codex 및 Claude JSONL transcript를 검색합니다."
     },
     searchLimit: { label: "검색 결과 제한", detail: "명령줄 검색이 반환하는 최대 결과 수입니다." },
+    notifications: {
+      label: "알림 유지 시간",
+      detail: "작업 알림이 자동으로 닫히기 전까지 표시되는 시간입니다."
+    },
     searchHistory: {
       label: "검색 기록",
       detail: "최근 검색어를 이 PC에 저장합니다. 민감한 transcript를 다룰 때는 꺼 두세요.",
@@ -259,6 +281,10 @@ export const koKR = {
     resetUi: {
       label: "UI 설정 초기화",
       detail: "테마, 밀도, 모션, 검사기, 글꼴 크기, 언어, 검색 제한을 복원합니다."
+    },
+    clearCache: {
+      label: "앱 캐시 지우기",
+      detail: "AgentScope 앱 데이터 아래 Electron 렌더러 캐시를 지웁니다."
     },
     theme: {
       label: "테마",
@@ -287,6 +313,10 @@ export const koKR = {
       full: "전체",
       reduced: "줄임",
       off: "끄기"
+    },
+    resetAppearance: {
+      label: "모양 초기화",
+      detail: "테마, 밀도, 모션, 강조색, 글꼴 preset, 글꼴 family, 줄 높이를 복원합니다."
     },
     uiScale: {
       label: "UI 배율",
@@ -408,7 +438,9 @@ export const koKR = {
       openTranscript: "Transcript 열기",
       revealTranscript: "Transcript 위치 표시",
       backupSession: "세션 백업",
+      backupSessions: "{{count}}개 세션 백업",
       deleteSession: "세션 삭제",
+      deleteSessions: "{{count}}개 세션 삭제",
       importSession: "세션 가져오기",
       writeDeletePlan: "삭제 계획 작성",
       planImport: "가져오기 계획"
@@ -464,16 +496,28 @@ export const koKR = {
     pathOpened: "경로 열림",
     pathRevealed: "경로 위치 열림",
     sessionBackedUp: "세션 백업 작성됨",
+    sessionsBackedUp: "{{count}}/{{total}}개 세션 백업됨",
+    noSessionsBackedUp: "백업된 세션 없음",
     sessionDeleted: "세션이 격리 폴더로 이동됨",
+    sessionsDeleted: "{{count}}/{{total}}개 세션이 격리 폴더로 이동됨",
+    noSessionsDeleted: "삭제된 세션 없음",
     sessionImported: "백업에서 세션을 가져왔습니다",
     deletePlanWritten: "삭제 계획 작성됨: {{path}}",
+    deletePlanUnavailable: "삭제 계획을 작성할 수 없습니다",
+    deletePlanPartial: "{{count}}/{{total}}개 세션의 삭제 계획 작성됨",
     importPlanWritten: "가져오기 계획 작성됨: {{path}}",
     importPlanCanceled: "가져오기 계획 취소됨",
+    settingsReset: "설정 초기화됨",
+    cacheCleared: "앱 캐시 지움",
+    diagnosticRepairComplete: "진단 수리 완료",
     operationFailed: "작업 실패: {{message}}"
   },
   confirm: {
     deleteSessionTitle: "세션 삭제",
+    deleteSessionsTitle: "{{count}}개 세션 삭제",
     deleteSession:
-      "이 세션을 삭제할까요?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope는 먼저 백업하고 journal을 쓴 뒤 검증된 로컬 참조를 제거하고 세션 파일을 격리 폴더로 이동합니다. 정확한 PID와 신뢰도 높은 Codex 프로세스 후보는 차단됩니다."
+      "이 세션을 삭제할까요?\n\n{{title}}\n\nBackup:\n{{backupDir}}\n\nQuarantine:\n{{quarantineDir}}\n\nJournal:\n{{journalPath}}\n\nAgentScope는 먼저 백업하고 journal을 쓴 뒤 검증된 로컬 참조를 제거하고 세션 파일을 격리 폴더로 이동합니다. 정확한 PID와 신뢰도 높은 Codex 프로세스 후보는 차단됩니다.",
+    deleteSessions:
+      "선택한 {{count}}개 세션을 삭제할까요?\n\n첫 Backup:\n{{backupDir}}\n\n첫 Quarantine:\n{{quarantineDir}}\n\n첫 Journal:\n{{journalPath}}\n\nAgentScope는 각 세션을 별도 백업, 격리 디렉터리, journal로 처리합니다. core blocker는 세션별로 적용됩니다."
   }
 } satisfies ResourceTree;
