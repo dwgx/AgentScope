@@ -1,12 +1,18 @@
 import {
   Activity,
   AlertTriangle,
+  BookOpen,
   CheckCircle2,
   ChevronRight,
+  CircleDot,
   Database,
+  Download,
+  ExternalLink,
   FileJson,
   FileText,
+  FolderOpen,
   GitBranch,
+  Github,
   LayoutList,
   MonitorCog,
   Palette,
@@ -15,9 +21,10 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
-  Terminal
+  Terminal,
+  X
 } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { AgentKind, AgentProcess, AgentSession, Diagnostic, Evidence, Relation, ScopeSnapshot, SessionCandidate } from "@agentscope/shared";
@@ -25,17 +32,67 @@ import "./styles.css";
 
 type View = "processes" | "sessions" | "graph" | "doctor" | "settings";
 type SettingsSection = "general" | "appearance" | "indexing" | "runtime" | "diagnostics";
+type ThemeName = "graphite" | "blueprint" | "contrast" | "midnight";
+type DensityName = "compact" | "comfortable" | "spacious";
+type MotionName = "full" | "reduced" | "off";
 type SelectionKey = { type: "session"; id: string } | { type: "process"; pid: number } | null;
 type Selection = { type: "session"; value: AgentSession } | { type: "process"; value: AgentProcess } | null;
+
+interface AppInfo {
+  userData: string;
+  home: string;
+  codexHome: string;
+  claudeHome: string;
+  githubUrl: string;
+  actionsUrl: string;
+  issuesUrl: string;
+  readmeUrl: string;
+}
+
+interface AppSettings {
+  theme: ThemeName;
+  density: DensityName;
+  motion: MotionName;
+  accent: string;
+  defaultView: Exclude<View, "settings">;
+  inspector: "right" | "hidden";
+  fontScale: "small" | "normal" | "large";
+  searchLimit: number;
+  showUnknownCandidates: boolean;
+}
+
+const settingsKey = "agentscope.settings.v2";
+const defaultSettings: AppSettings = {
+  theme: "graphite",
+  density: "compact",
+  motion: "full",
+  accent: "#b8c2cc",
+  defaultView: "processes",
+  inspector: "right",
+  fontScale: "normal",
+  searchLimit: 24,
+  showUnknownCandidates: true
+};
 
 function App() {
   const [snapshot, setSnapshot] = useState<ScopeSnapshot | null>(null);
   const [doctor, setDoctor] = useState<Diagnostic[]>([]);
-  const [view, setView] = useState<View>("processes");
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  const [view, setView] = useState<View>(settings.defaultView);
   const [selectionKey, setSelectionKey] = useState<SelectionKey>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState("");
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+
+  function updateSettings(patch: Partial<AppSettings>) {
+    setSettings((current) => {
+      const next = { ...current, ...patch };
+      saveSettings(next);
+      return next;
+    });
+  }
 
   async function refresh() {
     setLoading(true);
@@ -51,6 +108,7 @@ function App() {
 
   useEffect(() => {
     void refresh();
+    void window.agentscope.getAppInfo().then(setAppInfo);
   }, []);
 
   async function runSearch() {
@@ -58,7 +116,25 @@ function App() {
       setResults([]);
       return;
     }
-    setResults(await window.agentscope.search(query, 24));
+    setResults(await window.agentscope.search(query, settings.searchLimit));
+  }
+
+  async function exportCurrentSnapshot() {
+    if (!snapshot) return;
+    const result = await window.agentscope.exportSnapshot(snapshot);
+    setToast(result.canceled ? "Export canceled" : `Snapshot exported: ${result.path}`);
+  }
+
+  async function openPath(targetPath?: string) {
+    if (!targetPath) return;
+    const result = await window.agentscope.openPath(targetPath);
+    setToast(result ? `Open failed: ${result}` : `Opened ${targetPath}`);
+  }
+
+  async function revealPath(targetPath?: string) {
+    if (!targetPath) return;
+    await window.agentscope.revealPath(targetPath);
+    setToast(`Revealed ${targetPath}`);
   }
 
   const sessions = snapshot?.sessions ?? [];
@@ -78,22 +154,42 @@ function App() {
     }),
     [sessions, processes, matchedProcesses, doctor]
   );
+  const resetSettings = () => updateSettings(defaultSettings);
 
   return (
-    <main className="shell">
+    <main
+      className="shell"
+      data-theme={settings.theme}
+      data-density={settings.density}
+      data-motion={settings.motion}
+      data-inspector={settings.inspector}
+      data-font={settings.fontScale}
+      style={{ "--accent": settings.accent } as CSSProperties}
+    >
       <Sidebar view={view} setView={setView} warnings={counts.warnings} loading={loading} onRefresh={() => void refresh()} />
       <section className="workspace">
         <CommandBar
+          snapshot={snapshot}
+          appInfo={appInfo}
+          selected={selected}
+          currentView={view}
           query={query}
           setQuery={setQuery}
           runSearch={() => void runSearch()}
           counts={counts}
           loading={loading}
           onRefresh={() => void refresh()}
+          onExport={() => void exportCurrentSnapshot()}
+          onOpenPath={(targetPath) => void openPath(targetPath)}
+          onRevealPath={(targetPath) => void revealPath(targetPath)}
+          onOpenExternal={(url) => void window.agentscope.openExternal(url)}
+          onSetView={setView}
+          settings={settings}
+          updateSettings={updateSettings}
         />
         {results.length > 0 && <SearchResults results={results} onPick={() => setResults([])} />}
-        <div className="content">
-          <section className="listPane">
+        <div className="content" key={settings.inspector}>
+          <section className="listPane" key={view}>
             {view === "processes" && (
               <ProcessList
                 processes={activeProcesses}
@@ -111,11 +207,24 @@ function App() {
             )}
             {view === "graph" && <RelationList relations={relations} />}
             {view === "doctor" && <DoctorPanel checks={doctor} />}
-            {view === "settings" && <SettingsPanel doctor={doctor} processes={processes} sessions={sessions} />}
+            {view === "settings" && (
+              <SettingsPanel
+                appInfo={appInfo}
+                settings={settings}
+                updateSettings={updateSettings}
+                resetSettings={resetSettings}
+                doctor={doctor}
+                processes={processes}
+                sessions={sessions}
+                onOpenPath={(targetPath) => void openPath(targetPath)}
+                onOpenExternal={(url) => void window.agentscope.openExternal(url)}
+              />
+            )}
           </section>
-          <Inspector selected={selected} relations={relations} />
+          {settings.inspector === "right" && <Inspector selected={selected} relations={relations} showUnknownCandidates={settings.showUnknownCandidates} />}
         </div>
       </section>
+      {toast && <Toast message={toast} onClose={() => setToast("")} />}
     </main>
   );
 }
@@ -166,21 +275,40 @@ function NavButton(props: { active: boolean; icon: ReactNode; label: string; bad
 }
 
 function CommandBar(props: {
+  snapshot: ScopeSnapshot | null;
+  appInfo: AppInfo | null;
+  selected: Selection;
+  currentView: View;
   query: string;
   setQuery: (value: string) => void;
   runSearch: () => void;
   counts: { sessions: number; processes: number; codex: number; claude: number; matched: number; warnings: number };
   loading: boolean;
   onRefresh: () => void;
+  onExport: () => void;
+  onOpenPath: (targetPath?: string) => void;
+  onRevealPath: (targetPath?: string) => void;
+  onOpenExternal: (url: string) => void;
+  onSetView: (view: View) => void;
+  settings: AppSettings;
+  updateSettings: (patch: Partial<AppSettings>) => void;
 }) {
   return (
     <header className="commandBar">
-      <div className="menuText">
-        <span>File</span>
-        <span>View</span>
-        <span>Trace</span>
-        <span>Help</span>
-      </div>
+      <TopMenus
+        snapshot={props.snapshot}
+        appInfo={props.appInfo}
+        selected={props.selected}
+        currentView={props.currentView}
+        onExport={props.onExport}
+        onOpenPath={props.onOpenPath}
+        onRevealPath={props.onRevealPath}
+        onOpenExternal={props.onOpenExternal}
+        onSetView={props.onSetView}
+        onRefresh={props.onRefresh}
+        settings={props.settings}
+        updateSettings={props.updateSettings}
+      />
       <div className="searchBox">
         <Search size={17} />
         <input
@@ -204,6 +332,98 @@ function CommandBar(props: {
       </button>
     </header>
   );
+}
+
+function TopMenus(props: {
+  snapshot: ScopeSnapshot | null;
+  appInfo: AppInfo | null;
+  selected: Selection;
+  currentView: View;
+  onExport: () => void;
+  onOpenPath: (targetPath?: string) => void;
+  onRevealPath: (targetPath?: string) => void;
+  onOpenExternal: (url: string) => void;
+  onSetView: (view: View) => void;
+  onRefresh: () => void;
+  settings: AppSettings;
+  updateSettings: (patch: Partial<AppSettings>) => void;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  const selectedTranscript = selectedTranscriptPath(props.selected);
+  const selectedCwd = selectedCwdPath(props.selected);
+  const close = () => setOpen(null);
+  const run = (action: () => void) => {
+    action();
+    close();
+  };
+  return (
+    <div className="menuText" onMouseLeave={() => setOpen(null)}>
+      <MenuButton label="File" open={open} setOpen={setOpen}>
+        <MenuItem icon={<Download size={15} />} label="Export snapshot" detail="JSON" disabled={!props.snapshot} onClick={() => run(props.onExport)} />
+        <MenuItem icon={<FolderOpen size={15} />} label="Open app data" detail="logs" disabled={!props.appInfo?.userData} onClick={() => run(() => props.onOpenPath(props.appInfo?.userData))} />
+        <MenuItem icon={<FolderOpen size={15} />} label="Open Codex home" detail=".codex" disabled={!props.appInfo?.codexHome} onClick={() => run(() => props.onOpenPath(props.appInfo?.codexHome))} />
+        <MenuItem icon={<FolderOpen size={15} />} label="Open Claude home" detail=".claude" disabled={!props.appInfo?.claudeHome} onClick={() => run(() => props.onOpenPath(props.appInfo?.claudeHome))} />
+        <MenuDivider />
+        <MenuItem icon={<RefreshCw size={15} />} label="Reload window" onClick={() => run(() => void window.agentscope.reloadApp())} />
+        <MenuItem icon={<X size={15} />} label="Quit AgentScope" onClick={() => run(() => void window.agentscope.quitApp())} />
+      </MenuButton>
+      <MenuButton label="View" open={open} setOpen={setOpen}>
+        <MenuItem icon={<Activity size={15} />} label="Processes" active={props.currentView === "processes"} onClick={() => run(() => props.onSetView("processes"))} />
+        <MenuItem icon={<LayoutList size={15} />} label="Sessions" active={props.currentView === "sessions"} onClick={() => run(() => props.onSetView("sessions"))} />
+        <MenuItem icon={<GitBranch size={15} />} label="Relations" active={props.currentView === "graph"} onClick={() => run(() => props.onSetView("graph"))} />
+        <MenuItem icon={<ShieldCheck size={15} />} label="Doctor" active={props.currentView === "doctor"} onClick={() => run(() => props.onSetView("doctor"))} />
+        <MenuItem icon={<Settings size={15} />} label="Settings" active={props.currentView === "settings"} onClick={() => run(() => props.onSetView("settings"))} />
+        <MenuDivider />
+        <MenuItem icon={<Palette size={15} />} label="Graphite theme" active={props.settings.theme === "graphite"} onClick={() => run(() => props.updateSettings({ theme: "graphite" }))} />
+        <MenuItem icon={<Palette size={15} />} label="Blueprint theme" active={props.settings.theme === "blueprint"} onClick={() => run(() => props.updateSettings({ theme: "blueprint" }))} />
+        <MenuItem icon={<Palette size={15} />} label="High contrast" active={props.settings.theme === "contrast"} onClick={() => run(() => props.updateSettings({ theme: "contrast" }))} />
+        <MenuItem icon={<Palette size={15} />} label="Midnight theme" active={props.settings.theme === "midnight"} onClick={() => run(() => props.updateSettings({ theme: "midnight" }))} />
+        <MenuDivider />
+        <MenuItem icon={<FileText size={15} />} label="Toggle inspector" active={props.settings.inspector === "right"} onClick={() => run(() => props.updateSettings({ inspector: props.settings.inspector === "right" ? "hidden" : "right" }))} />
+      </MenuButton>
+      <MenuButton label="Trace" open={open} setOpen={setOpen}>
+        <MenuItem icon={<RefreshCw size={15} />} label="Refresh index" onClick={() => run(props.onRefresh)} />
+        <MenuItem icon={<CircleDot size={15} />} label="Show weak candidates" active={props.settings.showUnknownCandidates} onClick={() => run(() => props.updateSettings({ showUnknownCandidates: !props.settings.showUnknownCandidates }))} />
+        <MenuItem icon={<FileJson size={15} />} label="Open selected transcript" detail="JSONL" disabled={!selectedTranscript} onClick={() => run(() => props.onOpenPath(selectedTranscript))} />
+        <MenuItem icon={<FolderOpen size={15} />} label="Reveal selected transcript" disabled={!selectedTranscript} onClick={() => run(() => props.onRevealPath(selectedTranscript))} />
+        <MenuItem icon={<FolderOpen size={15} />} label="Open selected cwd" disabled={!selectedCwd} onClick={() => run(() => props.onOpenPath(selectedCwd))} />
+        <MenuItem icon={<Database size={15} />} label="Reveal Codex SQLite" disabled={!props.appInfo?.codexHome} onClick={() => run(() => props.appInfo && props.onRevealPath(`${props.appInfo.codexHome}\\state_5.sqlite`))} />
+      </MenuButton>
+      <MenuButton label="Help" open={open} setOpen={setOpen}>
+        <MenuItem icon={<Github size={15} />} label="GitHub repository" detail="public" disabled={!props.appInfo?.githubUrl} onClick={() => run(() => props.appInfo && props.onOpenExternal(props.appInfo.githubUrl))} />
+        <MenuItem icon={<ExternalLink size={15} />} label="GitHub Actions" disabled={!props.appInfo?.actionsUrl} onClick={() => run(() => props.appInfo && props.onOpenExternal(props.appInfo.actionsUrl))} />
+        <MenuItem icon={<ExternalLink size={15} />} label="Issues" disabled={!props.appInfo?.issuesUrl} onClick={() => run(() => props.appInfo && props.onOpenExternal(props.appInfo.issuesUrl))} />
+        <MenuItem icon={<BookOpen size={15} />} label="README" disabled={!props.appInfo?.readmeUrl} onClick={() => run(() => props.appInfo && props.onOpenExternal(props.appInfo.readmeUrl))} />
+      </MenuButton>
+    </div>
+  );
+}
+
+function MenuButton(props: { label: string; open: string | null; setOpen: (value: string | null) => void; children: ReactNode }) {
+  const active = props.open === props.label;
+  return (
+    <div className="menuButtonWrap">
+      <button className={`menuButton ${active ? "active" : ""}`} onClick={() => props.setOpen(active ? null : props.label)}>
+        {props.label}
+      </button>
+      {active && <div className="menuPanel">{props.children}</div>}
+    </div>
+  );
+}
+
+function MenuItem(props: { icon: ReactNode; label: string; detail?: string; active?: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button className={`menuItem ${props.active ? "active" : ""}`} disabled={props.disabled} onClick={props.onClick}>
+      {props.icon}
+      <span>{props.label}</span>
+      {props.detail && <em>{props.detail}</em>}
+      {props.active && <CircleDot size={12} />}
+    </button>
+  );
+}
+
+function MenuDivider() {
+  return <div className="menuDivider" />;
 }
 
 function StatusChip(props: { label: string; value: number; tone?: "ok" | "warn" }) {
@@ -350,12 +570,18 @@ function DoctorPanel(props: { checks: Diagnostic[] }) {
   );
 }
 
-function SettingsPanel(props: { doctor: Diagnostic[]; processes: AgentProcess[]; sessions: AgentSession[] }) {
+function SettingsPanel(props: {
+  appInfo: AppInfo | null;
+  settings: AppSettings;
+  updateSettings: (patch: Partial<AppSettings>) => void;
+  resetSettings: () => void;
+  doctor: Diagnostic[];
+  processes: AgentProcess[];
+  sessions: AgentSession[];
+  onOpenPath: (targetPath?: string) => void;
+  onOpenExternal: (url: string) => void;
+}) {
   const [section, setSection] = useState<SettingsSection>("general");
-  const [defaultView, setDefaultView] = useState("Processes");
-  const [density, setDensity] = useState("Compact");
-  const [motion, setMotion] = useState(true);
-  const [theme, setTheme] = useState("Graphite");
   const warnings = props.doctor.filter((item) => item.status === "warn").length;
   return (
     <>
@@ -373,18 +599,40 @@ function SettingsPanel(props: { doctor: Diagnostic[]; processes: AgentProcess[];
             <>
               <SettingGroup title="General">
                 <SettingRow label="Control mode" detail="Read-only; control actions stay suggested until explicit force options exist.">
-                  <Toggle checked />
+                  <Badge text="read-only" />
                 </SettingRow>
                 <SettingRow label="Default view" detail="Entry point used when AgentScope opens.">
-                  <SegmentedControl value={defaultView} values={["Processes", "Sessions"]} onChange={setDefaultView} />
+                  <SegmentedControl
+                    value={props.settings.defaultView}
+                    values={[
+                      ["processes", "Processes"],
+                      ["sessions", "Sessions"],
+                      ["graph", "Relations"],
+                      ["doctor", "Doctor"]
+                    ]}
+                    onChange={(value) => props.updateSettings({ defaultView: value as AppSettings["defaultView"] })}
+                  />
                 </SettingRow>
               </SettingGroup>
               <SettingGroup title="Workspace">
                 <SettingRow label="Inspector" detail="Right rail keeps runtime evidence visible while switching main views.">
-                  <Badge text="pinned" />
+                  <SegmentedControl
+                    value={props.settings.inspector}
+                    values={[
+                      ["right", "Right"],
+                      ["hidden", "Hidden"]
+                    ]}
+                    onChange={(value) => props.updateSettings({ inspector: value as AppSettings["inspector"] })}
+                  />
                 </SettingRow>
                 <SettingRow label="Search scope" detail="SQLite title/preview plus local Codex and Claude JSONL transcripts.">
                   <Badge text="local" tone="ok" />
+                </SettingRow>
+                <SettingRow label="Search result limit" detail="Maximum matches returned by the command bar search.">
+                  <Stepper value={props.settings.searchLimit} min={8} max={80} step={8} onChange={(value) => props.updateSettings({ searchLimit: value })} />
+                </SettingRow>
+                <SettingRow label="Reset UI settings" detail="Restores theme, density, motion, inspector, font scale, and search limit.">
+                  <ActionButton label="Reset" onClick={props.resetSettings} />
                 </SettingRow>
               </SettingGroup>
             </>
@@ -392,24 +640,64 @@ function SettingsPanel(props: { doctor: Diagnostic[]; processes: AgentProcess[];
           {section === "appearance" && (
             <>
               <SettingGroup title="Appearance">
-                <SettingRow label="Theme" detail="Flat graphite metal with cool blue state accents.">
-                  <SegmentedControl value={theme} values={["Graphite", "Blue", "Contrast"]} onChange={setTheme} />
+                <SettingRow label="Theme" detail={themeDetail(props.settings.theme)}>
+                  <SegmentedControl
+                    value={props.settings.theme}
+                    values={[
+                      ["graphite", "Graphite"],
+                      ["blueprint", "Blue"],
+                      ["contrast", "Contrast"],
+                      ["midnight", "Midnight"]
+                    ]}
+                    onChange={(value) => props.updateSettings({ theme: value as ThemeName })}
+                  />
                 </SettingRow>
                 <SettingRow label="Density" detail="Controls row spacing in process and session lists.">
-                  <SegmentedControl value={density} values={["Compact", "Roomy"]} onChange={setDensity} />
+                  <SegmentedControl
+                    value={props.settings.density}
+                    values={[
+                      ["compact", "Compact"],
+                      ["comfortable", "Comfortable"],
+                      ["spacious", "Spacious"]
+                    ]}
+                    onChange={(value) => props.updateSettings({ density: value as DensityName })}
+                  />
                 </SettingRow>
-                <SettingRow label="Motion" detail="Subtle transitions for row selection and setting section changes.">
-                  <button className={`toggleButton ${motion ? "on" : ""}`} onClick={() => setMotion((value) => !value)}>
-                    {motion ? "On" : "Off"}
-                  </button>
+                <SettingRow label="Accent" detail="Changes selection rails, buttons, and status focus color.">
+                  <ColorSwatches value={props.settings.accent} onChange={(accent) => props.updateSettings({ accent })} />
+                </SettingRow>
+                <SettingRow label="Motion" detail="Controls transitions, row entrance, hover lift, and animated loading states.">
+                  <SegmentedControl
+                    value={props.settings.motion}
+                    values={[
+                      ["full", "Full"],
+                      ["reduced", "Reduced"],
+                      ["off", "Off"]
+                    ]}
+                    onChange={(value) => props.updateSettings({ motion: value as MotionName })}
+                  />
                 </SettingRow>
               </SettingGroup>
               <SettingGroup title="Typography">
-                <SettingRow label="UI font" detail="Segoe UI Variable">
-                  <CodeValue value="system" />
+                <SettingRow label="UI scale" detail="Changes global interface font size.">
+                  <SegmentedControl
+                    value={props.settings.fontScale}
+                    values={[
+                      ["small", "Small"],
+                      ["normal", "Normal"],
+                      ["large", "Large"]
+                    ]}
+                    onChange={(value) => props.updateSettings({ fontScale: value as AppSettings["fontScale"] })}
+                  />
                 </SettingRow>
                 <SettingRow label="Code font" detail="Cascadia Code">
                   <CodeValue value="mono" />
+                </SettingRow>
+                <SettingRow label="Open GitHub" detail="Public repository for issues, actions, and releases.">
+                  <ActionButton label="GitHub" onClick={() => props.appInfo && props.onOpenExternal(props.appInfo.githubUrl)} />
+                </SettingRow>
+                <SettingRow label="Open README" detail="Project overview, CLI commands, and desktop notes.">
+                  <ActionButton label="README" onClick={() => props.appInfo && props.onOpenExternal(props.appInfo.readmeUrl)} />
                 </SettingRow>
               </SettingGroup>
             </>
@@ -419,6 +707,9 @@ function SettingsPanel(props: { doctor: Diagnostic[]; processes: AgentProcess[];
               <SettingGroup title="Codex">
                 <SettingRow label="SQLite index" detail="%USERPROFILE%\\.codex\\state_5.sqlite">
                   <Badge text="read" tone="ok" />
+                </SettingRow>
+                <SettingRow label="Open Codex home" detail={props.appInfo?.codexHome ?? "Loading path"}>
+                  <ActionButton label="Open" onClick={() => props.onOpenPath(props.appInfo?.codexHome)} disabled={!props.appInfo} />
                 </SettingRow>
                 <SettingRow label="Rollout JSONL" detail="%USERPROFILE%\\.codex\\sessions\\YYYY\\MM\\DD\\rollout-*.jsonl">
                   <Badge text="stream" />
@@ -430,6 +721,9 @@ function SettingsPanel(props: { doctor: Diagnostic[]; processes: AgentProcess[];
               <SettingGroup title="Claude">
                 <SettingRow label="PID sessions" detail="%USERPROFILE%\\.claude\\sessions\\*.json">
                   <Badge text="exact" tone="ok" />
+                </SettingRow>
+                <SettingRow label="Open Claude home" detail={props.appInfo?.claudeHome ?? "Loading path"}>
+                  <ActionButton label="Open" onClick={() => props.onOpenPath(props.appInfo?.claudeHome)} disabled={!props.appInfo} />
                 </SettingRow>
                 <SettingRow label="Transcripts" detail="%USERPROFILE%\\.claude\\projects\\<encoded-cwd>\\<sessionId>.jsonl">
                   <Badge text="resolved" />
@@ -458,7 +752,9 @@ function SettingsPanel(props: { doctor: Diagnostic[]; processes: AgentProcess[];
                   <Badge text="evidence" tone="warn" />
                 </SettingRow>
                 <SettingRow label="Unknown" detail="Weak time-only candidates remain visible but are not treated as matches.">
-                  <Badge text="weak" />
+                  <button className={`toggleButton ${props.settings.showUnknownCandidates ? "on" : ""}`} onClick={() => props.updateSettings({ showUnknownCandidates: !props.settings.showUnknownCandidates })}>
+                    {props.settings.showUnknownCandidates ? "Show" : "Hide"}
+                  </button>
                 </SettingRow>
               </SettingGroup>
             </>
@@ -511,18 +807,17 @@ function SettingRow(props: { label: string; detail: string; children: ReactNode 
   );
 }
 
-function Toggle(props: { checked?: boolean }) {
-  return <span className={`toggle ${props.checked ? "checked" : ""}`} />;
-}
-
-function SegmentedControl(props: { value: string; values: string[]; onChange: (value: string) => void }) {
+function SegmentedControl(props: { value: string; values: Array<string | [string, string]>; onChange: (value: string) => void }) {
   return (
     <span className="segmented">
-      {props.values.map((value) => (
+      {props.values.map((item) => {
+        const [value, label] = Array.isArray(item) ? item : [item, item];
+        return (
         <button className={props.value === value ? "active" : ""} key={value} onClick={() => props.onChange(value)}>
-          {value}
+          {label}
         </button>
-      ))}
+        );
+      })}
     </span>
   );
 }
@@ -531,7 +826,43 @@ function CodeValue(props: { value: string }) {
   return <span className="codeValue mono">{props.value}</span>;
 }
 
-function Inspector(props: { selected: Selection; relations: Relation[] }) {
+function ColorSwatches(props: { value: string; onChange: (value: string) => void }) {
+  const colors = ["#b8c2cc", "#4aa3ff", "#8b5cf6", "#f59e0b", "#f43f5e", "#e5e7eb"];
+  return (
+    <div className="swatches">
+      {colors.map((color) => (
+        <button
+          className={props.value.toLowerCase() === color ? "active" : ""}
+          key={color}
+          onClick={() => props.onChange(color)}
+          style={{ background: color }}
+          title={color}
+        />
+      ))}
+    </div>
+  );
+}
+
+function Stepper(props: { value: number; min: number; max: number; step: number; onChange: (value: number) => void }) {
+  const change = (delta: number) => props.onChange(Math.min(props.max, Math.max(props.min, props.value + delta)));
+  return (
+    <div className="stepper">
+      <button onClick={() => change(-props.step)}>-</button>
+      <span>{props.value}</span>
+      <button onClick={() => change(props.step)}>+</button>
+    </div>
+  );
+}
+
+function ActionButton(props: { label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button className="actionButton" disabled={props.disabled} onClick={props.onClick}>
+      {props.label}
+    </button>
+  );
+}
+
+function Inspector(props: { selected: Selection; relations: Relation[]; showUnknownCandidates: boolean }) {
   if (!props.selected) {
     return (
       <aside className="inspector">
@@ -546,7 +877,7 @@ function Inspector(props: { selected: Selection; relations: Relation[] }) {
       <aside className="inspector">
         <InspectorHeader title={process.windowTitle || process.processName} subtitle={`PID ${process.pid}`} agent={process.agent} />
         <FieldGroup title="Likely Sessions">
-          <CandidateList candidates={process.sessionCandidates ?? []} />
+          <CandidateList candidates={process.sessionCandidates ?? []} showUnknown={props.showUnknownCandidates} />
         </FieldGroup>
         <FieldGroup title="Runtime">
           <Field label="PID" value={process.pid} />
@@ -602,11 +933,12 @@ function Inspector(props: { selected: Selection; relations: Relation[] }) {
   );
 }
 
-function CandidateList(props: { candidates: SessionCandidate[] }) {
-  if (!props.candidates.length) return <p className="muted blockText">No candidate session. AgentScope will not guess without PID, cwd, transcript, title, or time evidence.</p>;
+function CandidateList(props: { candidates: SessionCandidate[]; showUnknown: boolean }) {
+  const candidates = props.showUnknown ? props.candidates : props.candidates.filter((candidate) => candidate.confidence !== "unknown");
+  if (!candidates.length) return <p className="muted blockText">No candidate session. AgentScope will not guess without PID, cwd, transcript, title, or time evidence.</p>;
   return (
     <div className="candidateList">
-      {props.candidates.map((candidate) => (
+      {candidates.map((candidate) => (
         <div className="candidateItem" key={`${candidate.agent}:${candidate.sessionId}`}>
           <div className="candidateHead">
             <AgentPill agent={candidate.agent} />
@@ -774,6 +1106,28 @@ function candidateTitle(candidate: SessionCandidate) {
   return candidate.title || short(candidate.sessionId);
 }
 
+function themeDetail(theme: ThemeName) {
+  const details: Record<ThemeName, string> = {
+    graphite: "Neutral graphite metal with cool state accents.",
+    blueprint: "Dark blue operational workspace.",
+    contrast: "Maximum contrast black interface.",
+    midnight: "Near-black focus theme with muted panels."
+  };
+  return details[theme];
+}
+
+function selectedTranscriptPath(selection: Selection): string | undefined {
+  if (!selection) return undefined;
+  if (selection.type === "session") return selection.value.transcriptPath;
+  return selection.value.sessionCandidates?.find((candidate) => candidate.transcriptPath)?.transcriptPath;
+}
+
+function selectedCwdPath(selection: Selection): string | undefined {
+  if (!selection) return undefined;
+  if (selection.type === "session") return selection.value.cwd;
+  return selection.value.sessionCandidates?.find((candidate) => candidate.cwd)?.cwd;
+}
+
 function short(value?: string) {
   if (!value) return "";
   return value.length > 28 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
@@ -788,6 +1142,33 @@ function formatDate(value: string) {
 function displayTitle(session: AgentSession) {
   const title = session.title || short(session.sessionId);
   return title.length > 160 ? `${title.slice(0, 157)}...` : title;
+}
+
+function Toast(props: { message: string; onClose: () => void }) {
+  useEffect(() => {
+    const timer = window.setTimeout(props.onClose, 4200);
+    return () => window.clearTimeout(timer);
+  }, [props.onClose]);
+  return (
+    <button className="toast" onClick={props.onClose}>
+      {props.message}
+    </button>
+  );
+}
+
+function loadSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem(settingsKey);
+    if (!raw) return defaultSettings;
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    return { ...defaultSettings, ...parsed };
+  } catch {
+    return defaultSettings;
+  }
+}
+
+function saveSettings(settings: AppSettings): void {
+  localStorage.setItem(settingsKey, JSON.stringify(settings));
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

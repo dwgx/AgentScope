@@ -1,7 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import os from "node:os";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import type { ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 
@@ -75,6 +76,27 @@ async function createWindow(): Promise<void> {
 ipcMain.handle("snapshot:get", async () => buildSnapshot());
 ipcMain.handle("doctor:get", async () => runDoctor());
 ipcMain.handle("search:run", async (_event, query: string, limit = 50) => searchAll(query, undefined, limit));
+ipcMain.handle("snapshot:export", async (_event, snapshot: ScopeSnapshot) => exportSnapshot(snapshot));
+ipcMain.handle("app:info", async () => appInfo());
+ipcMain.handle("app:reload", async () => {
+  mainWindow?.reload();
+  return true;
+});
+ipcMain.handle("app:quit", async () => {
+  app.quit();
+  return true;
+});
+ipcMain.handle("shell:openExternal", async (_event, url: string) => {
+  await shell.openExternal(url);
+  return true;
+});
+ipcMain.handle("shell:openPath", async (_event, targetPath: string) => {
+  return shell.openPath(targetPath);
+});
+ipcMain.handle("shell:revealPath", async (_event, targetPath: string) => {
+  shell.showItemInFolder(targetPath);
+  return true;
+});
 ipcMain.handle("inspect:pid", async (_event, pid: number) => {
   const snapshot = await buildSnapshot();
   return {
@@ -167,6 +189,33 @@ async function searchAll(query: string, home?: string, limit?: number) {
     lastCoreError = error instanceof Error ? error.message : String(error);
     return [];
   }
+}
+
+async function exportSnapshot(snapshot: ScopeSnapshot) {
+  const filename = `AgentScope-snapshot-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  const options = {
+    title: "Export AgentScope Snapshot",
+    defaultPath: path.join(app.getPath("documents"), filename),
+    filters: [{ name: "JSON", extensions: ["json"] }]
+  };
+  const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return { canceled: true };
+  fs.writeFileSync(result.filePath, JSON.stringify(snapshot, null, 2), "utf8");
+  return { canceled: false, path: result.filePath };
+}
+
+function appInfo() {
+  const home = process.env.USERPROFILE || os.homedir();
+  return {
+    userData: app.getPath("userData"),
+    home,
+    codexHome: path.join(home, ".codex"),
+    claudeHome: path.join(home, ".claude"),
+    githubUrl: "https://github.com/dwgx/AgentScope",
+    actionsUrl: "https://github.com/dwgx/AgentScope/actions",
+    issuesUrl: "https://github.com/dwgx/AgentScope/issues",
+    readmeUrl: "https://github.com/dwgx/AgentScope#readme"
+  };
 }
 
 async function findProcess(snapshot: ScopeSnapshot, pid: number) {
