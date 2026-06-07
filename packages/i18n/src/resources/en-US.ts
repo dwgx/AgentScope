@@ -12,6 +12,7 @@ export const enUS = {
       open: "Open",
       refresh: "Refresh",
       reset: "Reset",
+      clear: "Clear",
       show: "Show",
       hide: "Hide"
     },
@@ -119,25 +120,71 @@ export const enUS = {
     warn: "Warn",
     refreshTitle: "Refresh",
     results: "Results",
+    clearSearch: "Clear search",
     history: "Recent searches",
-    noHistory: "No recent searches"
+    noHistory: "No recent searches",
+    suggestions: "Maybe you want",
+    noSuggestions: "No contextual suggestions yet",
+    autoSearch: "searches as you type",
+    contextTitle: "Suggestions for {{view}}",
+    suggestion: {
+      refresh: "Refresh current index",
+      processes: "Inspect live Win32 processes",
+      sessions: "Browse indexed sessions",
+      relations: "Review process and session graph",
+      settings: "Tune workspace behavior",
+      query: "Search {{kind}}"
+    }
   },
   views: {
     processes: {
       emptyTitle: "No related processes",
       emptyDetail: "Codex, Claude, node_repl, app-server, or daemon processes were not found.",
+      captureOffTitle: "Runtime capture is off",
+      captureOffDetail: "Enable Win32_Process in Settings > Runtime to show live agent processes.",
       subtitle_one: "{{count}} live agent-related Win32 row",
       subtitle_other: "{{count}} live agent-related Win32 rows",
       noCandidate: "No session candidate yet",
       weakEvidence: "weak evidence",
       candidate: "candidate",
-      score: "score {{score}}"
+      score: "evidence {{score}}",
+      groupCount_one: "{{count}} process",
+      groupCount_other: "{{count}} processes",
+      sort: {
+        label: "Sort",
+        time: "Time",
+        runtime: "Runtime",
+        memory: "Memory",
+        score: "Evidence",
+        tree: "Tree"
+      },
+      group: {
+        label: "Group",
+        agent: "Agent",
+        parent: "Parent",
+        cwd: "cwd",
+        none: "Flat"
+      },
+      context: {
+        inspect: "Inspect process",
+        jumpSession: "Jump to session"
+      }
     },
     sessions: {
       emptyTitle: "No sessions indexed",
       emptyDetail: "Run Doctor to check Codex and Claude local paths.",
       subtitle_one: "{{count}} Claude + Codex record",
-      subtitle_other: "{{count}} Claude + Codex records"
+      subtitle_other: "{{count}} Claude + Codex records",
+      groupCount_one: "{{count}} session",
+      groupCount_other: "{{count}} sessions",
+      children_one: "{{count}} child",
+      children_other: "{{count}} children",
+      group: {
+        cwd: "cwd",
+        parent: "Parent",
+        agent: "Agent",
+        none: "Flat"
+      }
     },
     relations: {
       emptyTitle: "No relations found",
@@ -150,6 +197,10 @@ export const enUS = {
       emptyDetail: "Refresh to run local environment checks.",
       subtitle_one: "{{count}} environment check",
       subtitle_other: "{{count}} environment checks"
+    },
+    loading: {
+      title: "Reading local agent state",
+      detail: "Enumerating Win32_Process, Codex SQLite/JSONL, and Claude session files."
     }
   },
   settings: {
@@ -199,6 +250,28 @@ export const enUS = {
       label: "Search result limit",
       detail: "Maximum matches returned by the command bar search."
     },
+    searchHistory: {
+      label: "Search history",
+      detail: "Stores recent search terms locally. Keep disabled for sensitive transcript work.",
+      clearLabel: "Clear search history",
+      clearDetail_one: "{{count}} stored query.",
+      clearDetail_other: "{{count}} stored queries."
+    },
+    suggestions: {
+      label: "Context suggestions",
+      detail: "Shows page-aware search prompts from the selected process, session, cwd, model, tool, and diagnostics."
+    },
+    transcriptPreview: {
+      label: "Transcript hit preview",
+      detail: "Shows short redacted JSONL excerpts with line numbers when a search result is selected."
+    },
+    suggestion: {
+      theme: "theme",
+      language: "language",
+      motion: "motion",
+      indexing: "indexing",
+      runtime: "runtime"
+    },
     resetUi: {
       label: "Reset UI settings",
       detail: "Restores theme, density, motion, inspector, font scale, language, and search limit."
@@ -241,9 +314,51 @@ export const enUS = {
       normal: "Normal",
       large: "Large"
     },
+    fontMode: {
+      label: "Font mode",
+      detail: "Use one font everywhere, language-aware fallback, or fully custom per language.",
+      language: "Language",
+      unified: "Unified",
+      custom: "Custom"
+    },
+    fontPreset: {
+      label: "Font preset",
+      detail: "Apply a tested font stack for Windows, Claude-like reading, Japanese textbook, or dense trace work.",
+      windows: "Windows",
+      language: "Language",
+      claude: "Claude",
+      japaneseTextbook: "Textbook",
+      dense: "Dense",
+      custom: "Custom"
+    },
+    lineHeight: {
+      label: "Line height",
+      detail: "Controls vertical rhythm for mixed language text and dense evidence rows.",
+      compact: "Compact",
+      normal: "Normal",
+      spacious: "Spacious"
+    },
+    fonts: {
+      unified: "Unified UI font",
+      unifiedDetail: "Used when Font mode is Unified. PingFang, Inter, Anthropic Sans, and other installed fonts can be typed manually.",
+      latin: "English / Latin font",
+      latinDetail: "Primary font for English menus, labels, and numbers.",
+      chinese: "Chinese font",
+      chineseDetail: "Fallback for Simplified/Traditional Chinese labels and transcript text.",
+      japanese: "Japanese font",
+      japaneseDetail: "Yu Gothic UI is compact; UD Digi Kyokasho gives a textbook reading style.",
+      korean: "Korean font",
+      koreanDetail: "Malgun Gothic is the Windows-native Korean UI baseline.",
+      detected: "Installed fonts",
+      detectedDetail_one: "{{count}} font family detected on this Windows profile.",
+      detectedDetail_other: "{{count}} font families detected on this Windows profile."
+    },
+    fontPreview: {
+      title: "Typography preview"
+    },
     codeFont: {
       label: "Code font",
-      detail: "Cascadia Code"
+      detail: "Code, paths, command lines, IDs, and tabular evidence."
     },
     links: {
       githubLabel: "Open GitHub",
@@ -293,9 +408,12 @@ export const enUS = {
     runtime: "Runtime",
     identity: "Identity",
     transcript: "Transcript",
+    modelRuntime: "Model + Runtime",
+    control: "Safe Control",
     indexMetadata: "Index Metadata",
     relations: "Relations",
     evidence: "Evidence",
+    searchHit: "Search Hit",
     activity: "Activity",
     topEvents: "Top Events",
     topTools: "Top Tools",
@@ -306,6 +424,12 @@ export const enUS = {
     noCandidate:
       "No candidate session. AgentScope will not guess without PID, cwd, transcript, title, or time evidence.",
     noCwdEvidence: "No cwd evidence",
+    safeControlDetail:
+      "Read-only mode: open, reveal, resume command generation, and export are allowed; kill/archive stay disabled until explicit force controls exist.",
+    actions: {
+      openTranscript: "Open transcript",
+      revealTranscript: "Reveal transcript"
+    },
     fields: {
       pid: "PID",
       ppid: "PPID",
@@ -336,7 +460,16 @@ export const enUS = {
       inputTokens: "Input",
       outputTokens: "Output",
       cacheRead: "Cache read",
-      cacheWrite: "Cache write"
+      cacheWrite: "Cache write",
+      modelProvider: "Provider",
+      model: "Model",
+      reasoningEffort: "Effort",
+      tokensUsed: "Tokens used",
+      approvalMode: "Approval",
+      sandboxPolicy: "Sandbox",
+      entrypoint: "Entrypoint",
+      resumeCommand: "Resume",
+      safeControl: "Boundary"
     }
   },
   toast: {

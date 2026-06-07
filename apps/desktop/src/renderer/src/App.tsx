@@ -1,31 +1,30 @@
 import {
-  Activity,
   AlertTriangle,
   BookOpen,
+  Bot,
   CheckCircle2,
   ChevronRight,
   CircleDot,
+  Cpu,
   Database,
   Download,
   ExternalLink,
-  FileJson,
   FileText,
   FolderOpen,
-  GitBranch,
   Github,
-  LayoutList,
-  MonitorCog,
+  MessagesSquare,
+  Network,
   Palette,
   RefreshCw,
   Search,
   Settings,
-  ShieldCheck,
   SlidersHorizontal,
-  Terminal,
+  Stethoscope,
+  Workflow,
   X
 } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createRoot } from "react-dom/client";
 import { useTranslation } from "react-i18next";
 import type { LanguageSetting } from "@agentscope/i18n";
@@ -41,6 +40,8 @@ import type {
   SessionCandidate
 } from "@agentscope/shared";
 import { i18n, resolveAppLocale } from "./i18n.js";
+import claudeLogoUrl from "./assets/claude-color.svg";
+import codexLogoUrl from "./assets/codex-color.svg";
 import "./styles.css";
 
 type View = "processes" | "sessions" | "graph" | "doctor" | "settings";
@@ -48,12 +49,52 @@ type SettingsSection = "general" | "appearance" | "indexing" | "runtime" | "diag
 type ThemeName = "graphite" | "blueprint" | "contrast" | "midnight";
 type DensityName = "compact" | "comfortable" | "spacious";
 type MotionName = "full" | "reduced" | "off";
+type FontMode = "language" | "unified" | "custom";
+type FontPreset = "windows" | "language" | "claude" | "japaneseTextbook" | "dense" | "custom";
 type StrongConfidence = "exact" | "indexed" | "heuristic";
-type SelectionKey = { type: "session"; agent: AgentKind; id: string } | { type: "process"; pid: number } | null;
+type ProcessSortMode = "time" | "memory" | "runtime" | "score" | "tree";
+type ProcessGroupMode = "agent" | "parent" | "cwd" | "none";
+type SessionGroupMode = "agent" | "cwd" | "parent" | "none";
+type SelectionKey =
+  | { type: "session"; agent: AgentKind; id: string }
+  | { type: "process"; pid: number }
+  | null;
 type Selection =
   | { type: "session"; value: AgentSession }
   | { type: "process"; value: AgentProcess }
   | null;
+type RelationSide = "source" | "target";
+
+interface SearchResultRecord extends Record<string, unknown> {
+  agent?: string;
+  sessionId?: string;
+  source?: string;
+  path?: string;
+  line?: number;
+  query?: string;
+}
+
+interface SearchSuggestion {
+  label: string;
+  detail: string;
+  query?: string;
+  targetView?: View;
+}
+
+interface TranscriptContext {
+  path: string;
+  line: number;
+  query?: string;
+  eventType?: string;
+  timestamp?: string;
+  excerpt?: string;
+}
+
+interface RelationEndpointDisplay {
+  title: string;
+  detail?: string;
+  raw: string;
+}
 
 interface AppInfo {
   userData: string;
@@ -73,10 +114,24 @@ interface AppSettings {
   density: DensityName;
   motion: MotionName;
   accent: string;
+  runtimeWin32Enabled: boolean;
+  runtimeWindowTitlesEnabled: boolean;
+  runtimeCandidatesEnabled: boolean;
   defaultView: Exclude<View, "settings">;
   inspector: "right" | "hidden";
   fontScale: "small" | "normal" | "large";
+  fontMode: FontMode;
+  fontPreset: FontPreset;
+  unifiedFont: string;
+  latinFont: string;
+  chineseFont: string;
+  japaneseFont: string;
+  koreanFont: string;
+  codeFont: string;
+  uiLineHeight: "compact" | "normal" | "spacious";
   searchLimit: number;
+  suggestionsEnabled: boolean;
+  transcriptPreviewEnabled: boolean;
   showUnknownCandidates: boolean;
 }
 
@@ -87,10 +142,24 @@ const defaultSettings: AppSettings = {
   density: "compact",
   motion: "full",
   accent: "#b8c2cc",
+  runtimeWin32Enabled: true,
+  runtimeWindowTitlesEnabled: true,
+  runtimeCandidatesEnabled: true,
   defaultView: "processes",
   inspector: "right",
   fontScale: "normal",
+  fontMode: "language",
+  fontPreset: "language",
+  unifiedFont: "Segoe UI Variable Text",
+  latinFont: "Segoe UI Variable Text",
+  chineseFont: "Microsoft YaHei UI",
+  japaneseFont: "Yu Gothic UI",
+  koreanFont: "Malgun Gothic",
+  codeFont: "Cascadia Code",
+  uiLineHeight: "normal",
   searchLimit: 24,
+  suggestionsEnabled: true,
+  transcriptPreviewEnabled: true,
   showUnknownCandidates: true
 };
 const themeValues: ThemeName[] = ["graphite", "blueprint", "contrast", "midnight"];
@@ -105,6 +174,16 @@ const defaultViewValues: AppSettings["defaultView"][] = [
 ];
 const inspectorValues: AppSettings["inspector"][] = ["right", "hidden"];
 const fontScaleValues: AppSettings["fontScale"][] = ["small", "normal", "large"];
+const fontModeValues: FontMode[] = ["language", "unified", "custom"];
+const fontPresetValues: FontPreset[] = [
+  "windows",
+  "language",
+  "claude",
+  "japaneseTextbook",
+  "dense",
+  "custom"
+];
+const lineHeightValues: AppSettings["uiLineHeight"][] = ["compact", "normal", "spacious"];
 const accentValues = ["#b8c2cc", "#4aa3ff", "#8b5cf6", "#f59e0b", "#f43f5e", "#e5e7eb"] as const;
 
 function App() {
@@ -112,22 +191,44 @@ function App() {
   const [snapshot, setSnapshot] = useState<ScopeSnapshot | null>(null);
   const [doctor, setDoctor] = useState<Diagnostic[]>([]);
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
-  const [view, setView] = useState<View>(settings.defaultView);
+  const [view, setViewState] = useState<View>(settings.defaultView);
+  const [viewHistory, setViewHistory] = useState<View[]>([]);
   const [selectionKey, setSelectionKey] = useState<SelectionKey>(null);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Record<string, unknown>[]>([]);
+  const [results, setResults] = useState<SearchResultRecord[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchHistory, setSearchHistory] = useState<string[]>(() => loadSearchHistory());
-  const [historyExpanded, setHistoryExpanded] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [highlightTarget, setHighlightTarget] = useState<SearchResultRecord | null>(null);
+  const searchDebounceRef = useRef<number | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+  const [installedFonts, setInstalledFonts] = useState<string[]>([]);
 
   function updateSettings(patch: Partial<AppSettings>) {
     setSettings((current) => {
       const next = { ...current, ...patch };
       saveSettings(next);
       return next;
+    });
+  }
+
+  function navigateView(nextView: View) {
+    setViewState((current) => {
+      if (current === nextView) return current;
+      setViewHistory((history) => [current, ...history.filter((item) => item !== current)].slice(0, 16));
+      return nextView;
+    });
+  }
+
+  function goBack() {
+    setViewHistory((history) => {
+      const [previous, ...rest] = history;
+      if (previous) {
+        setViewState(previous);
+        return rest;
+      }
+      setViewState((current) => (current === settings.defaultView ? current : settings.defaultView));
+      return [];
     });
   }
 
@@ -149,6 +250,7 @@ function App() {
   useEffect(() => {
     void refresh();
     void window.agentscope.getAppInfo().then(setAppInfo);
+    void window.agentscope.listFonts().then((fonts) => setInstalledFonts(fonts));
   }, []);
 
   useEffect(() => {
@@ -156,6 +258,38 @@ function App() {
     void i18n.changeLanguage(locale);
     document.documentElement.lang = locale;
   }, [settings.language, appInfo?.locale]);
+
+  useEffect(() => {
+    const openGlobalSearch = (event: KeyboardEvent) => {
+      const isFind = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f";
+      if (isFind) {
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+      if (event.key !== "Escape") return;
+      if (searchOpen) {
+        event.preventDefault();
+        setSearchOpen(false);
+        return;
+      }
+      if (viewHistory.length > 0 || view !== settings.defaultView) {
+        event.preventDefault();
+        goBack();
+      }
+    };
+    window.addEventListener("keydown", openGlobalSearch);
+    return () => window.removeEventListener("keydown", openGlobalSearch);
+  }, [searchOpen, settings.defaultView, view, viewHistory.length]);
+
+  useEffect(() => {
+    if (!searchOpen) return undefined;
+    window.clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = window.setTimeout(() => {
+      void runSearchText(query);
+    }, query.trim() ? 180 : 0);
+    return () => window.clearTimeout(searchDebounceRef.current);
+  }, [query, searchOpen, settings.searchLimit]);
 
   async function runSearch() {
     await runSearchText(query);
@@ -168,9 +302,14 @@ function App() {
     }
     const trimmed = value.trim();
     const nextResults = await window.agentscope.search(trimmed, settings.searchLimit);
-    setQuery(trimmed);
-    setResults(nextResults);
-    setSearchHistory((current) => saveSearchHistory(trimmed, current));
+    setResults(nextResults.map((result) => ({ ...result, query: trimmed })));
+  }
+
+  function clearSearchState() {
+    window.clearTimeout(searchDebounceRef.current);
+    setQuery("");
+    setResults([]);
+    setHighlightTarget(null);
   }
 
   async function exportCurrentSnapshot() {
@@ -205,11 +344,21 @@ function App() {
   }
 
   const sessions = snapshot?.sessions ?? [];
-  const processes = snapshot?.processes ?? [];
+  const rawProcesses = snapshot?.processes ?? [];
+  const processes = useMemo(
+    () => visibleProcesses(rawProcesses, settings),
+    [
+      rawProcesses,
+      settings.runtimeWin32Enabled,
+      settings.runtimeWindowTitlesEnabled,
+      settings.runtimeCandidatesEnabled
+    ]
+  );
   const relations = snapshot?.relations ?? [];
   const selected = resolveSelection(selectionKey, sessions, processes);
   const activeProcesses = processes.filter((item) => item.agent !== "unknown");
   const matchedProcesses = processes.filter((item) => strongCandidates(item).length > 0).length;
+  const initialLoading = snapshot === null && loading;
   const counts = useMemo(
     () => ({
       sessions: sessions.length,
@@ -222,6 +371,13 @@ function App() {
     [sessions, processes, matchedProcesses, doctor]
   );
   const resetSettings = () => updateSettings(defaultSettings);
+  const suggestions = useMemo(
+    () =>
+      buildSearchSuggestions(view, selected, sessions, processes, relations, doctor, (key, options) =>
+        String(options ? t(key, options) : t(key))
+      ),
+    [view, selected, sessions, processes, relations, doctor, t]
+  );
 
   return (
     <main
@@ -231,11 +387,17 @@ function App() {
       data-motion={settings.motion}
       data-inspector={settings.inspector}
       data-font={settings.fontScale}
-      style={{ "--accent": settings.accent } as CSSProperties}
+      data-line-height={settings.uiLineHeight}
+      style={
+        {
+          "--accent": settings.accent,
+          ...fontStyleVariables(settings)
+        } as CSSProperties
+      }
     >
       <Sidebar
         view={view}
-        setView={setView}
+        setView={navigateView}
         warnings={counts.warnings}
         loading={loading}
         onRefresh={() => void refresh()}
@@ -257,7 +419,7 @@ function App() {
           onOpenPath={(targetPath) => void openPath(targetPath)}
           onRevealPath={(targetPath) => void revealPath(targetPath)}
           onOpenExternal={(url) => void openExternal(url)}
-          onSetView={setView}
+          onSetView={navigateView}
           settings={settings}
           updateSettings={updateSettings}
         />
@@ -267,12 +429,20 @@ function App() {
             setQuery={setQuery}
             runSearch={() => void runSearch()}
             runSearchText={(value) => void runSearchText(value)}
+            clearSearch={clearSearchState}
             results={results}
-            history={searchHistory}
-            historyExpanded={historyExpanded}
-            setHistoryExpanded={setHistoryExpanded}
-            setView={setView}
+            suggestions={settings.suggestionsEnabled ? suggestions : []}
+            currentView={view}
+            setView={navigateView}
             refresh={() => void refresh()}
+            selectResult={(result) => {
+              const target = searchResultSelection(result, sessions);
+              if (target) {
+                setSelectionKey(target);
+                navigateView("sessions");
+                setHighlightTarget(result);
+              }
+            }}
             close={() => setSearchOpen(false)}
           />
         )}
@@ -283,18 +453,33 @@ function App() {
                 processes={activeProcesses}
                 sessions={sessions}
                 selectedPid={selected?.type === "process" ? selected.value.pid : undefined}
+                loading={initialLoading}
+                runtimeWin32Enabled={settings.runtimeWin32Enabled}
                 onSelect={(process) => setSelectionKey({ type: "process", pid: process.pid })}
+                onSelectSession={(candidate) =>
+                  setSelectionKey({
+                    type: "session",
+                    agent: candidate.agent,
+                    id: candidate.sessionId
+                  })
+                }
               />
             )}
             {view === "sessions" && (
               <SessionList
                 sessions={sessions}
                 selectedKey={selected?.type === "session" ? sessionKey(selected.value) : undefined}
-                onSelect={(session) => setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId })}
+                loading={initialLoading}
+                highlightTarget={highlightTarget}
+                onSelect={(session) =>
+                  setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId })
+                }
               />
             )}
-            {view === "graph" && <RelationList relations={relations} sessions={sessions} />}
-            {view === "doctor" && <DoctorPanel checks={doctor} />}
+            {view === "graph" && (
+            <RelationList relations={relations} sessions={sessions} loading={initialLoading} />
+            )}
+            {view === "doctor" && <DoctorPanel checks={doctor} loading={initialLoading} />}
             {view === "settings" && (
               <SettingsPanel
                 appInfo={appInfo}
@@ -302,8 +487,9 @@ function App() {
                 updateSettings={updateSettings}
                 resetSettings={resetSettings}
                 doctor={doctor}
-                processes={processes}
+                processes={rawProcesses}
                 sessions={sessions}
+                installedFonts={installedFonts}
                 onOpenPath={(targetPath) => void openPath(targetPath)}
                 onOpenExternal={(url) => void openExternal(url)}
               />
@@ -313,7 +499,12 @@ function App() {
             <Inspector
               selected={selected}
               relations={relations}
+              loading={initialLoading}
               showUnknownCandidates={settings.showUnknownCandidates}
+              transcriptPreviewEnabled={settings.transcriptPreviewEnabled}
+              highlightTarget={highlightTarget}
+              onOpenPath={(targetPath) => void openPath(targetPath)}
+              onRevealPath={(targetPath) => void revealPath(targetPath)}
             />
           )}
         </div>
@@ -340,7 +531,7 @@ function Sidebar(props: {
       </div>
       <div className="brand">
         <div className="brandMark">
-          <MonitorCog size={18} />
+          <AgentScopeMark size={21} />
         </div>
         <div>
           <h1>AgentScope</h1>
@@ -350,25 +541,25 @@ function Sidebar(props: {
       <nav className="nav">
         <NavButton
           active={props.view === "processes"}
-          icon={<Activity size={17} />}
+          icon={<Workflow size={17} />}
           label={t("nav.processes")}
           onClick={() => props.setView("processes")}
         />
         <NavButton
           active={props.view === "sessions"}
-          icon={<LayoutList size={17} />}
+          icon={<MessagesSquare size={17} />}
           label={t("nav.sessions")}
           onClick={() => props.setView("sessions")}
         />
         <NavButton
           active={props.view === "graph"}
-          icon={<GitBranch size={17} />}
+          icon={<Network size={17} />}
           label={t("nav.relations")}
           onClick={() => props.setView("graph")}
         />
         <NavButton
           active={props.view === "doctor"}
-          icon={<ShieldCheck size={17} />}
+          icon={<Stethoscope size={17} />}
           label={t("nav.doctor")}
           badge={props.warnings}
           onClick={() => props.setView("doctor")}
@@ -511,9 +702,28 @@ function TopMenus(props: {
     action();
     close();
   };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".menuText")) return;
+      close();
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
   return (
     <div className="menuText">
-      <MenuButton label={t("menu.file.label")} open={open} setOpen={setOpen}>
+      <MenuButton id="file" label={t("menu.file.label")} open={open} setOpen={setOpen}>
         <MenuItem
           icon={<Download size={15} />}
           label={t("menu.file.exportSnapshot")}
@@ -554,27 +764,27 @@ function TopMenus(props: {
           onClick={() => run(() => void window.agentscope.quitApp())}
         />
       </MenuButton>
-      <MenuButton label={t("menu.view.label")} open={open} setOpen={setOpen}>
+      <MenuButton id="view" label={t("menu.view.label")} open={open} setOpen={setOpen}>
         <MenuItem
-          icon={<Activity size={15} />}
+          icon={<Workflow size={15} />}
           label={t("nav.processes")}
           active={props.currentView === "processes"}
           onClick={() => run(() => props.onSetView("processes"))}
         />
         <MenuItem
-          icon={<LayoutList size={15} />}
+          icon={<MessagesSquare size={15} />}
           label={t("nav.sessions")}
           active={props.currentView === "sessions"}
           onClick={() => run(() => props.onSetView("sessions"))}
         />
         <MenuItem
-          icon={<GitBranch size={15} />}
+          icon={<Network size={15} />}
           label={t("nav.relations")}
           active={props.currentView === "graph"}
           onClick={() => run(() => props.onSetView("graph"))}
         />
         <MenuItem
-          icon={<ShieldCheck size={15} />}
+          icon={<Stethoscope size={15} />}
           label={t("nav.doctor")}
           active={props.currentView === "doctor"}
           onClick={() => run(() => props.onSetView("doctor"))}
@@ -624,7 +834,7 @@ function TopMenus(props: {
           }
         />
       </MenuButton>
-      <MenuButton label={t("menu.trace.label")} open={open} setOpen={setOpen}>
+      <MenuButton id="trace" label={t("menu.trace.label")} open={open} setOpen={setOpen}>
         <MenuItem
           icon={<RefreshCw size={15} />}
           label={t("menu.trace.refreshIndex")}
@@ -641,7 +851,7 @@ function TopMenus(props: {
           }
         />
         <MenuItem
-          icon={<FileJson size={15} />}
+          icon={<TranscriptGlyph size={15} />}
           label={t("menu.trace.openSelectedTranscript")}
           detail={t("menu.detail.jsonl")}
           disabled={!selectedTranscript}
@@ -671,7 +881,7 @@ function TopMenus(props: {
           }
         />
       </MenuButton>
-      <MenuButton label={t("menu.help.label")} open={open} setOpen={setOpen}>
+      <MenuButton id="help" label={t("menu.help.label")} open={open} setOpen={setOpen}>
         <MenuItem
           icon={<Github size={15} />}
           label={t("menu.help.githubRepository")}
@@ -703,17 +913,18 @@ function TopMenus(props: {
 }
 
 function MenuButton(props: {
+  id: string;
   label: string;
   open: string | null;
   setOpen: (value: string | null) => void;
   children: ReactNode;
 }) {
-  const active = props.open === props.label;
+  const active = props.open === props.id;
   return (
     <div className="menuButtonWrap">
       <button
         className={`menuButton ${active ? "active" : ""}`}
-        onClick={() => props.setOpen(active ? null : props.label)}
+        onClick={() => props.setOpen(active ? null : props.id)}
       >
         {props.label}
       </button>
@@ -761,16 +972,55 @@ function ProcessList(props: {
   processes: AgentProcess[];
   sessions: AgentSession[];
   selectedPid?: number | undefined;
+  loading: boolean;
+  runtimeWin32Enabled: boolean;
   onSelect: (process: AgentProcess) => void;
+  onSelectSession: (candidate: SessionCandidate) => void;
 }) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
+  const [sortMode, setSortMode] = useState<ProcessSortMode>("time");
+  const [groupMode, setGroupMode] = useState<ProcessGroupMode>("none");
+  const [, startProcessListTransition] = useTransition();
+  const [isReordering, setIsReordering] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [contextMenu, setContextMenu] = useState<{
+    process: AgentProcess;
+    x: number;
+    y: number;
+  } | null>(null);
+  const groups = useMemo(
+    () => groupProcesses(props.processes, sortMode, groupMode),
+    [props.processes, sortMode, groupMode]
+  );
+  const toggleGroup = (key: string) => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const reorder = (action: () => void) => {
+    setIsReordering(true);
+    startProcessListTransition(action);
+    window.setTimeout(() => setIsReordering(false), 140);
+  };
+  if (props.loading) return <LoadingState />;
   if (!props.processes.length) {
     return (
       <EmptyState
-        icon={<Activity size={22} />}
-        title={t("views.processes.emptyTitle")}
-        detail={t("views.processes.emptyDetail")}
+        icon={<Workflow size={22} />}
+        title={t(
+          props.runtimeWin32Enabled
+            ? "views.processes.emptyTitle"
+            : "views.processes.captureOffTitle"
+        )}
+        detail={t(
+          props.runtimeWin32Enabled
+            ? "views.processes.emptyDetail"
+            : "views.processes.captureOffDetail"
+        )}
       />
     );
   }
@@ -780,66 +1030,255 @@ function ProcessList(props: {
         title={t("nav.processes")}
         subtitle={t("views.processes.subtitle", { count: props.processes.length })}
       />
-      <div className="rows processRows">
-        {props.processes.map((process) => {
-          const strong = strongCandidates(process);
-          const top = strong[0] ?? process.sessionCandidates?.[0];
-          const weakOnly = !strong.length && !!top;
+      <div className="listToolbar">
+        <ToolbarControl label={t("views.processes.sort.label")}>
+          <MiniSegmentedControl
+            value={sortMode}
+            values={["time", "runtime", "memory", "score", "tree"]}
+            label={(value) => t(`views.processes.sort.${value}`)}
+            onChange={(value) =>
+              reorder(() => setSortMode(value as ProcessSortMode))
+            }
+          />
+        </ToolbarControl>
+        <ToolbarControl label={t("views.processes.group.label")}>
+          <MiniSegmentedControl
+            value={groupMode}
+            values={["agent", "parent", "cwd", "none"]}
+            label={(value) => t(`views.processes.group.${value}`)}
+            onChange={(value) =>
+              reorder(() => setGroupMode(value as ProcessGroupMode))
+            }
+          />
+        </ToolbarControl>
+      </div>
+      <div
+        className={`rows processRows ${isReordering ? "reordering" : ""}`}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        {groupMode === "none"
+          ? groups[0]?.items.map((process) => (
+              <ProcessRow
+                key={process.pid}
+                process={process}
+                selected={props.selectedPid === process.pid}
+                locale={locale}
+                onSelect={() => props.onSelect(process)}
+                onContextMenu={(event) =>
+                  setContextMenu({ process, x: event.clientX, y: event.clientY })
+                }
+              />
+            ))
+          : groups.map((group) => {
+          const isCollapsed = collapsed.has(group.key);
           return (
-            <button
-              className={`processRow ${props.selectedPid === process.pid ? "selected" : ""}`}
-              key={process.pid}
-              onClick={() => props.onSelect(process)}
-            >
-              <AgentTile agent={process.agent} />
-              <div className="rowMain">
-                <div className="rowTop">
-                  <span className="rowTitle">{process.windowTitle || process.processName}</span>
-                  <span className="rowPid mono">PID {process.pid}</span>
-                </div>
-                <div className="rowMeta">
-                  <span>{process.processName}</span>
-                  {process.ppid !== undefined && <span>PPID {process.ppid}</span>}
-                  {process.startTime && (
-                    <span>
-                      {t("common.date.started", { date: formatDate(process.startTime, locale) })}
-                    </span>
-                  )}
-                </div>
-                <div className="candidateLine">
-                  {top ? (
-                    <>
-                      <ConfidenceBadge value={top.confidence} />
-                      <span className="candidateTitle">{candidateTitle(top)}</span>
-                      <span className="scoreBadge">
-                        {t("views.processes.score", { score: top.score })}
-                      </span>
-                      <span>
-                        {weakOnly
-                          ? t("views.processes.weakEvidence")
-                          : (top.reasons[0]?.source ?? t("views.processes.candidate"))}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="muted">{t("views.processes.noCandidate")}</span>
-                  )}
-                </div>
-                <div className="rowPath mono">
-                  {process.commandLine || process.executablePath || t("common.path.noCommandLine")}
-                </div>
-              </div>
-              <ChevronRight size={16} />
-            </button>
+            <section className="processGroup" key={group.key}>
+              <button className="groupHeader" onClick={() => toggleGroup(group.key)}>
+                <ChevronRight size={15} className={isCollapsed ? "" : "open"} />
+                <strong>{group.label}</strong>
+                <span>{t("views.processes.groupCount", { count: group.items.length })}</span>
+              </button>
+              {!isCollapsed &&
+                group.items.map((process) => (
+                  <ProcessRow
+                    key={process.pid}
+                    process={process}
+                    selected={props.selectedPid === process.pid}
+                    locale={locale}
+                    onSelect={() => props.onSelect(process)}
+                    onContextMenu={(event) =>
+                      setContextMenu({ process, x: event.clientX, y: event.clientY })
+                    }
+                  />
+                ))}
+            </section>
           );
         })}
       </div>
+      {contextMenu && (
+        <ProcessContextMenu
+          process={contextMenu.process}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onInspect={() => {
+            props.onSelect(contextMenu.process);
+            setContextMenu(null);
+          }}
+          onSelectSession={(candidate) => {
+            props.onSelectSession(candidate);
+            setContextMenu(null);
+          }}
+        />
+      )}
     </>
   );
 }
 
-function SessionList(props: { sessions: AgentSession[]; selectedKey?: string | undefined; onSelect: (session: AgentSession) => void }) {
+function ProcessRow(props: {
+  process: AgentProcess;
+  selected: boolean;
+  locale?: string;
+  onSelect: () => void;
+  onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  const { t } = useTranslation();
+  const process = props.process;
+  const strong = strongCandidates(process);
+  const top = strong[0] ?? process.sessionCandidates?.[0];
+  const weakOnly = !strong.length && !!top;
+  return (
+    <button
+      className={`processRow ${props.selected ? "selected" : ""}`}
+      onClick={props.onSelect}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        props.onContextMenu(event);
+      }}
+    >
+      <AgentTile agent={process.agent} />
+      <div className="rowMain">
+        <div className="rowTop">
+          <span className="rowTitle">{process.windowTitle || process.processName}</span>
+          <span className="rowPid mono">PID {process.pid}</span>
+        </div>
+        <div className="rowMeta">
+          <span>{process.processName}</span>
+          {process.ppid !== undefined && <span>PPID {process.ppid}</span>}
+          {process.startTime && (
+            <span>{t("common.date.started", { date: formatDate(process.startTime, props.locale) })}</span>
+          )}
+          {process.startTime && <span>{formatDuration(process.startTime, props.locale)}</span>}
+          {process.workingSetBytes !== undefined && (
+            <span>{formatBytes(process.workingSetBytes, props.locale)}</span>
+          )}
+        </div>
+        <div className="candidateLine">
+          {top ? (
+            <>
+              <ConfidenceBadge value={top.confidence} />
+              <span className="candidateTitle">{candidateTitle(top)}</span>
+              <span className="scoreBadge">{t("views.processes.score", { score: top.score })}</span>
+              <span>{weakOnly ? t("views.processes.weakEvidence") : explainTopCandidate(top)}</span>
+            </>
+          ) : (
+            <span className="muted">{t("views.processes.noCandidate")}</span>
+          )}
+        </div>
+        <div className="rowPath mono">
+          {process.commandLine || process.executablePath || t("common.path.noCommandLine")}
+        </div>
+      </div>
+      <ChevronRight size={16} />
+    </button>
+  );
+}
+
+function ProcessContextMenu(props: {
+  process: AgentProcess;
+  x: number;
+  y: number;
+  onClose: () => void;
+  onInspect: () => void;
+  onSelectSession: (candidate: SessionCandidate) => void;
+}) {
+  const { t } = useTranslation();
+  const candidates = (props.process.sessionCandidates ?? []).slice(0, 5);
+  const left = clampMenuCoordinate(props.x, window.innerWidth, 326);
+  const top = clampMenuCoordinate(props.y, window.innerHeight, 280);
+  useEffect(() => {
+    const close = () => props.onClose();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [props]);
+  return (
+    <div
+      className="contextMenu"
+      style={{ left, top } as CSSProperties}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <button onClick={props.onInspect}>{t("views.processes.context.inspect")}</button>
+      <div className="menuDivider" />
+      <span>{t("views.processes.context.jumpSession")}</span>
+      {candidates.length ? (
+        candidates.map((candidate) => (
+          <button key={`${candidate.agent}:${candidate.sessionId}`} onClick={() => props.onSelectSession(candidate)}>
+            <AgentPill agent={candidate.agent} />
+            <strong>{candidateTitle(candidate)}</strong>
+            <em>{candidateExplanation(candidate)}</em>
+          </button>
+        ))
+      ) : (
+        <p>{t("views.processes.noCandidate")}</p>
+      )}
+    </div>
+  );
+}
+
+function MiniSegmentedControl<T extends string>(props: {
+  value: T;
+  values: T[];
+  label: (value: T) => string;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="segmented miniSegmented">
+      {props.values.map((value) => (
+        <button
+          key={value}
+          className={props.value === value ? "active" : ""}
+          onClick={() => props.onChange(value)}
+        >
+          {props.label(value)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ToolbarControl(props: { label: string; children: ReactNode }) {
+  return (
+    <div className="toolbarControl">
+      <span>{props.label}</span>
+      {props.children}
+    </div>
+  );
+}
+
+function SessionList(props: {
+  sessions: AgentSession[];
+  selectedKey?: string | undefined;
+  loading: boolean;
+  highlightTarget: SearchResultRecord | null;
+  onSelect: (session: AgentSession) => void;
+}) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
+  const [groupMode, setGroupMode] = useState<SessionGroupMode>("none");
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const groups = useMemo(
+    () => groupSessions(props.sessions, groupMode),
+    [props.sessions, groupMode]
+  );
+  const highlightedKey = props.highlightTarget
+    ? `${props.highlightTarget.agent ?? ""}:${props.highlightTarget.sessionId ?? ""}`
+    : undefined;
+  const toggleGroup = (key: string) => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  if (props.loading) return <LoadingState />;
   if (!props.sessions.length) {
     return (
       <EmptyState
@@ -855,52 +1294,110 @@ function SessionList(props: { sessions: AgentSession[]; selectedKey?: string | u
         title={t("nav.sessions")}
         subtitle={t("views.sessions.subtitle", { count: props.sessions.length })}
       />
+      <div className="listToolbar">
+        <MiniSegmentedControl
+          value={groupMode}
+          values={["cwd", "parent", "agent", "none"]}
+          label={(value) => t(`views.sessions.group.${value}`)}
+          onChange={(value) => setGroupMode(value as SessionGroupMode)}
+        />
+      </div>
       <div className="rows">
-        {props.sessions.map((session) => (
-          <button
-            className={`sessionRow ${props.selectedKey === sessionKey(session) ? "selected" : ""}`}
-            key={`${session.agent}:${session.sessionId}`}
-            onClick={() => props.onSelect(session)}
-          >
-            <AgentTile agent={session.agent} />
-            <div className="rowMain">
-              <div className="rowTop">
-                <span className="rowTitle">{displayTitle(session)}</span>
-                <ConfidenceBadge value={session.confidence} />
-              </div>
-              <div className="rowMeta">
-                <span className="mono">{short(session.sessionId)}</span>
-                {session.pid !== undefined && <span>PID {session.pid}</span>}
-                {session.startedAt && (
-                  <span>
-                    {t("common.date.started", { date: formatDate(session.startedAt, locale) })}
-                  </span>
-                )}
-                {session.updatedAt && (
-                  <span>
-                    {t("common.date.updated", { date: formatDate(session.updatedAt, locale) })}
-                  </span>
-                )}
-              </div>
-              <div className="rowPath mono">
-                {session.cwd || session.transcriptPath || t("common.path.noPathEvidence")}
-              </div>
-              <EvidenceSummary evidence={session.evidence} />
-            </div>
-            <ChevronRight size={16} />
-          </button>
-        ))}
+        {groupMode === "none"
+          ? groups[0]?.items.map((session) => (
+              <SessionRow
+                key={`${session.agent}:${session.sessionId}`}
+                session={session}
+                selected={props.selectedKey === sessionKey(session)}
+                highlighted={highlightedKey === sessionKey(session)}
+                locale={locale}
+                onSelect={() => props.onSelect(session)}
+              />
+            ))
+          : groups.map((group) => {
+          const isCollapsed = collapsed.has(group.key);
+          return (
+            <section className="processGroup" key={group.key}>
+              <button className="groupHeader" onClick={() => toggleGroup(group.key)}>
+                <ChevronRight size={15} className={isCollapsed ? "" : "open"} />
+                <strong>{group.label}</strong>
+                <span>{t("views.sessions.groupCount", { count: group.items.length })}</span>
+              </button>
+              {!isCollapsed &&
+                group.items.map((session) => (
+                  <SessionRow
+                    key={`${session.agent}:${session.sessionId}`}
+                    session={session}
+                    selected={props.selectedKey === sessionKey(session)}
+                    highlighted={highlightedKey === sessionKey(session)}
+                    locale={locale}
+                    onSelect={() => props.onSelect(session)}
+                  />
+                ))}
+            </section>
+          );
+        })}
       </div>
     </>
   );
 }
 
-function RelationList(props: { relations: Relation[]; sessions: AgentSession[] }) {
+function SessionRow(props: {
+  session: AgentSession;
+  selected: boolean;
+  highlighted: boolean;
+  locale?: string;
+  onSelect: () => void;
+}) {
   const { t } = useTranslation();
+  const session = props.session;
+  const rowRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!props.highlighted) return;
+    rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [props.highlighted]);
+  return (
+    <button
+      ref={rowRef}
+      className={`sessionRow ${props.selected ? "selected" : ""} ${props.highlighted ? "highlighted" : ""}`}
+      onClick={props.onSelect}
+    >
+      <AgentTile agent={session.agent} />
+      <div className="rowMain">
+        <div className="rowTop">
+          <span className="rowTitle">{displayTitle(session)}</span>
+          <ConfidenceBadge value={session.confidence} />
+        </div>
+        <div className="rowMeta">
+          <span className="mono">{short(session.sessionId)}</span>
+          {session.pid !== undefined && <span>PID {session.pid}</span>}
+          {session.childSessionIds.length > 0 && (
+            <span>{t("views.sessions.children", { count: session.childSessionIds.length })}</span>
+          )}
+          {session.startedAt && (
+            <span>{t("common.date.started", { date: formatDate(session.startedAt, props.locale) })}</span>
+          )}
+          {session.updatedAt && (
+            <span>{t("common.date.updated", { date: formatDate(session.updatedAt, props.locale) })}</span>
+          )}
+        </div>
+        <div className="rowPath mono">
+          {session.cwd || session.transcriptPath || t("common.path.noPathEvidence")}
+        </div>
+        <EvidenceSummary evidence={session.evidence} />
+      </div>
+      <ChevronRight size={16} />
+    </button>
+  );
+}
+
+function RelationList(props: { relations: Relation[]; sessions: AgentSession[]; loading: boolean }) {
+  const { t } = useTranslation();
+  if (props.loading) return <LoadingState />;
   if (!props.relations.length) {
     return (
       <EmptyState
-        icon={<GitBranch size={22} />}
+        icon={<Network size={22} />}
         title={t("views.relations.emptyTitle")}
         detail={t("views.relations.emptyDetail")}
       />
@@ -913,42 +1410,55 @@ function RelationList(props: { relations: Relation[]; sessions: AgentSession[] }
         subtitle={t("views.relations.subtitle", { count: props.relations.length })}
       />
       <div className="relationList">
-        {props.relations.map((relation, index) => (
-          <div
-            className="relationItem"
-            key={`${relation.kind}:${relation.sourceId}:${relation.targetId}:${index}`}
-          >
-            <div className="relationKind">
-              <Badge text={t(`relations.kind.${relation.kind}`)} />
+        {props.relations.map((relation, index) => {
+          const sourceLabel = t(`relations.endpoint.${relation.kind}.source`);
+          const targetLabel = t(`relations.endpoint.${relation.kind}.target`);
+          const source = relationEndpointDisplay(props.sessions, relation, "source", sourceLabel);
+          const target = relationEndpointDisplay(props.sessions, relation, "target", targetLabel);
+          return (
+            <div
+              className="relationItem"
+              key={`${relation.kind}:${relation.sourceId}:${relation.targetId}:${index}`}
+            >
+              <div className="relationKind">
+                <Badge text={t(`relations.kind.${relation.kind}`)} />
+              </div>
+              <RelationEndpoint label={sourceLabel} endpoint={source} />
+              <span className="arrow">{"->"}</span>
+              <RelationEndpoint label={targetLabel} endpoint={target} />
+              <ConfidenceBadge value={relation.confidence} />
+              <div className="relationEvidence">
+                {relation.evidence[0]?.source ?? t("inspector.noEvidence")}
+              </div>
             </div>
-            <div className="relationEndpoint">
-              <span>{t(`relations.endpoint.${relation.kind}.source`)}</span>
-              <strong>{relationEndpointName(props.sessions, relation.sourceId)}</strong>
-              <em className="mono">{short(relation.sourceId)}</em>
-            </div>
-            <span className="arrow">{"->"}</span>
-            <div className="relationEndpoint">
-              <span>{t(`relations.endpoint.${relation.kind}.target`)}</span>
-              <strong>{relationEndpointName(props.sessions, relation.targetId)}</strong>
-              <em className="mono">{short(relation.targetId)}</em>
-            </div>
-            <ConfidenceBadge value={relation.confidence} />
-            <div className="relationEvidence">
-              {relation.evidence[0]?.source ?? t("inspector.noEvidence")}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </>
   );
 }
 
-function DoctorPanel(props: { checks: Diagnostic[] }) {
+function RelationEndpoint(props: { label: string; endpoint: RelationEndpointDisplay }) {
+  return (
+    <div className="relationEndpoint">
+      <span>{props.label}</span>
+      <strong title={props.endpoint.raw}>{props.endpoint.title}</strong>
+      {props.endpoint.detail && (
+        <em className="mono" title={props.endpoint.raw}>
+          {props.endpoint.detail}
+        </em>
+      )}
+    </div>
+  );
+}
+
+function DoctorPanel(props: { checks: Diagnostic[]; loading: boolean }) {
   const { t } = useTranslation();
+  if (props.loading) return <LoadingState />;
   if (!props.checks.length) {
     return (
       <EmptyState
-        icon={<ShieldCheck size={22} />}
+        icon={<Stethoscope size={22} />}
         title={t("views.doctor.emptyTitle")}
         detail={t("views.doctor.emptyDetail")}
       />
@@ -984,6 +1494,7 @@ function SettingsPanel(props: {
   doctor: Diagnostic[];
   processes: AgentProcess[];
   sessions: AgentSession[];
+  installedFonts: string[];
   onOpenPath: (targetPath?: string) => void;
   onOpenExternal: (url: string) => void;
 }) {
@@ -993,7 +1504,7 @@ function SettingsPanel(props: {
   return (
     <>
       <PaneHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
-      <div className="settingsShell" key={section}>
+      <div className="settingsShell">
         <aside className="settingsNav">
           <SettingsNavItem
             active={section === "general"}
@@ -1015,18 +1526,18 @@ function SettingsPanel(props: {
           />
           <SettingsNavItem
             active={section === "runtime"}
-            icon={<Terminal size={16} />}
+            icon={<Cpu size={16} />}
             label={t("settings.sections.runtime")}
             onClick={() => setSection("runtime")}
           />
           <SettingsNavItem
             active={section === "diagnostics"}
-            icon={<ShieldCheck size={16} />}
+            icon={<Stethoscope size={16} />}
             label={t("settings.sections.diagnostics")}
             onClick={() => setSection("diagnostics")}
           />
         </aside>
-        <section className="settingsRows animatedPane">
+        <section className="settingsRows animatedPane" key={section}>
           {section === "general" && (
             <>
               <SettingGroup title={t("settings.sections.general")}>
@@ -1107,6 +1618,40 @@ function SettingsPanel(props: {
                   />
                 </SettingRow>
                 <SettingRow
+                  label={t("settings.suggestions.label")}
+                  detail={t("settings.suggestions.detail")}
+                >
+                  <button
+                    className={`toggleButton ${props.settings.suggestionsEnabled ? "on" : ""}`}
+                    onClick={() =>
+                      props.updateSettings({
+                        suggestionsEnabled: !props.settings.suggestionsEnabled
+                      })
+                    }
+                  >
+                    {props.settings.suggestionsEnabled
+                      ? t("common.action.show")
+                      : t("common.action.hide")}
+                  </button>
+                </SettingRow>
+                <SettingRow
+                  label={t("settings.transcriptPreview.label")}
+                  detail={t("settings.transcriptPreview.detail")}
+                >
+                  <button
+                    className={`toggleButton ${props.settings.transcriptPreviewEnabled ? "on" : ""}`}
+                    onClick={() =>
+                      props.updateSettings({
+                        transcriptPreviewEnabled: !props.settings.transcriptPreviewEnabled
+                      })
+                    }
+                  >
+                    {props.settings.transcriptPreviewEnabled
+                      ? t("common.action.show")
+                      : t("common.action.hide")}
+                  </button>
+                </SettingRow>
+                <SettingRow
                   label={t("settings.resetUi.label")}
                   detail={t("settings.resetUi.detail")}
                 >
@@ -1166,6 +1711,32 @@ function SettingsPanel(props: {
                 </SettingRow>
               </SettingGroup>
               <SettingGroup title={t("settings.sections.typography")}>
+                <TypographyPreviewClean settings={props.settings} />
+                <SettingRow
+                  label={t("settings.fontMode.label")}
+                  detail={t("settings.fontMode.detail")}
+                >
+                  <SegmentedControl
+                    value={props.settings.fontMode}
+                    values={[
+                      ["language", t("settings.fontMode.language")],
+                      ["unified", t("settings.fontMode.unified")],
+                      ["custom", t("settings.fontMode.custom")]
+                    ]}
+                    onChange={(value) =>
+                      props.updateSettings({ fontMode: value as AppSettings["fontMode"] })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  label={t("settings.fontPreset.label")}
+                  detail={t("settings.fontPreset.detail")}
+                >
+                  <FontPresetControl
+                    value={props.settings.fontPreset}
+                    onChange={(preset) => props.updateSettings(fontPresetSettings(preset))}
+                  />
+                </SettingRow>
                 <SettingRow
                   label={t("settings.uiScale.label")}
                   detail={t("settings.uiScale.detail")}
@@ -1183,10 +1754,78 @@ function SettingsPanel(props: {
                   />
                 </SettingRow>
                 <SettingRow
+                  label={t("settings.lineHeight.label")}
+                  detail={t("settings.lineHeight.detail")}
+                >
+                  <SegmentedControl
+                    value={props.settings.uiLineHeight}
+                    values={[
+                      ["compact", t("settings.lineHeight.compact")],
+                      ["normal", t("settings.lineHeight.normal")],
+                      ["spacious", t("settings.lineHeight.spacious")]
+                    ]}
+                    onChange={(value) =>
+                      props.updateSettings({ uiLineHeight: value as AppSettings["uiLineHeight"] })
+                    }
+                  />
+                </SettingRow>
+                <FontSettingRow
+                  label={t("settings.fonts.unified")}
+                  detail={t("settings.fonts.unifiedDetail")}
+                  value={props.settings.unifiedFont}
+                  fonts={props.installedFonts}
+                  onChange={(unifiedFont) =>
+                    props.updateSettings({ unifiedFont, fontPreset: "custom" })
+                  }
+                />
+                <FontSettingRow
+                  label={t("settings.fonts.latin")}
+                  detail={t("settings.fonts.latinDetail")}
+                  value={props.settings.latinFont}
+                  fonts={props.installedFonts}
+                  onChange={(latinFont) => props.updateSettings({ latinFont, fontPreset: "custom" })}
+                />
+                <FontSettingRow
+                  label={t("settings.fonts.chinese")}
+                  detail={t("settings.fonts.chineseDetail")}
+                  value={props.settings.chineseFont}
+                  fonts={props.installedFonts}
+                  onChange={(chineseFont) =>
+                    props.updateSettings({ chineseFont, fontPreset: "custom" })
+                  }
+                />
+                <FontSettingRow
+                  label={t("settings.fonts.japanese")}
+                  detail={t("settings.fonts.japaneseDetail")}
+                  value={props.settings.japaneseFont}
+                  fonts={props.installedFonts}
+                  onChange={(japaneseFont) =>
+                    props.updateSettings({ japaneseFont, fontPreset: "custom" })
+                  }
+                />
+                <FontSettingRow
+                  label={t("settings.fonts.korean")}
+                  detail={t("settings.fonts.koreanDetail")}
+                  value={props.settings.koreanFont}
+                  fonts={props.installedFonts}
+                  onChange={(koreanFont) =>
+                    props.updateSettings({ koreanFont, fontPreset: "custom" })
+                  }
+                />
+                <FontSettingRow
                   label={t("settings.codeFont.label")}
                   detail={t("settings.codeFont.detail")}
+                  value={props.settings.codeFont}
+                  fonts={props.installedFonts}
+                  onChange={(codeFont) => props.updateSettings({ codeFont, fontPreset: "custom" })}
+                />
+                <SettingRow
+                  label={t("settings.fonts.detected")}
+                  detail={t("settings.fonts.detectedDetail", {
+                    count: props.installedFonts.length
+                  })}
                 >
-                  <CodeValue value="mono" />
+                  <CodeValue value={String(props.installedFonts.length)} />
                 </SettingRow>
                 <SettingRow
                   label={t("settings.links.githubLabel")}
@@ -1276,19 +1915,34 @@ function SettingsPanel(props: {
                   label={t("settings.runtime.win32Label")}
                   detail={t("settings.runtime.win32Detail", { count: props.processes.length })}
                 >
-                  <Badge text={t("common.status.on")} tone="ok" />
+                  <SwitchControl
+                    checked={props.settings.runtimeWin32Enabled}
+                    onChange={(runtimeWin32Enabled) =>
+                      props.updateSettings({ runtimeWin32Enabled })
+                    }
+                  />
                 </SettingRow>
                 <SettingRow
                   label={t("settings.runtime.windowTitlesLabel")}
                   detail={t("settings.runtime.windowTitlesDetail")}
                 >
-                  <Badge text={t("common.status.on")} tone="ok" />
+                  <SwitchControl
+                    checked={props.settings.runtimeWindowTitlesEnabled}
+                    onChange={(runtimeWindowTitlesEnabled) =>
+                      props.updateSettings({ runtimeWindowTitlesEnabled })
+                    }
+                  />
                 </SettingRow>
                 <SettingRow
                   label={t("settings.runtime.candidatesLabel")}
                   detail={t("settings.runtime.candidatesDetail", { count: props.sessions.length })}
                 >
-                  <Badge text={t("common.status.scored")} />
+                  <SwitchControl
+                    checked={props.settings.runtimeCandidatesEnabled}
+                    onChange={(runtimeCandidatesEnabled) =>
+                      props.updateSettings({ runtimeCandidatesEnabled })
+                    }
+                  />
                 </SettingRow>
               </SettingGroup>
               <SettingGroup title={t("settings.sections.confidence")}>
@@ -1410,18 +2064,376 @@ function CodeValue(props: { value: string }) {
   return <span className="codeValue mono">{props.value}</span>;
 }
 
-function ColorSwatches(props: { value: string; onChange: (value: string) => void }) {
+function FontPresetControl(props: { value: FontPreset; onChange: (value: FontPreset) => void }) {
+  const { t } = useTranslation();
   return (
-    <div className="swatches">
-      {accentValues.map((color) => (
+    <span className="segmented fontPresetControl">
+      {fontPresetValues.map((value) => (
         <button
-          className={props.value.toLowerCase() === color ? "active" : ""}
-          key={color}
-          onClick={() => props.onChange(color)}
-          style={{ background: color }}
-          title={color}
-        />
+          className={props.value === value ? "active" : ""}
+          key={value}
+          onClick={() => props.onChange(value)}
+        >
+          {t(`settings.fontPreset.${value}`)}
+        </button>
       ))}
+    </span>
+  );
+}
+
+function FontSettingRow(props: {
+  label: string;
+  detail: string;
+  value: string;
+  fonts: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <SettingRow label={props.label} detail={props.detail}>
+      <FontComboBox value={props.value} fonts={props.fonts} onChange={props.onChange} />
+    </SettingRow>
+  );
+}
+
+function FontComboBox(props: {
+  value: string;
+  fonts: string[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const comboRef = useRef<HTMLDivElement | null>(null);
+  const options = useMemo(() => {
+    const query = filter.trim().toLowerCase();
+    return fontOptions(props.fonts)
+      .filter((font) => !query || font.toLowerCase().includes(query))
+      .slice(0, 12);
+  }, [filter, props.fonts]);
+
+  useEffect(() => setHighlightedIndex(0), [filter, open]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (event: PointerEvent) => {
+      if (comboRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+      setFilter("");
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [open]);
+
+  const commit = (value: string) => {
+    const next = value.trim();
+    if (next) props.onChange(next);
+    setFilter("");
+  };
+
+  return (
+    <div className={`fontCombo ${open ? "open" : ""}`} ref={comboRef}>
+      <button
+        type="button"
+        className="fontComboTrigger"
+        onClick={() => setOpen((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen(true);
+          }
+          if (event.key === "Escape") setOpen(false);
+        }}
+      >
+        <span style={{ fontFamily: fontStack(props.value, ["sans-serif"]) }}>{props.value}</span>
+        <ChevronRight size={15} className={open ? "open" : ""} />
+      </button>
+      {open && (
+        <div className="fontComboMenu">
+          <input
+            className="fontComboSearch"
+            autoFocus
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setOpen(false);
+                setFilter("");
+              }
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setHighlightedIndex((index) => Math.min(options.length - 1, index + 1));
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setHighlightedIndex((index) => Math.max(0, index - 1));
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commit(options[highlightedIndex] ?? filter);
+                setOpen(false);
+              }
+            }}
+            spellCheck={false}
+          />
+          {options.map((font, index) => (
+            <button
+              type="button"
+              key={font}
+              className={`${font === props.value ? "active" : ""} ${
+                index === highlightedIndex ? "highlighted" : ""
+              }`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                props.onChange(font);
+                setFilter("");
+                setOpen(false);
+              }}
+            >
+              <span style={{ fontFamily: fontStack(font, ["sans-serif"]) }}>{font}</span>
+            </button>
+          ))}
+          {!options.length && <span className="fontComboEmpty">{filter}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TypographyPreviewClean(props: { settings: AppSettings }) {
+  const { t } = useTranslation();
+  return (
+    <section className="typographyPreview">
+      <div>
+        <span>{t("settings.fontPreview.title")}</span>
+        <strong>AgentScope trace layer</strong>
+        <p>Windows-native control console | PID 31720 | cwd D:\Project\AgentScope</p>
+      </div>
+      <div className="fontPreviewGrid">
+        <p lang="en">Process evidence, session index, transcript search.</p>
+        <p lang="zh-CN">中文路径、会话标题、进程证据和索引元数据。</p>
+        <p lang="ja-JP">日本語の設定、教科書体プレビュー、検索結果。</p>
+        <p lang="ko-KR">한국어 세션, 프로세스, 진단 정보 표시.</p>
+      </div>
+      <pre className="mono">{`function trace(pid: number) {
+  return sessions.find((s) => s.pid === pid);
+}`}</pre>
+      <div className="fontPreviewMeta">
+        <CodeValue value={props.settings.fontMode} />
+        <CodeValue value={props.settings.fontPreset} />
+      </div>
+    </section>
+  );
+}
+
+function fontOptions(installedFonts: string[]): string[] {
+  const preferred = [
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    "Anthropic Sans",
+    "Inter",
+    "SF Pro Text",
+    "PingFang SC",
+    "PingFang TC",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    "Noto Sans SC",
+    "Source Han Sans SC",
+    "Yu Gothic UI",
+    "Yu Gothic",
+    "Meiryo UI",
+    "BIZ UDPGothic",
+    "UD Digi Kyokasho N",
+    "UD Digi Kyokasho NP",
+    "Malgun Gothic",
+    "Noto Sans KR",
+    "Source Han Sans KR",
+    "Cascadia Code",
+    "JetBrains Mono",
+    "Consolas",
+    "SFMono-Regular"
+  ];
+  return [...new Set([...preferred, ...installedFonts])].sort((left, right) =>
+    left.localeCompare(right)
+  );
+}
+
+function fontPresetSettings(preset: FontPreset): Partial<AppSettings> {
+  const presets: Record<FontPreset, Partial<AppSettings>> = {
+    windows: {
+      fontPreset: "windows",
+      fontMode: "unified",
+      unifiedFont: "Segoe UI Variable Text",
+      latinFont: "Segoe UI Variable Text",
+      chineseFont: "Microsoft YaHei UI",
+      japaneseFont: "Yu Gothic UI",
+      koreanFont: "Malgun Gothic",
+      codeFont: "Cascadia Code",
+      uiLineHeight: "normal"
+    },
+    language: {
+      fontPreset: "language",
+      fontMode: "language",
+      unifiedFont: "Segoe UI Variable Text",
+      latinFont: "Segoe UI Variable Text",
+      chineseFont: "Microsoft YaHei UI",
+      japaneseFont: "Yu Gothic UI",
+      koreanFont: "Malgun Gothic",
+      codeFont: "Cascadia Code",
+      uiLineHeight: "normal"
+    },
+    claude: {
+      fontPreset: "claude",
+      fontMode: "language",
+      unifiedFont: "Anthropic Sans",
+      latinFont: "Anthropic Sans",
+      chineseFont: "Noto Sans SC",
+      japaneseFont: "Noto Sans JP",
+      koreanFont: "Noto Sans KR",
+      codeFont: "JetBrains Mono",
+      uiLineHeight: "spacious"
+    },
+    japaneseTextbook: {
+      fontPreset: "japaneseTextbook",
+      fontMode: "language",
+      unifiedFont: "Segoe UI Variable Text",
+      latinFont: "Segoe UI Variable Text",
+      chineseFont: "Noto Sans SC",
+      japaneseFont: "UD Digi Kyokasho NP",
+      koreanFont: "Malgun Gothic",
+      codeFont: "Cascadia Code",
+      uiLineHeight: "spacious"
+    },
+    dense: {
+      fontPreset: "dense",
+      fontMode: "language",
+      unifiedFont: "Segoe UI",
+      latinFont: "Segoe UI",
+      chineseFont: "Microsoft YaHei UI",
+      japaneseFont: "Yu Gothic UI",
+      koreanFont: "Malgun Gothic",
+      codeFont: "Cascadia Code",
+      uiLineHeight: "compact"
+    },
+    custom: {
+      fontPreset: "custom"
+    }
+  };
+  return presets[preset];
+}
+
+function fontStyleVariables(settings: AppSettings): Record<string, string> {
+  const latin = fontStack(settings.latinFont, [
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    "Arial",
+    "sans-serif"
+  ]);
+  const zh = fontStack(settings.chineseFont, [
+    "Microsoft YaHei UI",
+    "Noto Sans SC",
+    "Microsoft YaHei",
+    "SimHei",
+    "sans-serif"
+  ]);
+  const ja = fontStack(settings.japaneseFont, [
+    "Yu Gothic UI",
+    "BIZ UDPGothic",
+    "Meiryo UI",
+    "Meiryo",
+    "sans-serif"
+  ]);
+  const ko = fontStack(settings.koreanFont, ["Malgun Gothic", "Noto Sans KR", "sans-serif"]);
+  const unified = fontStack(settings.unifiedFont, [
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    "Microsoft YaHei UI",
+    "Yu Gothic UI",
+    "Malgun Gothic",
+    "sans-serif"
+  ]);
+  const languageAware = `${latin}, ${zh}, ${ja}, ${ko}, sans-serif`;
+  const ui = settings.fontMode === "unified" ? unified : languageAware;
+  return {
+    "--font-ui": ui,
+    "--font-latin": latin,
+    "--font-zh": zh,
+    "--font-ja": ja,
+    "--font-ko": ko,
+    "--font-code": fontStack(settings.codeFont, [
+      "Cascadia Code",
+      "Cascadia Mono",
+      "Consolas",
+      "monospace"
+    ])
+  };
+}
+
+function fontStack(primary: string, fallbacks: string[]): string {
+  return [...new Set([primary.trim(), ...fallbacks].filter(Boolean))]
+    .map((font) => (isGenericFont(font) ? font : JSON.stringify(font)))
+    .join(", ");
+}
+
+function isGenericFont(font: string): boolean {
+  return ["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui"].includes(
+    font.toLowerCase()
+  );
+}
+
+function ColorSwatches(props: { value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const normalized = normalizeHexColor(props.value);
+  const custom = normalized ?? defaultSettings.accent;
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (event: PointerEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [open]);
+  return (
+    <div className={`accentControl ${open ? "open" : ""}`} ref={ref}>
+      <button className="accentTrigger" type="button" onClick={() => setOpen((value) => !value)}>
+        <span className="accentPreview" style={{ background: custom }} />
+        <strong className="mono">{custom}</strong>
+        <ChevronRight size={14} className={open ? "open" : ""} />
+      </button>
+      {open && (
+        <div className="accentPopover">
+          <div className="swatches">
+            {accentValues.map((color) => (
+              <button
+                className={normalized === color ? "active" : ""}
+                key={color}
+                onClick={() => props.onChange(color)}
+                style={{ background: color }}
+                title={color}
+              />
+            ))}
+          </div>
+          <div className="accentAdvanced">
+            <label className="colorWheel" title={custom}>
+              <input
+                type="color"
+                value={custom}
+                onChange={(event) => props.onChange(event.target.value)}
+              />
+              <span style={{ background: custom }} />
+            </label>
+            <input
+              className="hexInput mono"
+              value={props.value}
+              onChange={(event) => props.onChange(event.target.value)}
+              onBlur={(event) =>
+                props.onChange(normalizeHexColor(event.target.value) ?? defaultSettings.accent)
+              }
+              spellCheck={false}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1455,10 +2467,22 @@ function ActionButton(props: { label: string; onClick: () => void; disabled?: bo
 function Inspector(props: {
   selected: Selection;
   relations: Relation[];
+  loading: boolean;
   showUnknownCandidates: boolean;
+  transcriptPreviewEnabled: boolean;
+  highlightTarget: SearchResultRecord | null;
+  onOpenPath: (targetPath?: string) => void;
+  onRevealPath: (targetPath?: string) => void;
 }) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
+  if (props.loading) {
+    return (
+      <aside className="inspector">
+        <LoadingState compact />
+      </aside>
+    );
+  }
   if (!props.selected) {
     return (
       <aside className="inspector">
@@ -1551,6 +2575,17 @@ function Inspector(props: {
           long
         />
       </FieldGroup>
+      <ModelRuntimeSummary session={session} />
+      <ControlSummary
+        session={session}
+        onOpenPath={props.onOpenPath}
+        onRevealPath={props.onRevealPath}
+      />
+      {props.transcriptPreviewEnabled && (
+        <TranscriptHitContext
+          context={transcriptContextForSession(session, props.highlightTarget)}
+        />
+      )}
       <MetadataSummary metadata={session.indexMetadata} />
       <ActivitySummary activity={session.activity} locale={locale} />
       {related.length > 0 && (
@@ -1583,10 +2618,22 @@ function ActivitySummary(props: { activity?: SessionActivity | undefined; locale
   const usage = activity.tokenUsage;
   return (
     <FieldGroup title={t("inspector.activity")}>
-      <Field label={t("inspector.fields.lines")} value={formatNumber(activity.lineCount, props.locale)} />
-      <Field label={t("inspector.fields.bytes")} value={formatBytes(activity.byteSize, props.locale)} />
-      <Field label={t("inspector.fields.firstEvent")} value={formatMaybeDate(activity.firstTimestamp, props.locale)} />
-      <Field label={t("inspector.fields.lastEvent")} value={formatMaybeDate(activity.lastTimestamp, props.locale)} />
+      <Field
+        label={t("inspector.fields.lines")}
+        value={formatNumber(activity.lineCount, props.locale)}
+      />
+      <Field
+        label={t("inspector.fields.bytes")}
+        value={formatBytes(activity.byteSize, props.locale)}
+      />
+      <Field
+        label={t("inspector.fields.firstEvent")}
+        value={formatMaybeDate(activity.firstTimestamp, props.locale)}
+      />
+      <Field
+        label={t("inspector.fields.lastEvent")}
+        value={formatMaybeDate(activity.lastTimestamp, props.locale)}
+      />
       <Field label={t("inspector.fields.cliVersion")} value={activity.cliVersion} />
       <Field label={t("inspector.fields.gitBranch")} value={activity.gitBranch} />
       <Field label={t("inspector.fields.permission")} value={activity.permissionMode} />
@@ -1601,15 +2648,162 @@ function ActivitySummary(props: { activity?: SessionActivity | undefined; locale
         <div className="activityBlock">
           <h4>{t("inspector.tokens")}</h4>
           <div className="statChips">
-            <StatChip label={t("inspector.fields.inputTokens")} value={usage.inputTokens} locale={props.locale} />
-            <StatChip label={t("inspector.fields.outputTokens")} value={usage.outputTokens} locale={props.locale} />
-            <StatChip label={t("inspector.fields.cacheRead")} value={usage.cacheReadInputTokens} locale={props.locale} />
-            <StatChip label={t("inspector.fields.cacheWrite")} value={usage.cacheCreationInputTokens} locale={props.locale} />
+            <StatChip
+              label={t("inspector.fields.inputTokens")}
+              value={usage.inputTokens}
+              locale={props.locale}
+            />
+            <StatChip
+              label={t("inspector.fields.outputTokens")}
+              value={usage.outputTokens}
+              locale={props.locale}
+            />
+            <StatChip
+              label={t("inspector.fields.cacheRead")}
+              value={usage.cacheReadInputTokens}
+              locale={props.locale}
+            />
+            <StatChip
+              label={t("inspector.fields.cacheWrite")}
+              value={usage.cacheCreationInputTokens}
+              locale={props.locale}
+            />
           </div>
         </div>
       )}
     </FieldGroup>
   );
+}
+
+function ModelRuntimeSummary(props: { session: AgentSession }) {
+  const { t } = useTranslation();
+  const metadata = props.session.indexMetadata ?? {};
+  const activity = props.session.activity;
+  const modelCounts = activity?.modelCounts ?? {};
+  const hasModelCounts = Object.keys(modelCounts).length > 0;
+  const fields = [
+    ["modelProvider", metadataValue(metadata, "model_provider", "provider")],
+    ["model", metadataValue(metadata, "model") ?? firstCounterKey(modelCounts)],
+    ["reasoningEffort", metadataValue(metadata, "reasoning_effort", "reasoning")],
+    ["tokensUsed", metadataValue(metadata, "tokens_used", "total_tokens")],
+    ["approvalMode", metadataValue(metadata, "approval_mode", "approval_policy")],
+    ["sandboxPolicy", metadataValue(metadata, "sandbox_policy", "sandbox_mode")],
+    ["gitBranch", metadataValue(metadata, "git_branch") ?? activity?.gitBranch],
+    ["cliVersion", metadataValue(metadata, "cli_version", "version") ?? activity?.cliVersion],
+    ["entrypoint", metadataValue(metadata, "entrypoint")]
+  ] as const;
+  const hasFields = fields.some(([, value]) => value !== undefined);
+  if (!hasFields && !hasModelCounts) return null;
+  return (
+    <FieldGroup title={t("inspector.modelRuntime")}>
+      {fields.map(([key, value]) => (
+        <Field
+          key={key}
+          label={t(`inspector.fields.${key}`)}
+          value={value}
+          mono={key !== "tokensUsed"}
+          long={key === "entrypoint"}
+        />
+      ))}
+      {hasModelCounts && <StatChips title={t("inspector.models")} values={modelCounts} />}
+    </FieldGroup>
+  );
+}
+
+function ControlSummary(props: {
+  session: AgentSession;
+  onOpenPath: (targetPath?: string) => void;
+  onRevealPath: (targetPath?: string) => void;
+}) {
+  const { t } = useTranslation();
+  const resumeCommand = suggestedResumeCommand(props.session);
+  return (
+    <FieldGroup title={t("inspector.control")}>
+      <div className="actionGrid">
+        <ActionButton
+          label={t("inspector.actions.openTranscript")}
+          disabled={!props.session.transcriptPath}
+          onClick={() => props.onOpenPath(props.session.transcriptPath)}
+        />
+        <ActionButton
+          label={t("inspector.actions.revealTranscript")}
+          disabled={!props.session.transcriptPath}
+          onClick={() => props.onRevealPath(props.session.transcriptPath)}
+        />
+      </div>
+      <Field label={t("inspector.fields.resumeCommand")} value={resumeCommand} mono long />
+      <Field label={t("inspector.fields.safeControl")} value={t("inspector.safeControlDetail")} long />
+    </FieldGroup>
+  );
+}
+
+function TranscriptHitContext(props: { context: TranscriptContext | undefined }) {
+  const { t } = useTranslation();
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!props.context) return;
+    window.setTimeout(() => {
+      ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 80);
+  }, [props.context]);
+  if (!props.context) return null;
+  return (
+    <FieldGroup title={t("inspector.searchHit")}>
+      <section className="transcriptHit" ref={ref}>
+        <div className="candidateHead">
+          <Badge text={`line ${props.context.line}`} tone="ok" />
+          {props.context.eventType && <Badge text={props.context.eventType} />}
+          {props.context.timestamp && <span>{formatMaybeDate(props.context.timestamp)}</span>}
+        </div>
+        {props.context.excerpt && (
+          <p className="hitExcerpt mono">
+            {highlightExcerpt(props.context.excerpt, props.context.query)}
+          </p>
+        )}
+        <span className="mono">{props.context.path}</span>
+      </section>
+    </FieldGroup>
+  );
+}
+
+function highlightExcerpt(excerpt: string, query?: string): ReactNode {
+  if (!query?.trim()) return excerpt;
+  const index = excerpt.toLowerCase().indexOf(query.trim().toLowerCase());
+  if (index < 0) return excerpt;
+  return (
+    <>
+      {excerpt.slice(0, index)}
+      <mark>{excerpt.slice(index, index + query.trim().length)}</mark>
+      {excerpt.slice(index + query.trim().length)}
+    </>
+  );
+}
+
+function metadataValue(metadata: Record<string, unknown>, ...keys: string[]): string | number | undefined {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "number" || typeof value === "string") return value;
+    if (typeof value === "boolean") return value ? "true" : "false";
+    return JSON.stringify(value);
+  }
+  return undefined;
+}
+
+function firstCounterKey(values: Record<string, number> | undefined): string | undefined {
+  if (!values) return undefined;
+  return Object.entries(values).sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+function suggestedResumeCommand(session: AgentSession): string | undefined {
+  if (!session.sessionId) return undefined;
+  if (session.agent === "codex") return `codex resume ${quoteCommandArg(session.sessionId)}`;
+  if (session.agent === "claude") return `claude --resume ${quoteCommandArg(session.sessionId)}`;
+  return undefined;
+}
+
+function quoteCommandArg(value: string): string {
+  return /^[A-Za-z0-9._:-]+$/.test(value) ? value : `"${value.replaceAll('"', '\\"')}"`;
 }
 
 function StatChips(props: { title: string; values?: Record<string, number> | undefined }) {
@@ -1627,7 +2821,11 @@ function StatChips(props: { title: string; values?: Record<string, number> | und
   );
 }
 
-function StatChip(props: { label: string; value?: number | undefined; locale?: string | undefined }) {
+function StatChip(props: {
+  label: string;
+  value?: number | undefined;
+  locale?: string | undefined;
+}) {
   if (props.value === undefined) return null;
   return (
     <span className="statChip">
@@ -1659,17 +2857,29 @@ function CandidateList(props: { candidates: SessionCandidate[]; showUnknown: boo
           <span className="mono">
             {candidate.cwd || candidate.transcriptPath || t("common.path.noPath")}
           </span>
+          <div className="candidateFacts">
+            <Field label={t("inspector.fields.session")} value={candidate.sessionId} mono />
+            <Field label={t("inspector.fields.path")} value={candidate.transcriptPath} mono long />
+            <Field
+              label={t("inspector.fields.started")}
+              value={formatMaybeDate(candidate.startedAt)}
+            />
+            <Field
+              label={t("inspector.fields.updated")}
+              value={formatMaybeDate(candidate.updatedAt)}
+            />
+          </div>
           <div className="reasonList">
-            {(candidate.scoreParts ?? candidate.reasons.map((reason) => ({ ...reason, points: 0 }))).map(
-              (reason, index) => (
-                <div className="scorePart" key={`${reason.source}:${index}`}>
-                  <strong>{reason.points ? `+${reason.points}` : ""}</strong>
-                  <span>{reason.source.replace("process.match.", "")}</span>
-                  {reason.field && <em>{reason.field}</em>}
-                  <p>{reason.detail}</p>
-                </div>
-              )
-            )}
+            {(
+              candidate.scoreParts ?? candidate.reasons.map((reason) => ({ ...reason, points: 0 }))
+            ).map((reason, index) => (
+              <div className="scorePart" key={`${reason.source}:${index}`}>
+                <strong>{reason.points ? `+${reason.points}` : ""}</strong>
+                <span>{reason.source.replace("process.match.", "")}</span>
+                {reason.field && <em>{reason.field}</em>}
+                <p>{reason.detail}</p>
+              </div>
+            ))}
             {candidate.confidence === "unknown" && (
               <Badge text={t("views.processes.weakEvidence")} />
             )}
@@ -1745,19 +2955,26 @@ function CommandPalette(props: {
   setQuery: (value: string) => void;
   runSearch: () => void;
   runSearchText: (value: string) => void;
-  results: Record<string, unknown>[];
-  history: string[];
-  historyExpanded: boolean;
-  setHistoryExpanded: (value: boolean) => void;
+  clearSearch: () => void;
+  results: SearchResultRecord[];
+  suggestions: SearchSuggestion[];
+  currentView: View;
   setView: (view: View) => void;
   refresh: () => void;
+  selectResult: (result: SearchResultRecord) => void;
   close: () => void;
 }) {
   const { t } = useTranslation();
-  const visibleHistory = props.historyExpanded ? props.history : props.history.slice(0, 4);
   const runQuick = (action: () => void) => {
     action();
     props.close();
+  };
+  const useSuggestion = (suggestion: SearchSuggestion) => {
+    if (suggestion.targetView) props.setView(suggestion.targetView);
+    if (suggestion.query) {
+      props.setQuery(suggestion.query);
+      props.runSearchText(suggestion.query);
+    }
   };
   return (
     <div className="paletteOverlay" onMouseDown={props.close}>
@@ -1769,7 +2986,6 @@ function CommandPalette(props: {
             value={props.query}
             onChange={(event) => props.setQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") props.runSearch();
               if (event.key === "Escape") props.close();
             }}
             placeholder={t("command.palettePlaceholder")}
@@ -1779,43 +2995,60 @@ function CommandPalette(props: {
           </button>
         </div>
         <div className="quickActions">
-          <button onClick={() => runQuick(() => props.setView("processes"))}>{t("nav.processes")}</button>
-          <button onClick={() => runQuick(() => props.setView("sessions"))}>{t("nav.sessions")}</button>
-          <button onClick={() => runQuick(() => props.setView("graph"))}>{t("nav.relations")}</button>
+          <button onClick={() => runQuick(() => props.setView("processes"))}>
+            {t("nav.processes")}
+          </button>
+          <button onClick={() => runQuick(() => props.setView("sessions"))}>
+            {t("nav.sessions")}
+          </button>
+          <button onClick={() => runQuick(() => props.setView("graph"))}>
+            {t("nav.relations")}
+          </button>
           <button onClick={() => runQuick(props.refresh)}>{t("nav.refreshIndex")}</button>
         </div>
         <div className="paletteBody">
           <section>
             <div className="paletteSectionTitle">
-              <span>{t("command.results")}</span>
-              <button onClick={props.runSearch}>{t("common.action.show")}</button>
+              <span>
+                {props.query.trim()
+                  ? t("command.results")
+                  : t("command.contextTitle", { view: t(`nav.${props.currentView}`) })}
+              </span>
+              {props.query.trim() && <em>{t("command.autoSearch")}</em>}
             </div>
-            <SearchResults results={props.results} onPick={props.close} />
+            <SearchResults
+              results={props.results}
+              onPick={(result) => {
+                props.selectResult(result);
+                props.close();
+              }}
+            />
           </section>
           <section>
             <div className="paletteSectionTitle">
-              <span>{t("command.history")}</span>
-              {props.history.length > 4 && (
-                <button onClick={() => props.setHistoryExpanded(!props.historyExpanded)}>
-                  {props.historyExpanded ? t("common.action.hide") : t("common.action.show")}
+              <span>{t("command.suggestions")}</span>
+              <button
+                type="button"
+                disabled={!props.query && props.results.length === 0}
+                onClick={props.clearSearch}
+              >
+                  {t("command.clearSearch")}
                 </button>
-              )}
             </div>
-            <div className="historyList">
-              {visibleHistory.length ? (
-                visibleHistory.map((item) => (
+            <div className="suggestionList">
+              {props.suggestions.length ? (
+                props.suggestions.map((item) => (
                   <button
-                    key={item}
-                    onClick={() => {
-                      props.runSearchText(item);
-                    }}
+                    key={`${item.label}:${item.query ?? item.targetView ?? ""}`}
+                    onClick={() => useSuggestion(item)}
                   >
                     <Search size={14} />
-                    <span>{item}</span>
+                    <span>{item.label}</span>
+                    <em>{item.detail}</em>
                   </button>
                 ))
               ) : (
-                <p className="muted">{t("command.noHistory")}</p>
+                <p className="muted">{t("command.noSuggestions")}</p>
               )}
             </div>
           </section>
@@ -1827,7 +3060,9 @@ function CommandPalette(props: {
 
 function MetadataSummary(props: { metadata?: Record<string, unknown> | undefined }) {
   const { t } = useTranslation();
-  const entries = Object.entries(props.metadata ?? {}).filter(([, value]) => value !== undefined && value !== null && value !== "");
+  const entries = Object.entries(props.metadata ?? {}).filter(
+    ([, value]) => value !== undefined && value !== null && value !== ""
+  );
   if (!entries.length) return null;
   return (
     <FieldGroup title={t("inspector.indexMetadata")}>
@@ -1843,15 +3078,19 @@ function MetadataSummary(props: { metadata?: Record<string, unknown> | undefined
   );
 }
 
-function SearchResults(props: { results: Record<string, unknown>[]; onPick: () => void }) {
+function SearchResults(props: {
+  results: SearchResultRecord[];
+  onPick: (result: SearchResultRecord) => void;
+}) {
   return (
     <section className="results">
       {props.results.map((result, index) => (
-        <button className="result" key={index} onClick={props.onPick}>
+        <button className="result" key={index} onClick={() => props.onPick(result)}>
           <AgentPill agent={String(result.agent ?? "unknown")} />
           <span>{String(result.source ?? "")}</span>
           <span className="mono">{short(String(result.sessionId ?? ""))}</span>
           <strong>{searchResultTitle(result)}</strong>
+          {typeof result.excerpt === "string" && <em className="mono">{result.excerpt}</em>}
         </button>
       ))}
     </section>
@@ -1868,6 +3107,19 @@ function EmptyState(props: { icon: ReactNode; title: string; detail: string }) {
   );
 }
 
+function LoadingState(props: { compact?: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className={`emptyState loadingState ${props.compact ? "compact" : ""}`}>
+      <div>
+        <RefreshCw size={22} className="spin" />
+      </div>
+      <h2>{t("views.loading.title")}</h2>
+      <p>{t("views.loading.detail")}</p>
+    </div>
+  );
+}
+
 function AgentTile(props: { agent: AgentKind }) {
   const { t } = useTranslation();
   return (
@@ -1879,9 +3131,77 @@ function AgentTile(props: { agent: AgentKind }) {
 }
 
 function AgentIcon(props: { agent: string }) {
-  if (props.agent === "claude") return <FileJson size={18} />;
-  if (props.agent === "codex") return <Terminal size={18} />;
-  return <Activity size={18} />;
+  if (props.agent === "claude") {
+    return <img className="agentBrandIcon" src={claudeLogoUrl} alt="" aria-hidden="true" />;
+  }
+  if (props.agent === "codex") {
+    return <img className="agentBrandIcon" src={codexLogoUrl} alt="" aria-hidden="true" />;
+  }
+  return <Bot size={18} />;
+}
+
+function AgentScopeMark(props: { size?: number }) {
+  const size = props.size ?? 24;
+  return (
+    <svg
+      className="agentGlyph"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+    >
+      <path
+        d="M5.4 7.1c0-1.2 1-2.1 2.1-2.1h9c1.2 0 2.1 1 2.1 2.1v8.2c0 1.2-1 2.1-2.1 2.1h-9c-1.2 0-2.1-1-2.1-2.1V7.1Z"
+        stroke="currentColor"
+        strokeWidth="1.65"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8.2 10.6h4.1M8.2 13.8h2.2M15.6 8.7v3.1M14 10.2h3.1"
+        stroke="currentColor"
+        strokeWidth="1.65"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12.5 17.6v2.2h3.3M18.6 17.4l2.1 2.1"
+        stroke="currentColor"
+        strokeWidth="1.65"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="18" cy="19.8" r="1.25" fill="currentColor" />
+      <circle cx="20.6" cy="20.4" r=".8" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TranscriptGlyph(props: { size?: number }) {
+  const size = props.size ?? 24;
+  return (
+    <svg
+      className="agentGlyph"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+    >
+      <path
+        d="M6.5 4.8h8l3 3v11.4H6.5V4.8Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M14.3 5v3.1h3" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M8.8 11h5.4M8.8 14h6.1M8.8 17h3.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 function AgentPill(props: { agent: string }) {
@@ -1895,6 +3215,18 @@ function AgentPill(props: { agent: string }) {
 
 function Badge(props: { text: string; tone?: "ok" | "warn" | undefined }) {
   return <span className={`badge ${props.tone ?? ""}`}>{props.text}</span>;
+}
+
+function SwitchControl(props: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <button
+      className={`switchControl ${props.checked ? "checked" : ""}`}
+      aria-pressed={props.checked}
+      onClick={() => props.onChange(!props.checked)}
+    >
+      <span />
+    </button>
+  );
 }
 
 function ConfidenceBadge(props: { value: string }) {
@@ -1962,35 +3294,295 @@ function candidateTitle(candidate: SessionCandidate) {
   return candidate.title || short(candidate.sessionId);
 }
 
-function relationEndpointName(sessions: AgentSession[], id: string): string {
+function candidateExplanation(candidate: SessionCandidate): string {
+  const parts = (candidate.scoreParts ?? [])
+    .slice()
+    .sort((a, b) => Math.abs(b.points) - Math.abs(a.points))
+    .slice(0, 3)
+    .map((part) => `${part.points > 0 ? "+" : ""}${part.points} ${part.source.replace("process.match.", "")}`);
+  return parts.length ? parts.join(" / ") : candidate.reasons[0]?.source ?? "";
+}
+
+function explainTopCandidate(candidate: SessionCandidate): string {
+  const exact = candidate.scoreParts?.find((part) => part.source === "process.match.pid");
+  if (exact) return "PID exact";
+  return candidateExplanation(candidate);
+}
+
+function groupProcesses(
+  processes: AgentProcess[],
+  sortMode: ProcessSortMode,
+  groupMode: ProcessGroupMode
+): Array<{ key: string; label: string; items: AgentProcess[] }> {
+  const sorted = [...processes].sort((left, right) => compareProcesses(left, right, sortMode));
+  const groups = new Map<string, { key: string; label: string; items: AgentProcess[] }>();
+  for (const process of sorted) {
+    const key = processGroupKey(process, groupMode);
+    const label = processGroupLabel(process, groupMode);
+    if (!groups.has(key)) groups.set(key, { key, label, items: [] });
+    groups.get(key)!.items.push(process);
+  }
+  return [...groups.values()];
+}
+
+function groupSessions(
+  sessions: AgentSession[],
+  groupMode: SessionGroupMode
+): Array<{ key: string; label: string; items: AgentSession[] }> {
+  const sorted = [...sessions].sort(
+    (left, right) =>
+      parseDate(right.updatedAt ?? right.startedAt) - parseDate(left.updatedAt ?? left.startedAt) ||
+      displayTitle(left).localeCompare(displayTitle(right))
+  );
+  const groups = new Map<string, { key: string; label: string; items: AgentSession[] }>();
+  for (const session of sorted) {
+    const key = sessionGroupKey(session, groupMode);
+    const label = sessionGroupLabel(session, groupMode);
+    if (!groups.has(key)) groups.set(key, { key, label, items: [] });
+    groups.get(key)!.items.push(session);
+  }
+  return [...groups.values()];
+}
+
+function sessionGroupKey(session: AgentSession, groupMode: SessionGroupMode): string {
+  if (groupMode === "none") return "all";
+  if (groupMode === "parent") return `parent:${session.parentSessionId ?? "root"}`;
+  if (groupMode === "agent") return `agent:${session.agent}`;
+  return `cwd:${session.cwd ?? "unknown"}`;
+}
+
+function sessionGroupLabel(session: AgentSession, groupMode: SessionGroupMode): string {
+  if (groupMode === "none") return "All sessions";
+  if (groupMode === "parent") return session.parentSessionId ? `Parent ${short(session.parentSessionId)}` : "Root / no parent";
+  if (groupMode === "agent") return session.agent;
+  return session.cwd ?? "No cwd";
+}
+
+function compareProcesses(left: AgentProcess, right: AgentProcess, sortMode: ProcessSortMode): number {
+  if (sortMode === "memory") {
+    return (right.workingSetBytes ?? 0) - (left.workingSetBytes ?? 0) || compareProcesses(left, right, "time");
+  }
+  if (sortMode === "runtime") {
+    return runtimeMs(right) - runtimeMs(left) || compareProcesses(left, right, "time");
+  }
+  if (sortMode === "score") {
+    return topScore(right) - topScore(left) || compareProcesses(left, right, "time");
+  }
+  if (sortMode === "tree") {
+    return (left.ppid ?? 0) - (right.ppid ?? 0) || left.pid - right.pid;
+  }
+  return parseDate(right.startTime ?? right.creationDate) - parseDate(left.startTime ?? left.creationDate);
+}
+
+function processGroupKey(process: AgentProcess, groupMode: ProcessGroupMode): string {
+  if (groupMode === "none") return "all";
+  if (groupMode === "parent") return `ppid:${process.ppid ?? "root"}`;
+  if (groupMode === "cwd") return `cwd:${topProcessCwd(process) ?? "unknown"}`;
+  return `agent:${process.agent}`;
+}
+
+function processGroupLabel(process: AgentProcess, groupMode: ProcessGroupMode): string {
+  if (groupMode === "none") return "All processes";
+  if (groupMode === "parent") return process.ppid === undefined ? "No parent PID" : `Parent PID ${process.ppid}`;
+  if (groupMode === "cwd") return topProcessCwd(process) ?? "No cwd candidate";
+  return process.agent === "unknown" ? "Unknown" : process.agent;
+}
+
+function topProcessCwd(process: AgentProcess): string | undefined {
+  return strongCandidates(process)[0]?.cwd ?? process.sessionCandidates?.[0]?.cwd;
+}
+
+function topScore(process: AgentProcess): number {
+  return strongCandidates(process)[0]?.score ?? process.sessionCandidates?.[0]?.score ?? 0;
+}
+
+function visibleProcesses(processes: AgentProcess[], settings: AppSettings): AgentProcess[] {
+  if (!settings.runtimeWin32Enabled) return [];
+  return processes.map((process) => ({
+    ...process,
+    windowTitle: settings.runtimeWindowTitlesEnabled ? process.windowTitle : undefined,
+    sessionCandidates: settings.runtimeCandidatesEnabled ? process.sessionCandidates : []
+  }));
+}
+
+function runtimeMs(process: AgentProcess): number {
+  const start = parseDate(process.startTime ?? process.creationDate);
+  return start ? Date.now() - start : 0;
+}
+
+function relationEndpointDisplay(
+  sessions: AgentSession[],
+  relation: Relation,
+  side: RelationSide,
+  label: string
+): RelationEndpointDisplay {
+  const id = side === "source" ? relation.sourceId : relation.targetId;
+  if (relation.kind === "process_parent") {
+    const detail = relation.evidence[0]?.source;
+    return {
+      title: id === "unknown" ? label : `PID ${id}`,
+      ...(detail ? { detail } : {}),
+      raw: id
+    };
+  }
+
   const session = sessions.find((item) => item.sessionId === id);
-  return session ? displayTitle(session) : id;
+  if (session) {
+    return {
+      title: displayTitle(session),
+      detail: session.cwd || short(session.sessionId),
+      raw: session.sessionId
+    };
+  }
+
+  if (relation.kind === "transcript" && id.includes("\\")) {
+    return {
+      title: id.split("\\").pop() || label,
+      detail: short(id),
+      raw: id
+    };
+  }
+
+  const fallbackDetail = id.length > 28 ? short(id) : relation.evidence[0]?.source;
+  return {
+    title: relation.kind === "subagent" && side === "target" ? label : short(id),
+    ...(fallbackDetail ? { detail: fallbackDetail } : {}),
+    raw: id
+  };
 }
 
 function searchResultTitle(result: Record<string, unknown>): string {
   if (result.title) return String(result.title);
   const eventType = result.eventType ? String(result.eventType) : "jsonl";
   const line = result.line ? `line ${String(result.line)}` : "";
-  const fields = Array.isArray(result.matchedFields) && result.matchedFields.length
-    ? `fields ${result.matchedFields.map(String).join(", ")}`
-    : "";
-  return [eventType, line, fields, result.path ? String(result.path) : ""].filter(Boolean).join(" · ");
+  const fields =
+    Array.isArray(result.matchedFields) && result.matchedFields.length
+      ? `fields ${result.matchedFields.map(String).join(", ")}`
+      : "";
+  return [eventType, line, fields, result.path ? String(result.path) : ""]
+    .filter(Boolean)
+    .join(" · ");
 }
 
-function loadSearchHistory(): string[] {
-  try {
-    const raw = localStorage.getItem("agentscope.searchHistory.v1");
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string").slice(0, 20) : [];
-  } catch {
-    return [];
+function searchResultSelection(
+  result: SearchResultRecord,
+  sessions: AgentSession[]
+): SelectionKey {
+  const sessionId = typeof result.sessionId === "string" ? result.sessionId : undefined;
+  if (!sessionId) return null;
+  const agent = typeof result.agent === "string" ? result.agent : undefined;
+  const session = sessions.find(
+    (item) => item.sessionId === sessionId && (!agent || item.agent === agent)
+  );
+  return session ? { type: "session", agent: session.agent, id: session.sessionId } : null;
+}
+
+function transcriptContextForSession(
+  session: AgentSession,
+  result: SearchResultRecord | null
+): TranscriptContext | undefined {
+  if (!result || !result.path || !result.line) return undefined;
+  if (result.sessionId && result.sessionId !== session.sessionId) return undefined;
+  if (result.agent && result.agent !== session.agent) return undefined;
+  const query = typeof result.query === "string" ? result.query : undefined;
+  const eventType = typeof result.eventType === "string" ? result.eventType : undefined;
+  const timestamp = typeof result.timestamp === "string" ? result.timestamp : undefined;
+  const excerpt = typeof result.excerpt === "string" ? result.excerpt : undefined;
+  return {
+    path: String(result.path),
+    line: Number(result.line),
+    ...(query ? { query } : {}),
+    ...(eventType ? { eventType } : {}),
+    ...(timestamp ? { timestamp } : {}),
+    ...(excerpt ? { excerpt } : {})
+  };
+}
+
+function buildSearchSuggestions(
+  view: View,
+  selected: Selection,
+  sessions: AgentSession[],
+  processes: AgentProcess[],
+  relations: Relation[],
+  doctor: Diagnostic[],
+  t: (key: string, options?: Record<string, unknown>) => string
+): SearchSuggestion[] {
+  const out: SearchSuggestion[] = [];
+  const add = (suggestion: SearchSuggestion | undefined) => {
+    if (!suggestion) return;
+    const key = `${suggestion.label}\0${suggestion.query ?? ""}\0${suggestion.targetView ?? ""}`;
+    if (out.some((item) => `${item.label}\0${item.query ?? ""}\0${item.targetView ?? ""}` === key)) return;
+    out.push(suggestion);
+  };
+
+  add({ label: t("command.suggestion.refresh"), detail: t("nav.refreshIndex"), targetView: view });
+  if (view !== "processes") add({ label: t("nav.processes"), detail: t("command.suggestion.processes"), targetView: "processes" });
+  if (view !== "sessions") add({ label: t("nav.sessions"), detail: t("command.suggestion.sessions"), targetView: "sessions" });
+  if (view !== "graph") add({ label: t("nav.relations"), detail: t("command.suggestion.relations"), targetView: "graph" });
+  if (view !== "settings") add({ label: t("nav.settings"), detail: t("command.suggestion.settings"), targetView: "settings" });
+
+  if (selected?.type === "process") {
+    const process = selected.value;
+    add(searchSuggestion(`PID ${process.pid}`, "pid", String(process.pid), t));
+    add(searchSuggestion(process.windowTitle, "title", process.windowTitle, t));
+    add(searchSuggestion(process.processName, "process", process.processName, t));
+    add(searchSuggestion(topProcessCwd(process), "cwd", topProcessCwd(process), t));
+    for (const candidate of (process.sessionCandidates ?? []).slice(0, 3)) {
+      add(searchSuggestion(candidate.title ?? short(candidate.sessionId), "candidate", candidate.sessionId, t));
+      add(searchSuggestion(candidate.cwd, "cwd", candidate.cwd, t));
+    }
   }
+
+  if (selected?.type === "session") {
+    const session = selected.value;
+    add(searchSuggestion(displayTitle(session), "title", displayTitle(session), t));
+    add(searchSuggestion(short(session.sessionId), "session", session.sessionId, t));
+    add(searchSuggestion(session.cwd, "cwd", session.cwd, t));
+    add(searchSuggestion(session.status, "status", session.status, t));
+    add(searchSuggestion(firstCounterKey(session.activity?.modelCounts), "model", firstCounterKey(session.activity?.modelCounts), t));
+    for (const [tool] of topEntries(session.activity?.toolCounts, 3)) {
+      add(searchSuggestion(tool, "tool", tool, t));
+    }
+  }
+
+  if (view === "processes") {
+    for (const process of processes.slice(0, 5)) {
+      add(searchSuggestion(process.windowTitle || process.processName, "process", process.windowTitle || process.processName, t));
+    }
+  } else if (view === "sessions") {
+    for (const session of sessions.slice(-6).reverse()) {
+      add(searchSuggestion(displayTitle(session), "session", session.sessionId, t));
+    }
+  } else if (view === "graph") {
+    for (const relation of relations.slice(0, 5)) {
+      add(searchSuggestion(relation.kind, "relation", relation.kind, t));
+    }
+  } else if (view === "doctor") {
+    for (const warning of doctor.filter((item) => item.status === "warn").slice(0, 5)) {
+      add(searchSuggestion(warning.name, "diagnostic", warning.name, t));
+    }
+  } else if (view === "settings") {
+    for (const key of ["theme", "language", "motion", "indexing", "runtime"]) {
+      add(searchSuggestion(t(`settings.suggestion.${key}`), "setting", key, t));
+    }
+  }
+
+  return out.slice(0, 12);
 }
 
-function saveSearchHistory(query: string, current: string[]): string[] {
-  const next = [query, ...current.filter((item) => item.toLowerCase() !== query.toLowerCase())].slice(0, 20);
-  localStorage.setItem("agentscope.searchHistory.v1", JSON.stringify(next));
-  return next;
+function searchSuggestion(
+  label: string | undefined,
+  kind: string,
+  query: string | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string
+): SearchSuggestion | undefined {
+  const cleaned = query?.trim();
+  if (!label || !cleaned) return undefined;
+  return {
+    label,
+    detail: t("command.suggestion.query", { kind }),
+    query: cleaned
+  };
 }
 
 function selectedTranscriptPath(selection: Selection): string | undefined {
@@ -2011,7 +3603,10 @@ function short(value?: string) {
   return value.length > 28 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
 }
 
-function topEntries(values: Record<string, number> | undefined, limit: number): Array<[string, number]> {
+function topEntries(
+  values: Record<string, number> | undefined,
+  limit: number
+): Array<[string, number]> {
   return Object.entries(values ?? {})
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, limit);
@@ -2023,7 +3618,14 @@ function formatNumber(value: number | undefined, locale?: string): string | unde
 
 function formatBytes(value: number | undefined, locale?: string): string | undefined {
   if (value === undefined) return undefined;
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value / 1024) + " KB";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: size >= 10 ? 0 : 1 }).format(size)} ${units[unit]}`;
 }
 
 function formatDate(value: string, locale?: string) {
@@ -2041,9 +3643,62 @@ function formatMaybeDate(value: string | undefined, locale?: string) {
   return value ? formatDate(value, locale) : undefined;
 }
 
+function formatDuration(startTime: string, locale?: string): string {
+  const start = parseDate(startTime);
+  if (!start) return "";
+  const minutes = Math.max(0, Math.floor((Date.now() - start) / 60000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours < 24) return `${hours}h ${restMinutes}m`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return `${new Intl.NumberFormat(locale).format(days)}d ${restHours}h`;
+}
+
+function parseDate(value?: string): number {
+  if (!value) return 0;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && value.length >= 10) return numeric;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function clampMenuCoordinate(value: number, viewport: number, size: number): number {
+  return Math.max(8, Math.min(value, viewport - size - 8));
+}
+
 function displayTitle(session: AgentSession) {
-  const title = session.title || short(session.sessionId);
+  const title = session.title || inferredSessionTitle(session) || short(session.sessionId);
   return title.length > 160 ? `${title.slice(0, 157)}...` : title;
+}
+
+function inferredSessionTitle(session: AgentSession): string | undefined {
+  const metadata = session.indexMetadata ?? {};
+  const agentName = metadataValue(metadata, "agent_nickname", "agent_role", "agent_path");
+  if (agentName) return cleanTitle(String(agentName));
+  const batch = fileBatchTitle(session.transcriptPath);
+  if (batch) return batch;
+  const cwdName = basename(session.cwd);
+  if (cwdName && session.parentSessionId) return `${cwdName} child`;
+  if (cwdName) return cwdName;
+  return basename(session.transcriptPath);
+}
+
+function fileBatchTitle(filePath?: string): string | undefined {
+  if (!filePath) return undefined;
+  const match = /batch[_-](\d+)/i.exec(filePath);
+  return match ? `batch ${match[1]}` : undefined;
+}
+
+function basename(value?: string): string | undefined {
+  if (!value) return undefined;
+  const parts = value.split(/[\\/]+/).filter(Boolean);
+  return parts.at(-1);
+}
+
+function cleanTitle(value: string): string {
+  return value.replaceAll("_", " ").replace(/\s+/g, " ").trim();
 }
 
 function Toast(props: { message: string; onClose: () => void }) {
@@ -2079,20 +3734,68 @@ function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     theme: pickEnum(settings.theme, themeValues, defaultSettings.theme),
     density: pickEnum(settings.density, densityValues, defaultSettings.density),
     motion: pickEnum(settings.motion, motionValues, defaultSettings.motion),
-    accent: pickEnum(settings.accent, [...accentValues], defaultSettings.accent),
+    accent: normalizeHexColor(settings.accent) ?? defaultSettings.accent,
+    runtimeWin32Enabled: pickBoolean(
+      settings.runtimeWin32Enabled,
+      defaultSettings.runtimeWin32Enabled
+    ),
+    runtimeWindowTitlesEnabled: pickBoolean(
+      settings.runtimeWindowTitlesEnabled,
+      defaultSettings.runtimeWindowTitlesEnabled
+    ),
+    runtimeCandidatesEnabled: pickBoolean(
+      settings.runtimeCandidatesEnabled,
+      defaultSettings.runtimeCandidatesEnabled
+    ),
     defaultView: pickEnum(settings.defaultView, defaultViewValues, defaultSettings.defaultView),
     inspector: pickEnum(settings.inspector, inspectorValues, defaultSettings.inspector),
     fontScale: pickEnum(settings.fontScale, fontScaleValues, defaultSettings.fontScale),
+    fontMode: pickEnum(settings.fontMode, fontModeValues, defaultSettings.fontMode),
+    fontPreset: pickEnum(settings.fontPreset, fontPresetValues, defaultSettings.fontPreset),
+    unifiedFont: pickFont(settings.unifiedFont, defaultSettings.unifiedFont),
+    latinFont: pickFont(settings.latinFont, defaultSettings.latinFont),
+    chineseFont: pickFont(settings.chineseFont, defaultSettings.chineseFont),
+    japaneseFont: pickFont(settings.japaneseFont, defaultSettings.japaneseFont),
+    koreanFont: pickFont(settings.koreanFont, defaultSettings.koreanFont),
+    codeFont: pickFont(settings.codeFont, defaultSettings.codeFont),
+    uiLineHeight: pickEnum(settings.uiLineHeight, lineHeightValues, defaultSettings.uiLineHeight),
     searchLimit: clampNumber(settings.searchLimit, 8, 80, defaultSettings.searchLimit),
-    showUnknownCandidates:
-      typeof settings.showUnknownCandidates === "boolean"
-        ? settings.showUnknownCandidates
-        : defaultSettings.showUnknownCandidates
+    suggestionsEnabled: pickBoolean(settings.suggestionsEnabled, defaultSettings.suggestionsEnabled),
+    transcriptPreviewEnabled: pickBoolean(
+      settings.transcriptPreviewEnabled,
+      defaultSettings.transcriptPreviewEnabled
+    ),
+    showUnknownCandidates: pickBoolean(
+      settings.showUnknownCandidates,
+      defaultSettings.showUnknownCandidates
+    )
   };
 }
 
 function pickEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === "string" && allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+function pickFont(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 80) : fallback;
+}
+
+function pickBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeHexColor(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  const shortHex = /^#([0-9a-f]{3})$/i.exec(trimmed);
+  if (shortHex?.[1]) {
+    return `#${shortHex[1]
+      .split("")
+      .map((char) => char + char)
+      .join("")
+      .toLowerCase()}`;
+  }
+  return /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed.toLowerCase() : undefined;
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {

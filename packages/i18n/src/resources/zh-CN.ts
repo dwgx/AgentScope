@@ -7,7 +7,14 @@ export const zhCN = {
   common: {
     ...enUS.common,
     agent: { codex: "codex", claude: "claude", unknown: "unknown" },
-    action: { open: "打开", refresh: "刷新", reset: "重置", show: "显示", hide: "隐藏" },
+    action: {
+      open: "打开",
+      refresh: "刷新",
+      reset: "重置",
+      clear: "清空",
+      show: "显示",
+      hide: "隐藏"
+    },
     status: {
       ...enUS.common.status,
       ok: "正常",
@@ -99,25 +106,71 @@ export const zhCN = {
     warn: "警告",
     refreshTitle: "刷新",
     results: "搜索结果",
+    clearSearch: "清除搜索",
     history: "最近搜索",
-    noHistory: "暂无搜索历史"
+    noHistory: "暂无搜索历史",
+    suggestions: "猜你想找",
+    noSuggestions: "暂无上下文推荐",
+    autoSearch: "输入时自动搜索",
+    contextTitle: "{{view}} 的推荐",
+    suggestion: {
+      refresh: "刷新当前索引",
+      processes: "检查运行中的 Win32 进程",
+      sessions: "浏览已索引会话",
+      relations: "查看进程和会话关系图",
+      settings: "调整工作区行为",
+      query: "搜索 {{kind}}"
+    }
   },
   views: {
     processes: {
       emptyTitle: "没有相关进程",
       emptyDetail: "未找到 Codex、Claude、node_repl、app-server 或 daemon 进程。",
+      captureOffTitle: "运行时采集已关闭",
+      captureOffDetail: "在 设置 > 运行时 打开 Win32_Process 后才会显示实时 Agent 进程。",
       subtitle_one: "{{count}} 个相关 Win32 进程",
       subtitle_other: "{{count}} 个相关 Win32 进程",
       noCandidate: "还没有会话候选",
       weakEvidence: "弱证据",
       candidate: "候选",
-      score: "评分 {{score}}"
+      score: "证据 {{score}}",
+      groupCount_one: "{{count}} 个进程",
+      groupCount_other: "{{count}} 个进程",
+      sort: {
+        label: "排序",
+        time: "时间",
+        runtime: "运行时长",
+        memory: "内存",
+        score: "证据",
+        tree: "进程树"
+      },
+      group: {
+        label: "分组",
+        agent: "Agent",
+        parent: "父进程",
+        cwd: "cwd",
+        none: "平铺"
+      },
+      context: {
+        inspect: "检查进程",
+        jumpSession: "跳转会话"
+      }
     },
     sessions: {
       emptyTitle: "没有索引到会话",
       emptyDetail: "运行诊断以检查 Codex 和 Claude 本地路径。",
       subtitle_one: "{{count}} 条 Claude + Codex 记录",
-      subtitle_other: "{{count}} 条 Claude + Codex 记录"
+      subtitle_other: "{{count}} 条 Claude + Codex 记录",
+      groupCount_one: "{{count}} 个会话",
+      groupCount_other: "{{count}} 个会话",
+      children_one: "{{count}} 个子会话",
+      children_other: "{{count}} 个子会话",
+      group: {
+        cwd: "cwd",
+        parent: "父级",
+        agent: "Agent",
+        none: "平铺"
+      }
     },
     relations: {
       emptyTitle: "没有关系",
@@ -130,6 +183,10 @@ export const zhCN = {
       emptyDetail: "刷新以运行本地环境检查。",
       subtitle_one: "{{count}} 项环境检查",
       subtitle_other: "{{count}} 项环境检查"
+    },
+    loading: {
+      title: "正在读取本机 Agent 状态",
+      detail: "正在枚举 Win32_Process、Codex SQLite/JSONL 和 Claude 会话文件。"
     }
   },
   settings: {
@@ -174,6 +231,28 @@ export const zhCN = {
       detail: "SQLite 标题/预览，以及本地 Codex 和 Claude JSONL 转录。"
     },
     searchLimit: { label: "搜索结果数量", detail: "命令栏搜索返回的最大匹配数。" },
+    searchHistory: {
+      label: "搜索历史",
+      detail: "将最近搜索词保存在本机；处理敏感转录时建议关闭。",
+      clearLabel: "清空搜索历史",
+      clearDetail_one: "已保存 {{count}} 条搜索。",
+      clearDetail_other: "已保存 {{count}} 条搜索。"
+    },
+    suggestions: {
+      label: "上下文推荐",
+      detail: "根据当前页面、选中的进程/会话、cwd、模型、工具和诊断生成搜索提示。"
+    },
+    transcriptPreview: {
+      label: "转录命中预览",
+      detail: "选择搜索结果时显示短摘录和行号，不展示整段 JSONL 原文。"
+    },
+    suggestion: {
+      theme: "主题",
+      language: "语言",
+      motion: "动画",
+      indexing: "索引",
+      runtime: "运行时"
+    },
     resetUi: {
       label: "重置 UI 设置",
       detail: "恢复主题、密度、动画、检查器、字号、语言和搜索数量。"
@@ -213,7 +292,49 @@ export const zhCN = {
       normal: "正常",
       large: "大"
     },
-    codeFont: { label: "代码字体", detail: "Cascadia Code" },
+    fontMode: {
+      label: "字体模式",
+      detail: "统一字体、按语言 fallback，或每种语言完全自定义。",
+      language: "按语言",
+      unified: "统一",
+      custom: "自定义"
+    },
+    fontPreset: {
+      label: "字体预设",
+      detail: "套用 Windows、Claude-like、日文教科书或高密度追踪字体栈。",
+      windows: "Windows",
+      language: "按语言",
+      claude: "Claude",
+      japaneseTextbook: "教科书",
+      dense: "高密度",
+      custom: "自定义"
+    },
+    lineHeight: {
+      label: "行高",
+      detail: "控制混排文字和证据行的垂直节奏。",
+      compact: "紧凑",
+      normal: "正常",
+      spacious: "宽松"
+    },
+    fonts: {
+      unified: "统一 UI 字体",
+      unifiedDetail: "字体模式为统一时使用。可手动输入 PingFang、Inter、Anthropic Sans 等字体名。",
+      latin: "英文 / 拉丁字体",
+      latinDetail: "英文菜单、标签和数字的主字体。",
+      chinese: "中文字体",
+      chineseDetail: "中文标签和转录文本的 fallback。",
+      japanese: "日文字体",
+      japaneseDetail: "Yu Gothic UI 更紧凑；UD Digi Kyokasho 更接近日文教科书阅读风格。",
+      korean: "韩文字体",
+      koreanDetail: "Malgun Gothic 是 Windows 原生韩文 UI 基准。",
+      detected: "已安装字体",
+      detectedDetail_one: "当前 Windows 用户检测到 {{count}} 个字体族。",
+      detectedDetail_other: "当前 Windows 用户检测到 {{count}} 个字体族。"
+    },
+    fontPreview: {
+      title: "字体预览"
+    },
+    codeFont: { label: "代码字体", detail: "代码、路径、命令行、ID 和表格证据。" },
     links: {
       githubLabel: "打开 GitHub",
       githubDetail: "公开仓库，用于 issues、actions 和 releases。",
@@ -258,9 +379,12 @@ export const zhCN = {
     runtime: "运行时",
     identity: "身份",
     transcript: "转录",
+    modelRuntime: "模型与运行参数",
+    control: "安全控制",
     indexMetadata: "索引元数据",
     relations: "关系",
     evidence: "证据",
+    searchHit: "搜索命中",
     activity: "活动",
     topEvents: "主要事件",
     topTools: "主要工具",
@@ -270,6 +394,12 @@ export const zhCN = {
     noActivity: "没有可用的转录活动摘要。",
     noCandidate: "没有候选会话。没有 PID、cwd、转录、标题或时间证据时，AgentScope 不会猜测。",
     noCwdEvidence: "没有 cwd 证据",
+    safeControlDetail:
+      "只读模式：可以打开、定位、生成 resume 命令和导出；kill/archive 在显式 force 控制出现前保持禁用。",
+    actions: {
+      openTranscript: "打开转录",
+      revealTranscript: "定位转录"
+    },
     fields: {
       pid: "PID",
       ppid: "PPID",
@@ -300,7 +430,16 @@ export const zhCN = {
       inputTokens: "输入",
       outputTokens: "输出",
       cacheRead: "缓存读",
-      cacheWrite: "缓存写"
+      cacheWrite: "缓存写",
+      modelProvider: "提供方",
+      model: "模型",
+      reasoningEffort: "推理强度",
+      tokensUsed: "已用 Token",
+      approvalMode: "审批",
+      sandboxPolicy: "沙箱",
+      entrypoint: "入口",
+      resumeCommand: "恢复命令",
+      safeControl: "边界"
     }
   },
   toast: {

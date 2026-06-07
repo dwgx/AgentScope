@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="AgentScope">
+  <defs>
+    <linearGradient id="bg" x1="34" y1="22" x2="222" y2="238" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#30343b"/>
+      <stop offset=".52" stop-color="#15171b"/>
+      <stop offset="1" stop-color="#0a0b0e"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="57" y1="55" x2="197" y2="187" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#59616a"/>
+      <stop offset=".62" stop-color="#272b31"/>
+      <stop offset="1" stop-color="#13161a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="67" y1="70" x2="202" y2="214" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#dfe7ee"/>
+      <stop offset=".42" stop-color="#8fb9da"/>
+      <stop offset="1" stop-color="#d77b59"/>
+    </linearGradient>
+    <filter id="shadow" x="-28" y="-24" width="312" height="312" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#000000" flood-opacity=".45"/>
+    </filter>
+  </defs>
+  <rect width="256" height="256" rx="50" fill="url(#bg)"/>
+  <path d="M34 70c0-18 15-33 33-33h89c18 0 33 15 33 33v77c0 18-15 33-33 33H67c-18 0-33-15-33-33V70Z" fill="url(#panel)" filter="url(#shadow)"/>
+  <path d="M55 83c0-12 10-22 22-22h82c12 0 22 10 22 22v56c0 12-10 22-22 22H77c-12 0-22-10-22-22V83Z" fill="#111418" stroke="#8b949e" stroke-width="7"/>
+  <path d="M86 180h64v19H86z" fill="#2f363d"/>
+  <path d="M71 207h100" stroke="#a7b0ba" stroke-width="12" stroke-linecap="round"/>
+  <path d="M82 109h35M82 133h23" stroke="#dfe7ee" stroke-width="12" stroke-linecap="round"/>
+  <path d="M151 91v36M133 109h36" stroke="#8fc9ff" stroke-width="12" stroke-linecap="round"/>
+  <path d="M153 163l24 24 34-34 16 16-34 34 18 18-17 17-18-18-24 24-22-22 24-24-24-24 23-11Z" fill="#0c0e11" opacity=".72"/>
+  <path d="M156 162l24 24 34-34 16 16-34 34 18 18-17 17-18-18-24 24-22-22 24-24-24-24 23-11Z" fill="url(#accent)" stroke="#f4f7fb" stroke-width="5" stroke-linejoin="round"/>
+</svg>

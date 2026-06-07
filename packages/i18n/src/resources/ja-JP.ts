@@ -7,7 +7,14 @@ export const jaJP = {
   common: {
     ...enUS.common,
     agent: { codex: "codex", claude: "claude", unknown: "unknown" },
-    action: { open: "開く", refresh: "更新", reset: "リセット", show: "表示", hide: "非表示" },
+    action: {
+      open: "開く",
+      refresh: "更新",
+      reset: "リセット",
+      clear: "消去",
+      show: "表示",
+      hide: "非表示"
+    },
     status: {
       ...enUS.common.status,
       ok: "正常",
@@ -99,26 +106,72 @@ export const jaJP = {
     warn: "警告",
     refreshTitle: "更新",
     results: "検索結果",
+    clearSearch: "検索をクリア",
     history: "最近の検索",
-    noHistory: "最近の検索はありません"
+    noHistory: "最近の検索はありません",
+    suggestions: "候補",
+    noSuggestions: "コンテキスト候補はまだありません",
+    autoSearch: "入力中に自動検索",
+    contextTitle: "{{view}} の候補",
+    suggestion: {
+      refresh: "現在の索引を更新",
+      processes: "実行中の Win32 プロセスを確認",
+      sessions: "索引済みセッションを閲覧",
+      relations: "プロセスとセッションの関係を見る",
+      settings: "ワークスペース動作を調整",
+      query: "{{kind}} を検索"
+    }
   },
   views: {
     processes: {
       emptyTitle: "関連プロセスがありません",
       emptyDetail:
         "Codex、Claude、node_repl、app-server、daemon のプロセスは見つかりませんでした。",
+      captureOffTitle: "ランタイム取得がオフです",
+      captureOffDetail: "ライブ Agent プロセスを表示するには、設定 > ランタイムで Win32_Process をオンにしてください。",
       subtitle_one: "{{count}} 件の関連 Win32 行",
       subtitle_other: "{{count}} 件の関連 Win32 行",
       noCandidate: "セッション候補はまだありません",
       weakEvidence: "弱い証拠",
       candidate: "候補",
-      score: "スコア {{score}}"
+      score: "証拠 {{score}}",
+      groupCount_one: "{{count}} 件のプロセス",
+      groupCount_other: "{{count}} 件のプロセス",
+      sort: {
+        label: "並び替え",
+        time: "時刻",
+        runtime: "実行時間",
+        memory: "メモリ",
+        score: "証拠",
+        tree: "プロセスツリー"
+      },
+      group: {
+        label: "グループ",
+        agent: "Agent",
+        parent: "親プロセス",
+        cwd: "cwd",
+        none: "一覧"
+      },
+      context: {
+        inspect: "プロセスを調べる",
+        jumpSession: "セッションへ移動"
+      }
     },
     sessions: {
       emptyTitle: "セッションが索引されていません",
       emptyDetail: "Doctor を実行して Codex と Claude のローカルパスを確認してください。",
       subtitle_one: "{{count}} 件の Claude + Codex レコード",
-      subtitle_other: "{{count}} 件の Claude + Codex レコード"
+      subtitle_other: "{{count}} 件の Claude + Codex レコード",
+      groupCount_one: "{{count}} 件のセッション",
+      groupCount_other: "{{count}} 件のセッション",
+      children_one: "{{count}} 件の子セッション",
+      children_other: "{{count}} 件の子セッション",
+      group: {
+        cwd: "cwd",
+        parent: "親",
+        agent: "Agent",
+        none: "一覧"
+      }
     },
     relations: {
       emptyTitle: "関係が見つかりません",
@@ -131,6 +184,10 @@ export const jaJP = {
       emptyDetail: "更新してローカル環境チェックを実行してください。",
       subtitle_one: "{{count}} 件の環境チェック",
       subtitle_other: "{{count}} 件の環境チェック"
+    },
+    loading: {
+      title: "ローカル Agent 状態を読み込み中",
+      detail: "Win32_Process、Codex SQLite/JSONL、Claude セッションファイルを確認しています。"
     }
   },
   settings: {
@@ -176,6 +233,29 @@ export const jaJP = {
       detail: "SQLite のタイトル/プレビューと、ローカル Codex/Claude JSONL 転写を検索します。"
     },
     searchLimit: { label: "検索結果数", detail: "コマンドバー検索で返す最大一致数です。" },
+    searchHistory: {
+      label: "検索履歴",
+      detail:
+        "最近の検索語をこのPCに保存します。機密性の高い転写を扱う場合はオフのままにしてください。",
+      clearLabel: "検索履歴を消去",
+      clearDetail_one: "{{count}} 件の検索語が保存されています。",
+      clearDetail_other: "{{count}} 件の検索語が保存されています。"
+    },
+    suggestions: {
+      label: "コンテキスト候補",
+      detail: "現在のページ、選択中のプロセス/セッション、cwd、モデル、ツール、診断から検索候補を表示します。"
+    },
+    transcriptPreview: {
+      label: "転写ヒットプレビュー",
+      detail: "検索結果を選択したとき、短い抜粋と行番号だけを表示します。"
+    },
+    suggestion: {
+      theme: "テーマ",
+      language: "言語",
+      motion: "モーション",
+      indexing: "索引",
+      runtime: "ランタイム"
+    },
     resetUi: {
       label: "UI 設定をリセット",
       detail: "テーマ、密度、動き、インスペクター、文字サイズ、言語、検索件数を復元します。"
@@ -215,7 +295,49 @@ export const jaJP = {
       normal: "標準",
       large: "大"
     },
-    codeFont: { label: "コードフォント", detail: "Cascadia Code" },
+    fontMode: {
+      label: "フォントモード",
+      detail: "統一フォント、言語別 fallback、または言語ごとのカスタムを選びます。",
+      language: "言語別",
+      unified: "統一",
+      custom: "カスタム"
+    },
+    fontPreset: {
+      label: "フォントプリセット",
+      detail: "Windows、Claude 風、教科書体、高密度トレース向けのフォントスタックを適用します。",
+      windows: "Windows",
+      language: "言語別",
+      claude: "Claude",
+      japaneseTextbook: "教科書",
+      dense: "高密度",
+      custom: "カスタム"
+    },
+    lineHeight: {
+      label: "行の高さ",
+      detail: "混在言語テキストと証拠行の縦方向のリズムを調整します。",
+      compact: "コンパクト",
+      normal: "標準",
+      spacious: "広め"
+    },
+    fonts: {
+      unified: "統一 UI フォント",
+      unifiedDetail: "統一モードで使います。PingFang、Inter、Anthropic Sans なども手入力できます。",
+      latin: "英字 / ラテン",
+      latinDetail: "英語メニュー、ラベル、数字の主フォントです。",
+      chinese: "中国語フォント",
+      chineseDetail: "中国語ラベルと transcript テキストの fallback です。",
+      japanese: "日本語フォント",
+      japaneseDetail: "Yu Gothic UI はコンパクト、UD Digi Kyokasho は教科書風の読み心地です。",
+      korean: "韓国語フォント",
+      koreanDetail: "Malgun Gothic は Windows 標準の韓国語 UI 基準です。",
+      detected: "インストール済みフォント",
+      detectedDetail_one: "この Windows プロファイルで {{count}} 件のフォントファミリーを検出しました。",
+      detectedDetail_other: "この Windows プロファイルで {{count}} 件のフォントファミリーを検出しました。"
+    },
+    fontPreview: {
+      title: "フォントプレビュー"
+    },
+    codeFont: { label: "コードフォント", detail: "コード、パス、コマンドライン、ID、表形式の証拠に使います。" },
     links: {
       githubLabel: "GitHub を開く",
       githubDetail: "issues、actions、releases 用の公開リポジトリです。",
@@ -264,9 +386,12 @@ export const jaJP = {
     runtime: "ランタイム",
     identity: "識別",
     transcript: "転写",
+    modelRuntime: "モデルと実行設定",
+    control: "安全な制御",
     indexMetadata: "索引メタデータ",
     relations: "関係",
     evidence: "証拠",
+    searchHit: "検索ヒット",
     activity: "アクティビティ",
     topEvents: "主要イベント",
     topTools: "主要ツール",
@@ -277,6 +402,12 @@ export const jaJP = {
     noCandidate:
       "候補セッションがありません。PID、cwd、転写、タイトル、時間証拠がない場合、AgentScope は推測しません。",
     noCwdEvidence: "cwd 証拠なし",
+    safeControlDetail:
+      "読み取り専用モードです。開く、場所を表示、resume コマンド生成、書き出しのみを許可します。kill/archive は明示的な force 制御が入るまで無効です。",
+    actions: {
+      openTranscript: "転写を開く",
+      revealTranscript: "転写の場所を表示"
+    },
     fields: {
       pid: "PID",
       ppid: "PPID",
@@ -307,7 +438,16 @@ export const jaJP = {
       inputTokens: "入力",
       outputTokens: "出力",
       cacheRead: "キャッシュ読込",
-      cacheWrite: "キャッシュ作成"
+      cacheWrite: "キャッシュ作成",
+      modelProvider: "提供元",
+      model: "モデル",
+      reasoningEffort: "推論強度",
+      tokensUsed: "使用トークン",
+      approvalMode: "承認",
+      sandboxPolicy: "サンドボックス",
+      entrypoint: "入口",
+      resumeCommand: "再開コマンド",
+      safeControl: "境界"
     }
   },
   toast: {

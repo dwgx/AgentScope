@@ -20,6 +20,9 @@ export interface AgentProcess {
   creationDate?: string | undefined;
   startTime?: string | undefined;
   windowTitle?: string | undefined;
+  workingSetBytes?: number | undefined;
+  privateMemoryBytes?: number | undefined;
+  cpuSeconds?: number | undefined;
   cwdHint?: string | undefined;
   agent: AgentKind;
   sessionCandidates?: SessionCandidate[] | undefined;

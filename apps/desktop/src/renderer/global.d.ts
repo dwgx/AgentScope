@@ -18,6 +18,7 @@ export interface AgentScopeApi {
   search(query: string, limit?: number): Promise<Record<string, unknown>[]>;
   exportSnapshot(): Promise<{ canceled: boolean; path?: string }>;
   getAppInfo(): Promise<AppInfo>;
+  listFonts(): Promise<string[]>;
   reloadApp(): Promise<boolean>;
   quitApp(): Promise<boolean>;
   openExternal(url: string): Promise<boolean>;

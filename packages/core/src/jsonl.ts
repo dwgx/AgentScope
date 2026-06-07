@@ -32,13 +32,15 @@ export async function searchJsonl(filePath: string, query: string, limit: number
   const matches: Record<string, unknown>[] = [];
   const needle = query.toLowerCase();
   await iterateJsonl(filePath, (line, raw, value) => {
-    if (raw.toLowerCase().includes(needle)) {
+    const lowerRaw = raw.toLowerCase();
+    if (lowerRaw.includes(needle)) {
       matches.push({
         path: filePath,
         line,
         eventType: safeEventType(value),
         timestamp: safeTimestamp(value),
-        matchedFields: findMatchingFields(value, needle).slice(0, 8)
+        matchedFields: findMatchingFields(value, needle).slice(0, 8),
+        excerpt: redactedExcerpt(raw, lowerRaw.indexOf(needle), query.length)
       });
     }
     return matches.length < limit;
@@ -78,6 +80,11 @@ function findMatchingFields(value: Record<string, unknown>, needle: string): str
   };
   walk(value, "", 0);
   return [...matches];
+}
+
+function redactedExcerpt(raw: string, index: number, length: number): string {
+  if (index < 0) return "";
+  return `...${raw.slice(index, index + length).replace(/\s+/g, " ")}...`;
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

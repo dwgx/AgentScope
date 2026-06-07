@@ -61,10 +61,16 @@ async function searchJsonlRoots(query: string, home: string, limit: number): Pro
     const source = rolloutThreadId(filePath) ? "codex.sessions.rollout" : "claude.projects";
     const agent = source.startsWith("codex") ? "codex" : "claude";
     for (const match of await searchJsonl(filePath, query, remaining)) {
-      matches.push({ ...match, source, agent });
+      matches.push({ ...match, source, agent, sessionId: sessionIdFromJsonlPath(filePath, agent) });
     }
   }
   return matches;
+}
+
+function sessionIdFromJsonlPath(filePath: string, agent: string): string | undefined {
+  if (agent === "codex") return rolloutThreadId(filePath);
+  const name = path.basename(filePath, ".jsonl");
+  return name || undefined;
 }
 
 function collectFiles(root: string, include: (filePath: string) => boolean, out: string[]): void {

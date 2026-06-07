@@ -17,6 +17,9 @@ interface Win32ProcessRow {
   CreationDate?: string | null;
   StartTime?: string | null;
   MainWindowTitle?: string | null;
+  WorkingSet64?: number | null;
+  PrivateMemorySize64?: number | null;
+  CPU?: number | null;
 }
 
 export function isWindows(): boolean {
@@ -36,6 +39,9 @@ Get-Process | ForEach-Object {
   $processMap[[int]$_.Id] = [pscustomobject]@{
     MainWindowTitle = $_.MainWindowTitle
     StartTime = $startTime
+    WorkingSet64 = $_.WorkingSet64
+    PrivateMemorySize64 = $_.PrivateMemorySize64
+    CPU = $_.CPU
   }
 }
 Get-CimInstance Win32_Process | ForEach-Object {
@@ -49,6 +55,9 @@ Get-CimInstance Win32_Process | ForEach-Object {
     CreationDate = if ($_.CreationDate) { $_.CreationDate.ToString('o') } else { $null }
     StartTime = if ($runtime) { $runtime.StartTime } else { $null }
     MainWindowTitle = if ($runtime) { $runtime.MainWindowTitle } else { $null }
+    WorkingSet64 = if ($runtime) { $runtime.WorkingSet64 } else { $null }
+    PrivateMemorySize64 = if ($runtime) { $runtime.PrivateMemorySize64 } else { $null }
+    CPU = if ($runtime) { $runtime.CPU } else { $null }
   }
 } | ConvertTo-Json -Depth 3
 `;
@@ -93,6 +102,9 @@ function processFromRow(row: Win32ProcessRow): AgentProcess {
     creationDate: row.CreationDate ?? undefined,
     startTime: row.StartTime ?? row.CreationDate ?? undefined,
     windowTitle: row.MainWindowTitle?.trim() || undefined,
+    workingSetBytes: numberValue(row.WorkingSet64),
+    privateMemoryBytes: numberValue(row.PrivateMemorySize64),
+    cpuSeconds: numberValue(row.CPU),
     agent: classifyProcess(row.Name, commandLine, executablePath),
     evidence: [
       {
@@ -102,4 +114,9 @@ function processFromRow(row: Win32ProcessRow): AgentProcess {
       }
     ]
   };
+}
+
+function numberValue(value: unknown): number | undefined {
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(numeric) ? numeric : undefined;
 }

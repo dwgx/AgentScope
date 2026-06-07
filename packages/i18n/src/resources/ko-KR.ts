@@ -7,7 +7,14 @@ export const koKR = {
   common: {
     ...enUS.common,
     agent: { codex: "codex", claude: "claude", unknown: "unknown" },
-    action: { open: "열기", refresh: "새로 고침", reset: "초기화", show: "표시", hide: "숨기기" },
+    action: {
+      open: "열기",
+      refresh: "새로 고침",
+      reset: "초기화",
+      clear: "지우기",
+      show: "표시",
+      hide: "숨기기"
+    },
     status: {
       ...enUS.common.status,
       ok: "정상",
@@ -99,25 +106,71 @@ export const koKR = {
     warn: "경고",
     refreshTitle: "새로 고침",
     results: "검색 결과",
+    clearSearch: "검색 지우기",
     history: "최근 검색",
-    noHistory: "최근 검색이 없습니다"
+    noHistory: "최근 검색이 없습니다",
+    suggestions: "추천 검색",
+    noSuggestions: "아직 문맥 추천이 없습니다",
+    autoSearch: "입력하면 자동 검색",
+    contextTitle: "{{view}} 추천",
+    suggestion: {
+      refresh: "현재 색인 새로 고침",
+      processes: "실행 중인 Win32 프로세스 확인",
+      sessions: "색인된 세션 탐색",
+      relations: "프로세스와 세션 관계 보기",
+      settings: "작업 영역 동작 조정",
+      query: "{{kind}} 검색"
+    }
   },
   views: {
     processes: {
       emptyTitle: "관련 프로세스 없음",
       emptyDetail: "Codex, Claude, node_repl, app-server 또는 daemon 프로세스를 찾지 못했습니다.",
+      captureOffTitle: "런타임 캡처가 꺼져 있습니다",
+      captureOffDetail: "실시간 Agent 프로세스를 보려면 설정 > 런타임에서 Win32_Process를 켜세요.",
       subtitle_one: "{{count}}개의 관련 Win32 행",
       subtitle_other: "{{count}}개의 관련 Win32 행",
       noCandidate: "아직 세션 후보가 없습니다",
       weakEvidence: "약한 증거",
       candidate: "후보",
-      score: "점수 {{score}}"
+      score: "증거 {{score}}",
+      groupCount_one: "{{count}}개 프로세스",
+      groupCount_other: "{{count}}개 프로세스",
+      sort: {
+        label: "정렬",
+        time: "시간",
+        runtime: "실행 시간",
+        memory: "메모리",
+        score: "증거",
+        tree: "프로세스 트리"
+      },
+      group: {
+        label: "그룹",
+        agent: "Agent",
+        parent: "부모 프로세스",
+        cwd: "cwd",
+        none: "전체"
+      },
+      context: {
+        inspect: "프로세스 검사",
+        jumpSession: "세션으로 이동"
+      }
     },
     sessions: {
       emptyTitle: "색인된 세션 없음",
       emptyDetail: "Doctor를 실행해 Codex 및 Claude 로컬 경로를 확인하세요.",
       subtitle_one: "{{count}}개의 Claude + Codex 레코드",
-      subtitle_other: "{{count}}개의 Claude + Codex 레코드"
+      subtitle_other: "{{count}}개의 Claude + Codex 레코드",
+      groupCount_one: "{{count}}개 세션",
+      groupCount_other: "{{count}}개 세션",
+      children_one: "{{count}}개 자식 세션",
+      children_other: "{{count}}개 자식 세션",
+      group: {
+        cwd: "cwd",
+        parent: "부모",
+        agent: "Agent",
+        none: "전체"
+      }
     },
     relations: {
       emptyTitle: "관계 없음",
@@ -130,6 +183,10 @@ export const koKR = {
       emptyDetail: "새로 고침하여 로컬 환경 검사를 실행하세요.",
       subtitle_one: "{{count}}개의 환경 검사",
       subtitle_other: "{{count}}개의 환경 검사"
+    },
+    loading: {
+      title: "로컬 Agent 상태 읽는 중",
+      detail: "Win32_Process, Codex SQLite/JSONL, Claude 세션 파일을 확인하고 있습니다."
     }
   },
   settings: {
@@ -174,6 +231,28 @@ export const koKR = {
       detail: "SQLite 제목/미리보기와 로컬 Codex 및 Claude JSONL transcript를 검색합니다."
     },
     searchLimit: { label: "검색 결과 제한", detail: "명령줄 검색이 반환하는 최대 결과 수입니다." },
+    searchHistory: {
+      label: "검색 기록",
+      detail: "최근 검색어를 이 PC에 저장합니다. 민감한 transcript를 다룰 때는 꺼 두세요.",
+      clearLabel: "검색 기록 지우기",
+      clearDetail_one: "{{count}}개의 검색어가 저장되어 있습니다.",
+      clearDetail_other: "{{count}}개의 검색어가 저장되어 있습니다."
+    },
+    suggestions: {
+      label: "문맥 추천",
+      detail: "현재 페이지, 선택한 프로세스/세션, cwd, 모델, 도구, 진단에서 검색 추천을 표시합니다."
+    },
+    transcriptPreview: {
+      label: "Transcript hit 미리보기",
+      detail: "검색 결과를 선택하면 짧은 발췌와 줄 번호만 표시합니다."
+    },
+    suggestion: {
+      theme: "테마",
+      language: "언어",
+      motion: "모션",
+      indexing: "색인",
+      runtime: "런타임"
+    },
     resetUi: {
       label: "UI 설정 초기화",
       detail: "테마, 밀도, 모션, 검사기, 글꼴 크기, 언어, 검색 제한을 복원합니다."
@@ -213,7 +292,49 @@ export const koKR = {
       normal: "보통",
       large: "크게"
     },
-    codeFont: { label: "코드 글꼴", detail: "Cascadia Code" },
+    fontMode: {
+      label: "글꼴 모드",
+      detail: "통합 글꼴, 언어별 fallback, 또는 언어별 사용자 지정을 선택합니다.",
+      language: "언어별",
+      unified: "통합",
+      custom: "사용자 지정"
+    },
+    fontPreset: {
+      label: "글꼴 프리셋",
+      detail: "Windows, Claude 스타일, 일본어 교과서체, 고밀도 trace용 글꼴 스택을 적용합니다.",
+      windows: "Windows",
+      language: "언어별",
+      claude: "Claude",
+      japaneseTextbook: "교과서",
+      dense: "고밀도",
+      custom: "사용자 지정"
+    },
+    lineHeight: {
+      label: "줄 높이",
+      detail: "혼합 언어 텍스트와 증거 행의 세로 간격을 조정합니다.",
+      compact: "촘촘",
+      normal: "보통",
+      spacious: "넓게"
+    },
+    fonts: {
+      unified: "통합 UI 글꼴",
+      unifiedDetail: "통합 모드에서 사용합니다. PingFang, Inter, Anthropic Sans 등도 직접 입력할 수 있습니다.",
+      latin: "영문 / 라틴 글꼴",
+      latinDetail: "영문 메뉴, 라벨, 숫자의 기본 글꼴입니다.",
+      chinese: "중국어 글꼴",
+      chineseDetail: "중국어 라벨과 transcript 텍스트의 fallback입니다.",
+      japanese: "일본어 글꼴",
+      japaneseDetail: "Yu Gothic UI는 촘촘하고, UD Digi Kyokasho는 교과서식 읽기 느낌입니다.",
+      korean: "한국어 글꼴",
+      koreanDetail: "Malgun Gothic은 Windows 기본 한국어 UI 기준입니다.",
+      detected: "설치된 글꼴",
+      detectedDetail_one: "현재 Windows 프로필에서 {{count}}개의 글꼴 패밀리를 감지했습니다.",
+      detectedDetail_other: "현재 Windows 프로필에서 {{count}}개의 글꼴 패밀리를 감지했습니다."
+    },
+    fontPreview: {
+      title: "글꼴 미리보기"
+    },
+    codeFont: { label: "코드 글꼴", detail: "코드, 경로, 명령줄, ID, 표 형태의 증거에 사용합니다." },
     links: {
       githubLabel: "GitHub 열기",
       githubDetail: "issues, actions, releases를 위한 공개 저장소입니다.",
@@ -262,9 +383,12 @@ export const koKR = {
     runtime: "런타임",
     identity: "식별",
     transcript: "Transcript",
+    modelRuntime: "모델 및 실행 설정",
+    control: "안전 제어",
     indexMetadata: "색인 메타데이터",
     relations: "관계",
     evidence: "증거",
+    searchHit: "검색 hit",
     activity: "활동",
     topEvents: "주요 이벤트",
     topTools: "주요 도구",
@@ -275,6 +399,12 @@ export const koKR = {
     noCandidate:
       "후보 세션이 없습니다. PID, cwd, transcript, 제목 또는 시간 증거가 없으면 AgentScope는 추측하지 않습니다.",
     noCwdEvidence: "cwd 증거 없음",
+    safeControlDetail:
+      "읽기 전용 모드입니다. 열기, 위치 표시, resume 명령 생성, 내보내기만 허용합니다. kill/archive는 명시적 force 제어가 생기기 전까지 비활성화됩니다.",
+    actions: {
+      openTranscript: "Transcript 열기",
+      revealTranscript: "Transcript 위치 표시"
+    },
     fields: {
       pid: "PID",
       ppid: "PPID",
@@ -305,7 +435,16 @@ export const koKR = {
       inputTokens: "입력",
       outputTokens: "출력",
       cacheRead: "캐시 읽기",
-      cacheWrite: "캐시 쓰기"
+      cacheWrite: "캐시 쓰기",
+      modelProvider: "제공자",
+      model: "모델",
+      reasoningEffort: "추론 강도",
+      tokensUsed: "사용 토큰",
+      approvalMode: "승인",
+      sandboxPolicy: "샌드박스",
+      entrypoint: "진입점",
+      resumeCommand: "재개 명령",
+      safeControl: "경계"
     }
   },
   toast: {

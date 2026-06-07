@@ -2,12 +2,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import type { Evidence, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === "development" || process.env.VITE_DEV_SERVER_URL;
+const execFileAsync = promisify(execFile);
 
 let mainWindow: BrowserWindow | undefined;
 let corePromise: Promise<typeof AgentScopeCore> | undefined;
@@ -78,6 +81,7 @@ ipcMain.handle("doctor:get", async () => runDoctor());
 ipcMain.handle("search:run", async (_event, query: string, limit = 50) => searchAll(query, undefined, limit));
 ipcMain.handle("snapshot:export", async () => exportSnapshot());
 ipcMain.handle("app:info", async () => appInfo());
+ipcMain.handle("fonts:list", async () => listInstalledFonts());
 ipcMain.handle("app:reload", async () => {
   mainWindow?.reload();
   return true;
@@ -221,6 +225,27 @@ function appInfo() {
     issuesUrl: "https://github.com/dwgx/AgentScope/issues",
     readmeUrl: "https://github.com/dwgx/AgentScope#readme"
   };
+}
+
+async function listInstalledFonts(): Promise<string[]> {
+  const script = [
+    "Add-Type -AssemblyName System.Drawing",
+    "$fonts = New-Object System.Drawing.Text.InstalledFontCollection",
+    "$fonts.Families | ForEach-Object { $_.Name } | Sort-Object -Unique | ConvertTo-Json -Compress"
+  ].join("; ");
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { windowsHide: true, timeout: 6000, maxBuffer: 1024 * 1024 }
+    );
+    const parsed = JSON.parse(stdout.trim() || "[]") as unknown;
+    const values = Array.isArray(parsed) ? parsed : typeof parsed === "string" ? [parsed] : [];
+    return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  } catch (error) {
+    log(`listInstalledFonts failed ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
 }
 
 function isAllowedExternalUrl(url: string): boolean {

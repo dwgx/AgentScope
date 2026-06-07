@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("agentscope", {
   search: (query, limit = 50) => ipcRenderer.invoke("search:run", query, limit),
   exportSnapshot: () => ipcRenderer.invoke("snapshot:export"),
   getAppInfo: () => ipcRenderer.invoke("app:info"),
+  listFonts: () => ipcRenderer.invoke("fonts:list"),
   reloadApp: () => ipcRenderer.invoke("app:reload"),
   quitApp: () => ipcRenderer.invoke("app:quit"),
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),

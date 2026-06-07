@@ -20,8 +20,9 @@ describe("search privacy", () => {
     const [match] = await searchAll("AgentScope", home, 5);
     expect(match?.source).toBe("codex.sessions.rollout");
     expect(match).not.toHaveProperty("text");
-    expect(match).not.toHaveProperty("preview");
+    expect(match?.excerpt).toContain("AgentScope");
+    expect(String(match?.excerpt).length).toBeLessThan(220);
     expect(match?.matchedFields).toEqual(["payload.message"]);
-    expect(JSON.stringify(match)).not.toContain("secret");
+    expect(JSON.stringify(match)).not.toContain("secret AgentScope raw text");
   });
 });

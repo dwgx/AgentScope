@@ -53,6 +53,7 @@ export function loadCodexIndex(home?: string): {
     ]);
     const sessions: AgentSession[] = [];
     const records: IndexRecord[] = [];
+    const sourceRelations: Relation[] = [];
     for (const row of rows) {
       const sessionId = stringValue(row.id);
       if (!sessionId) continue;
@@ -95,8 +96,25 @@ export function loadCodexIndex(home?: string): {
         metadata: mergedMetadata,
         evidence
       });
+      const sourceParentId = parentThreadFromValue(row.source);
+      if (sourceParentId && sourceParentId !== sessionId) {
+        sourceRelations.push({
+          kind: "parent_child",
+          sourceId: sourceParentId,
+          targetId: sessionId,
+          confidence: "indexed",
+          evidence: [
+            {
+              source: "codex.sqlite.threads.source",
+              detail: "Parent thread inferred from structured Codex thread source metadata.",
+              path: evidencePath,
+              field: "threads.source"
+            }
+          ]
+        });
+      }
     }
-    const relations = loadSpawnEdges(db, evidencePath);
+    const relations = mergeRelations([...loadSpawnEdges(db, evidencePath), ...sourceRelations]);
     applyRelationsToSessions(sessions, relations);
     return { sessions, records, relations };
   } finally {
@@ -108,9 +126,10 @@ export async function scanCodexRollouts(home?: string): Promise<{
   transcripts: Transcript[];
   sessions: AgentSession[];
   records: IndexRecord[];
+  relations: Relation[];
 }> {
   const root = path.join(codexHome(home), "sessions");
-  if (!fs.existsSync(root)) return { transcripts: [], sessions: [], records: [] };
+  if (!fs.existsSync(root)) return { transcripts: [], sessions: [], records: [], relations: [] };
   const files: string[] = [];
   walk(root, (filePath) => {
     if (rolloutThreadId(filePath)) files.push(filePath);
@@ -119,6 +138,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
   const transcripts: Transcript[] = [];
   const sessions: AgentSession[] = [];
   const records: IndexRecord[] = [];
+  const relations: Relation[] = [];
   for (const filePath of files) {
     const sessionId = rolloutThreadId(filePath);
     if (!sessionId) continue;
@@ -147,7 +167,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
       title: stringValue(metadata.title),
       startedAt,
       updatedAt,
-      indexMetadata: { activity_line_count: activity.lineCount },
+      indexMetadata: compactMetadata({ ...metadata, activity_line_count: activity.lineCount }),
       activity,
       evidence
     });
@@ -163,8 +183,25 @@ export async function scanCodexRollouts(home?: string): Promise<{
       metadata: { ...metadata, activity },
       evidence
     });
+    const parentSessionId = stringValue(metadata.parent_thread_id) ?? stringValue(metadata.parent_id);
+    if (parentSessionId && parentSessionId !== sessionId) {
+      relations.push({
+        kind: "parent_child",
+        sourceId: parentSessionId,
+        targetId: sessionId,
+        confidence: "indexed",
+        evidence: [
+          {
+            source: "codex.sessions.rollout.parent",
+            detail: "Parent/child relation inferred from Codex rollout JSONL metadata.",
+            path: filePath,
+            field: "parent_thread_id,parent_id"
+          }
+        ]
+      });
+    }
   }
-  return { transcripts, sessions, records };
+  return { transcripts, sessions, records, relations: mergeRelations(relations) };
 }
 
 export function rolloutThreadId(filePath: string): string | undefined {
@@ -184,12 +221,13 @@ export function rolloutStartedAt(filePath: string): string | undefined {
 
 export async function readRolloutMetadata(filePath: string): Promise<Record<string, unknown>> {
   const metadata: Record<string, unknown> = {};
-  let seen = 0;
+  let parsed = 0;
   await iterateJsonl(filePath, (_line, _raw, value) => {
-    seen += 1;
+    parsed += 1;
     collectMetadata(value, metadata);
-    return seen < 50 && !(metadata.cwd && metadata.title);
+    return parsed < 2500 && (parsed < 250 || missingImportantRolloutMetadata(metadata));
   }).catch(() => undefined);
+  metadata.metadata_scan_lines = parsed;
   return metadata;
 }
 
@@ -363,6 +401,63 @@ function loadSpawnEdges(db: Database.Database, dbPath: string): Relation[] {
   }
 }
 
+function mergeRelations(relations: Relation[]): Relation[] {
+  const merged = new Map<string, Relation>();
+  for (const relation of relations) {
+    const key = `${relation.kind}\0${relation.sourceId}\0${relation.targetId}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...relation, evidence: [...relation.evidence] });
+      continue;
+    }
+    existing.confidence = bestConfidence(existing.confidence, relation.confidence);
+    existing.evidence = appendEvidenceUnique(existing.evidence, relation.evidence);
+  }
+  return [...merged.values()];
+}
+
+function bestConfidence(left: Relation["confidence"], right: Relation["confidence"]): Relation["confidence"] {
+  const rank: Record<Relation["confidence"], number> = {
+    unknown: 0,
+    heuristic: 1,
+    indexed: 2,
+    exact: 3
+  };
+  return rank[left] >= rank[right] ? left : right;
+}
+
+function parentThreadFromValue(value: unknown): string | undefined {
+  const direct = objectValue(value);
+  if (direct) return parentThreadFromObject(direct);
+  const text = stringValue(value);
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parentThreadFromObject(parsed as Record<string, unknown>);
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function parentThreadFromObject(value: Record<string, unknown>, depth = 0): string | undefined {
+  if (depth > 3) return undefined;
+  const direct =
+    stringValue(value.parent_thread_id) ??
+    stringValue(value.parentThreadId) ??
+    stringValue(value.parent_id) ??
+    stringValue(value.parentId);
+  if (direct) return direct;
+  for (const nested of Object.values(value)) {
+    if (!nested || typeof nested !== "object" || Array.isArray(nested)) continue;
+    const found = parentThreadFromObject(nested as Record<string, unknown>, depth + 1);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 function applyRelationsToSessions(sessions: AgentSession[], relations: Relation[]): void {
   const byId = new Map(sessions.map((session) => [session.sessionId, session]));
   for (const relation of relations) {
@@ -378,17 +473,118 @@ function applyRelationsToSessions(sessions: AgentSession[], relations: Relation[
 }
 
 function collectMetadata(value: Record<string, unknown>, metadata: Record<string, unknown>): void {
-  for (const key of ["cwd", "title", "session_id", "thread_id"]) {
-    if (metadata[key] === undefined && value[key] !== undefined) metadata[key] = value[key];
-  }
-  for (const key of ["payload", "message", "data"]) {
+  collectMetadataFromObject(value, metadata);
+  for (const key of ["payload", "message", "data", "event", "turn", "context", "config"]) {
     const nested = value[key];
     if (!nested || typeof nested !== "object" || Array.isArray(nested)) continue;
-    for (const nestedKey of ["cwd", "title", "session_id", "thread_id"]) {
-      const nestedValue = (nested as Record<string, unknown>)[nestedKey];
-      if (metadata[nestedKey] === undefined && nestedValue !== undefined) metadata[nestedKey] = nestedValue;
-    }
+    collectMetadataFromObject(nested as Record<string, unknown>, metadata);
   }
+}
+
+function collectMetadataFromObject(value: Record<string, unknown>, metadata: Record<string, unknown>): void {
+  const scalarKeys = [
+    "cwd",
+    "title",
+    "session_id",
+    "thread_id",
+    "parent_thread_id",
+    "parent_id",
+    "child_thread_id",
+    "model_provider",
+    "model",
+    "reasoning_effort",
+    "approval_mode",
+    "approval_policy",
+    "sandbox_policy",
+    "sandbox_mode",
+    "cli_version",
+    "agent_nickname",
+    "agent_role",
+    "agent_path",
+    "git_branch",
+    "git_sha",
+    "entrypoint",
+    "source",
+    "thread_source"
+  ];
+  for (const key of scalarKeys) {
+    const nextValue = safeMetadataScalar(value[key]);
+    if (metadata[key] === undefined && nextValue !== undefined) metadata[key] = nextValue;
+  }
+  const workspaceRoots = value.workspace_roots ?? value.workspaceRoots;
+  if (metadata.workspace_roots_count === undefined && Array.isArray(workspaceRoots)) {
+    metadata.workspace_roots_count = workspaceRoots.length;
+  }
+  const tokenUsage = objectValue(value.usage) ?? objectValue(value.token_usage) ?? objectValue(value.tokenUsage);
+  if (tokenUsage) collectTokenMetadata(tokenUsage, metadata);
+}
+
+function collectTokenMetadata(value: Record<string, unknown>, metadata: Record<string, unknown>): void {
+  const total =
+    numberValue(value.total_tokens) ??
+    numberValue(value.totalTokens) ??
+    sumNumbers([
+      value.input_tokens,
+      value.output_tokens,
+      value.cache_read_input_tokens,
+      value.cache_creation_input_tokens,
+      value.inputTokens,
+      value.outputTokens
+    ]);
+  if (metadata.total_tokens === undefined && total !== undefined) metadata.total_tokens = total;
+  for (const [sourceKey, targetKey] of [
+    ["input_tokens", "input_tokens"],
+    ["output_tokens", "output_tokens"],
+    ["cache_read_input_tokens", "cache_read_input_tokens"],
+    ["cache_creation_input_tokens", "cache_creation_input_tokens"],
+    ["inputTokens", "input_tokens"],
+    ["outputTokens", "output_tokens"]
+  ] as const) {
+    const nextValue = numberValue(value[sourceKey]);
+    if (metadata[targetKey] === undefined && nextValue !== undefined) metadata[targetKey] = nextValue;
+  }
+}
+
+function missingImportantRolloutMetadata(metadata: Record<string, unknown>): boolean {
+  return !(
+    metadata.cwd &&
+    metadata.title &&
+    metadata.model &&
+    (metadata.approval_mode || metadata.approval_policy) &&
+    (metadata.sandbox_policy || metadata.sandbox_mode)
+  );
+}
+
+function safeMetadataScalar(value: unknown): string | number | boolean | undefined {
+  if (typeof value === "string") return value || undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "boolean") return value;
+  return undefined;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function sumNumbers(values: unknown[]): number | undefined {
+  let total = 0;
+  let found = false;
+  for (const value of values) {
+    const parsed = numberValue(value);
+    if (parsed === undefined) continue;
+    total += parsed;
+    found = true;
+  }
+  return found ? total : undefined;
 }
 
 function walk(root: string, visitor: (filePath: string) => void): void {

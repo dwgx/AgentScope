@@ -26,7 +26,7 @@ export async function buildSnapshot(home?: string, includeProcesses = true): Pro
   const sessions = mergeSessions([...claudeSessions, ...codex.sessions, ...rollouts.sessions]);
   const transcripts = [...claudeTranscriptIndex.transcripts, ...rollouts.transcripts];
   const indexRecords = [...claudeRecords, ...codex.records, ...rollouts.records];
-  const relations = [...codex.relations, ...claudeTranscriptIndex.relations];
+  const relations = [...codex.relations, ...rollouts.relations, ...claudeTranscriptIndex.relations];
 
   attachTranscripts(sessions, transcripts);
   attachProcesses(sessions, processes, relations);
