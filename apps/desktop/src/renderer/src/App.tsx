@@ -35,6 +35,7 @@ type SettingsSection = "general" | "appearance" | "indexing" | "runtime" | "diag
 type ThemeName = "graphite" | "blueprint" | "contrast" | "midnight";
 type DensityName = "compact" | "comfortable" | "spacious";
 type MotionName = "full" | "reduced" | "off";
+type StrongConfidence = "exact" | "indexed" | "heuristic";
 type SelectionKey = { type: "session"; id: string } | { type: "process"; pid: number } | null;
 type Selection = { type: "session"; value: AgentSession } | { type: "process"; value: AgentProcess } | null;
 
@@ -73,6 +74,13 @@ const defaultSettings: AppSettings = {
   searchLimit: 24,
   showUnknownCandidates: true
 };
+const themeValues: ThemeName[] = ["graphite", "blueprint", "contrast", "midnight"];
+const densityValues: DensityName[] = ["compact", "comfortable", "spacious"];
+const motionValues: MotionName[] = ["full", "reduced", "off"];
+const defaultViewValues: AppSettings["defaultView"][] = ["processes", "sessions", "graph", "doctor"];
+const inspectorValues: AppSettings["inspector"][] = ["right", "hidden"];
+const fontScaleValues: AppSettings["fontScale"][] = ["small", "normal", "large"];
+const accentValues = ["#b8c2cc", "#4aa3ff", "#8b5cf6", "#f59e0b", "#f43f5e", "#e5e7eb"] as const;
 
 function App() {
   const [snapshot, setSnapshot] = useState<ScopeSnapshot | null>(null);
@@ -121,8 +129,13 @@ function App() {
 
   async function exportCurrentSnapshot() {
     if (!snapshot) return;
-    const result = await window.agentscope.exportSnapshot(snapshot);
+    const result = await window.agentscope.exportSnapshot();
     setToast(result.canceled ? "Export canceled" : `Snapshot exported: ${result.path}`);
+  }
+
+  async function openExternal(url: string) {
+    const opened = await window.agentscope.openExternal(url);
+    setToast(opened ? `Opened ${url}` : `Blocked external URL: ${url}`);
   }
 
   async function openPath(targetPath?: string) {
@@ -182,7 +195,7 @@ function App() {
           onExport={() => void exportCurrentSnapshot()}
           onOpenPath={(targetPath) => void openPath(targetPath)}
           onRevealPath={(targetPath) => void revealPath(targetPath)}
-          onOpenExternal={(url) => void window.agentscope.openExternal(url)}
+          onOpenExternal={(url) => void openExternal(url)}
           onSetView={setView}
           settings={settings}
           updateSettings={updateSettings}
@@ -217,7 +230,7 @@ function App() {
                 processes={processes}
                 sessions={sessions}
                 onOpenPath={(targetPath) => void openPath(targetPath)}
-                onOpenExternal={(url) => void window.agentscope.openExternal(url)}
+                onOpenExternal={(url) => void openExternal(url)}
               />
             )}
           </section>
@@ -694,10 +707,10 @@ function SettingsPanel(props: {
                   <CodeValue value="mono" />
                 </SettingRow>
                 <SettingRow label="Open GitHub" detail="Public repository for issues, actions, and releases.">
-                  <ActionButton label="GitHub" onClick={() => props.appInfo && props.onOpenExternal(props.appInfo.githubUrl)} />
+                  <ActionButton label="GitHub" onClick={() => props.appInfo && props.onOpenExternal(props.appInfo.githubUrl)} disabled={!props.appInfo} />
                 </SettingRow>
                 <SettingRow label="Open README" detail="Project overview, CLI commands, and desktop notes.">
-                  <ActionButton label="README" onClick={() => props.appInfo && props.onOpenExternal(props.appInfo.readmeUrl)} />
+                  <ActionButton label="README" onClick={() => props.appInfo && props.onOpenExternal(props.appInfo.readmeUrl)} disabled={!props.appInfo} />
                 </SettingRow>
               </SettingGroup>
             </>
@@ -827,10 +840,9 @@ function CodeValue(props: { value: string }) {
 }
 
 function ColorSwatches(props: { value: string; onChange: (value: string) => void }) {
-  const colors = ["#b8c2cc", "#4aa3ff", "#8b5cf6", "#f59e0b", "#f43f5e", "#e5e7eb"];
   return (
     <div className="swatches">
-      {colors.map((color) => (
+      {accentValues.map((color) => (
         <button
           className={props.value.toLowerCase() === color ? "active" : ""}
           key={color}
@@ -1072,8 +1084,12 @@ function ConfidenceBadge(props: { value: string }) {
   return <Badge text={props.value} tone={tone} />;
 }
 
+function isStrongConfidence(value: string): value is StrongConfidence {
+  return value === "exact" || value === "indexed" || value === "heuristic";
+}
+
 function strongCandidates(process: AgentProcess) {
-  return (process.sessionCandidates ?? []).filter((candidate) => candidate.confidence === "exact" || candidate.confidence === "heuristic");
+  return (process.sessionCandidates ?? []).filter((candidate) => isStrongConfidence(candidate.confidence));
 }
 
 function EvidenceSummary(props: { evidence: Evidence[] }) {
@@ -1119,13 +1135,13 @@ function themeDetail(theme: ThemeName) {
 function selectedTranscriptPath(selection: Selection): string | undefined {
   if (!selection) return undefined;
   if (selection.type === "session") return selection.value.transcriptPath;
-  return selection.value.sessionCandidates?.find((candidate) => candidate.transcriptPath)?.transcriptPath;
+  return strongCandidates(selection.value).find((candidate) => candidate.transcriptPath)?.transcriptPath;
 }
 
 function selectedCwdPath(selection: Selection): string | undefined {
   if (!selection) return undefined;
   if (selection.type === "session") return selection.value.cwd;
-  return selection.value.sessionCandidates?.find((candidate) => candidate.cwd)?.cwd;
+  return strongCandidates(selection.value).find((candidate) => candidate.cwd)?.cwd;
 }
 
 function short(value?: string) {
@@ -1161,14 +1177,36 @@ function loadSettings(): AppSettings {
     const raw = localStorage.getItem(settingsKey);
     if (!raw) return defaultSettings;
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    return { ...defaultSettings, ...parsed };
+    return normalizeSettings(parsed);
   } catch {
     return defaultSettings;
   }
 }
 
 function saveSettings(settings: AppSettings): void {
-  localStorage.setItem(settingsKey, JSON.stringify(settings));
+  localStorage.setItem(settingsKey, JSON.stringify(normalizeSettings(settings)));
+}
+
+function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
+  return {
+    theme: pickEnum(settings.theme, themeValues, defaultSettings.theme),
+    density: pickEnum(settings.density, densityValues, defaultSettings.density),
+    motion: pickEnum(settings.motion, motionValues, defaultSettings.motion),
+    accent: pickEnum(settings.accent, [...accentValues], defaultSettings.accent),
+    defaultView: pickEnum(settings.defaultView, defaultViewValues, defaultSettings.defaultView),
+    inspector: pickEnum(settings.inspector, inspectorValues, defaultSettings.inspector),
+    fontScale: pickEnum(settings.fontScale, fontScaleValues, defaultSettings.fontScale),
+    searchLimit: clampNumber(settings.searchLimit, 8, 80, defaultSettings.searchLimit),
+    showUnknownCandidates: typeof settings.showUnknownCandidates === "boolean" ? settings.showUnknownCandidates : defaultSettings.showUnknownCandidates
+  };
+}
+
+function pickEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === "string" && allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

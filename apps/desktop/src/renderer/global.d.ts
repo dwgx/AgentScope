@@ -15,7 +15,7 @@ export interface AgentScopeApi {
   getSnapshot(): Promise<ScopeSnapshot>;
   getDoctor(): Promise<Diagnostic[]>;
   search(query: string, limit?: number): Promise<Record<string, unknown>[]>;
-  exportSnapshot(snapshot: ScopeSnapshot): Promise<{ canceled: boolean; path?: string }>;
+  exportSnapshot(): Promise<{ canceled: boolean; path?: string }>;
   getAppInfo(): Promise<AppInfo>;
   reloadApp(): Promise<boolean>;
   quitApp(): Promise<boolean>;

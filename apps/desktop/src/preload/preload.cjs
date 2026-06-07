@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld("agentscope", {
   getSnapshot: () => ipcRenderer.invoke("snapshot:get"),
   getDoctor: () => ipcRenderer.invoke("doctor:get"),
   search: (query, limit = 50) => ipcRenderer.invoke("search:run", query, limit),
-  exportSnapshot: (snapshot) => ipcRenderer.invoke("snapshot:export", snapshot),
+  exportSnapshot: () => ipcRenderer.invoke("snapshot:export"),
   getAppInfo: () => ipcRenderer.invoke("app:info"),
   reloadApp: () => ipcRenderer.invoke("app:reload"),
   quitApp: () => ipcRenderer.invoke("app:quit"),

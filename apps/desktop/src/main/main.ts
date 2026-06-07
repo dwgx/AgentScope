@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
-import type { ScopeSnapshot } from "@agentscope/shared";
+import type { Evidence, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,7 +50,7 @@ async function createWindow(): Promise<void> {
   setTimeout(showWindow, 1500);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 
@@ -76,7 +76,7 @@ async function createWindow(): Promise<void> {
 ipcMain.handle("snapshot:get", async () => buildSnapshot());
 ipcMain.handle("doctor:get", async () => runDoctor());
 ipcMain.handle("search:run", async (_event, query: string, limit = 50) => searchAll(query, undefined, limit));
-ipcMain.handle("snapshot:export", async (_event, snapshot: ScopeSnapshot) => exportSnapshot(snapshot));
+ipcMain.handle("snapshot:export", async () => exportSnapshot());
 ipcMain.handle("app:info", async () => appInfo());
 ipcMain.handle("app:reload", async () => {
   mainWindow?.reload();
@@ -87,13 +87,16 @@ ipcMain.handle("app:quit", async () => {
   return true;
 });
 ipcMain.handle("shell:openExternal", async (_event, url: string) => {
+  if (!isAllowedExternalUrl(url)) return false;
   await shell.openExternal(url);
   return true;
 });
 ipcMain.handle("shell:openPath", async (_event, targetPath: string) => {
+  if (!(await isAllowedLocalPath(targetPath))) return "Path is not in AgentScope's local trace allowlist";
   return shell.openPath(targetPath);
 });
 ipcMain.handle("shell:revealPath", async (_event, targetPath: string) => {
+  if (!(await isAllowedLocalPath(targetPath))) return false;
   shell.showItemInFolder(targetPath);
   return true;
 });
@@ -191,7 +194,7 @@ async function searchAll(query: string, home?: string, limit?: number) {
   }
 }
 
-async function exportSnapshot(snapshot: ScopeSnapshot) {
+async function exportSnapshot() {
   const filename = `AgentScope-snapshot-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
   const options = {
     title: "Export AgentScope Snapshot",
@@ -200,6 +203,7 @@ async function exportSnapshot(snapshot: ScopeSnapshot) {
   };
   const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { canceled: true };
+  const snapshot = await buildSnapshot();
   fs.writeFileSync(result.filePath, JSON.stringify(snapshot, null, 2), "utf8");
   return { canceled: false, path: result.filePath };
 }
@@ -217,6 +221,86 @@ function appInfo() {
     readmeUrl: "https://github.com/dwgx/AgentScope#readme"
   };
 }
+
+function isAllowedExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    if (parsed.hostname !== "github.com") return false;
+    return parsed.pathname === "/dwgx/AgentScope" || parsed.pathname.startsWith("/dwgx/AgentScope/");
+  } catch {
+    return false;
+  }
+}
+
+async function isAllowedLocalPath(targetPath: string): Promise<boolean> {
+  const normalizedTarget = normalizeFsPath(targetPath);
+  if (!normalizedTarget) return false;
+  const allowedPaths = await allowedLocalPaths();
+  return allowedPaths.includes(normalizedTarget);
+}
+
+async function allowedLocalPaths(): Promise<string[]> {
+  const info = appInfo();
+  const paths = new Set<string>();
+  addAllowedPath(paths, info.userData);
+  addAllowedPath(paths, info.codexHome);
+  addAllowedPath(paths, info.claudeHome);
+  addAllowedPath(paths, path.join(info.codexHome, "state_5.sqlite"));
+
+  const snapshot = await buildSnapshot();
+  for (const session of snapshot.sessions) {
+    addAllowedPath(paths, session.path);
+    addAllowedPath(paths, session.cwd);
+    addAllowedPath(paths, session.transcriptPath);
+    addEvidencePaths(paths, session.evidence);
+  }
+  for (const process of snapshot.processes) {
+    addAllowedPath(paths, process.executablePath);
+    addAllowedPath(paths, process.cwdHint);
+    addEvidencePaths(paths, process.evidence);
+    for (const candidate of process.sessionCandidates ?? []) {
+      addAllowedPath(paths, candidate.cwd);
+      addAllowedPath(paths, candidate.transcriptPath);
+      addEvidencePaths(paths, candidate.reasons);
+    }
+  }
+  for (const transcript of snapshot.transcripts) {
+    addAllowedPath(paths, transcript.path);
+    addAllowedPath(paths, transcript.cwd);
+    addEvidencePaths(paths, transcript.evidence);
+  }
+  for (const record of snapshot.indexRecords) {
+    addAllowedPath(paths, record.path);
+    addAllowedPath(paths, record.cwd);
+    addEvidencePaths(paths, record.evidence);
+  }
+  for (const relation of snapshot.relations) {
+    addEvidencePaths(paths, relation.evidence);
+  }
+  return [...paths];
+}
+
+function addEvidencePaths(paths: Set<string>, evidence: Evidence[] | undefined): void {
+  for (const item of evidence ?? []) {
+    addAllowedPath(paths, item.path);
+  }
+}
+
+function addAllowedPath(paths: Set<string>, candidate: string | undefined): void {
+  const normalized = normalizeFsPath(candidate);
+  if (normalized) paths.add(normalized);
+}
+
+function normalizeFsPath(candidate: string | undefined): string | undefined {
+  if (!candidate) return undefined;
+  try {
+    return path.resolve(candidate.replace(/^\\\\\?\\/, "")).toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
 
 async function findProcess(snapshot: ScopeSnapshot, pid: number) {
   const core = await loadCore();
