@@ -292,6 +292,7 @@ export const jaJP = {
       appearance: "外観",
       indexing: "索引",
       runtime: "ランタイム",
+      codexControl: "Codex 制御",
       diagnostics: "診断",
       workspace: "ワークスペース",
       typography: "文字",

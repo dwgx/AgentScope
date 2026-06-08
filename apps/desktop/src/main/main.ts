@@ -86,7 +86,18 @@ async function createWindow(): Promise<void> {
   if (isDev) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173");
   } else {
-    await mainWindow.loadFile(rendererIndexPath());
+    await mainWindow.loadFile(
+      rendererIndexPath(),
+      isSmoke
+        ? {
+            query: {
+              agentscopeSmoke: "1",
+              view: process.env.AGENTSCOPE_SMOKE_VIEW ?? "",
+              settingsSection: process.env.AGENTSCOPE_SMOKE_SETTINGS_SECTION ?? ""
+            }
+          }
+        : undefined
+    );
   }
 }
 
@@ -100,6 +111,18 @@ ipcMain.handle("search:run", async (_event, query: string, limit = 50, options?:
 ipcMain.handle("snapshot:export", async () => exportSnapshot());
 ipcMain.handle("app:info", async () => appInfo());
 ipcMain.handle("fonts:list", async () => listInstalledFonts());
+ipcMain.handle("codexControl:list", async () => {
+  const core = await loadCore();
+  return core.listCodexControlSurfaces();
+});
+ipcMain.handle("codexControl:read", async (_event, id: string) => {
+  const core = await loadCore();
+  return core.readCodexControlDocument(id);
+});
+ipcMain.handle("codexControl:save", async (_event, id: string, content: string, expectedSha256: string) => {
+  const core = await loadCore();
+  return core.saveCodexControlDocument(id, content, expectedSha256);
+});
 ipcMain.handle("app:reload", async () => {
   mainWindow?.reload();
   return true;

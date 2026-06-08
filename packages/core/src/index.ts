@@ -6,3 +6,4 @@ export * from "./scope.js";
 export * from "./doctor.js";
 export * from "./search.js";
 export * from "./sessionOps.js";
+export * from "./codexControl.js";

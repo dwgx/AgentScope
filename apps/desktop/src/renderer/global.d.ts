@@ -9,7 +9,10 @@ import type {
   QuarantinedSession,
   SessionRestoreResult,
   SessionLaunchContext,
-  SessionLaunchResult
+  SessionLaunchResult,
+  CodexControlDocument,
+  CodexControlSaveResult,
+  CodexControlSnapshot
 } from "@agentscope/shared";
 
 export interface AppInfo {
@@ -31,6 +34,13 @@ export interface AgentScopeApi {
   exportSnapshot(): Promise<{ canceled: boolean; path?: string }>;
   getAppInfo(): Promise<AppInfo>;
   listFonts(): Promise<string[]>;
+  listCodexControl(): Promise<CodexControlSnapshot>;
+  readCodexControlDocument(id: string): Promise<CodexControlDocument>;
+  saveCodexControlDocument(
+    id: string,
+    content: string,
+    expectedSha256: string
+  ): Promise<CodexControlSaveResult>;
   reloadApp(): Promise<boolean>;
   clearCache(): Promise<{ ok: boolean; directories: string[]; files: string[] }>;
   quitApp(): Promise<boolean>;

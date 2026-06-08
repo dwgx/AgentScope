@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDot,
+  Code2,
   Cpu,
   Database,
   Download,
@@ -42,7 +43,10 @@ import type {
   SessionOperationPlanResult,
   SessionRestoreResult,
   ScopeSnapshot,
-  SessionCandidate
+  SessionCandidate,
+  CodexControlDocument,
+  CodexControlSnapshot,
+  CodexControlSurface
 } from "@agentscope/shared";
 import { i18n, resolveAppLocale } from "./i18n.js";
 import claudeLogoUrl from "./assets/claude-color.svg";
@@ -50,7 +54,7 @@ import codexLogoUrl from "./assets/codex-color.svg";
 import "./styles.css";
 
 type View = "processes" | "sessions" | "graph" | "doctor" | "settings";
-type SettingsSection = "general" | "appearance" | "indexing" | "runtime" | "diagnostics";
+type SettingsSection = "general" | "appearance" | "indexing" | "runtime" | "codexControl" | "diagnostics";
 type ThemeName = "graphite" | "blueprint" | "contrast" | "midnight";
 type DensityName = "compact" | "comfortable" | "spacious";
 type MotionName = "full" | "reduced" | "off";
@@ -249,10 +253,12 @@ const accentValues = ["#b8c2cc", "#4aa3ff", "#8b5cf6", "#f59e0b", "#f43f5e", "#e
 
 function App() {
   const { t } = useTranslation();
+  const smokeView = smokeInitialView();
+  const smokeSettingsSection = smokeInitialSettingsSection();
   const [snapshot, setSnapshot] = useState<ScopeSnapshot | null>(null);
   const [doctor, setDoctor] = useState<Diagnostic[]>([]);
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
-  const [view, setViewState] = useState<View>(settings.defaultView);
+  const [view, setViewState] = useState<View>(smokeView ?? settings.defaultView);
   const [viewHistory, setViewHistory] = useState<View[]>([]);
   const [selectionKey, setSelectionKey] = useState<SelectionKey>(null);
   const [relationSelectionKey, setRelationSelectionKey] = useState<string | null>(null);
@@ -1066,6 +1072,7 @@ function App() {
               <SettingsPanel
                 appInfo={appInfo}
                 settings={settings}
+                initialSection={smokeSettingsSection}
                 updateSettings={updateSettings}
                 resetSettings={resetSettings}
                 resetAppearance={resetAppearanceSettings}
@@ -1075,6 +1082,7 @@ function App() {
                 sessions={sessions}
                 installedFonts={installedFonts}
                 onOpenPath={(targetPath) => void openPath(targetPath)}
+                onRevealPath={(targetPath) => void revealPath(targetPath)}
                 onRepairDiagnostic={(name) => void repairDiagnostic(name)}
                 onOpenExternal={(url) => void openExternal(url)}
               />
@@ -2537,6 +2545,7 @@ function DoctorPanel(props: {
 function SettingsPanel(props: {
   appInfo: AppInfo | null;
   settings: AppSettings;
+  initialSection?: SettingsSection | undefined;
   updateSettings: (patch: Partial<AppSettings>) => void;
   resetSettings: () => void;
   resetAppearance: () => void;
@@ -2546,14 +2555,91 @@ function SettingsPanel(props: {
   sessions: AgentSession[];
   installedFonts: string[];
   onOpenPath: (targetPath?: string) => void;
+  onRevealPath: (targetPath?: string) => void;
   onRepairDiagnostic: (name: string) => void;
   onOpenExternal: (url: string) => void;
 }) {
   const { t } = useTranslation();
-  const [section, setSection] = useState<SettingsSection>("general");
+  const [section, setSection] = useState<SettingsSection>(props.initialSection ?? "general");
+  const [codexControl, setCodexControl] = useState<CodexControlSnapshot | null>(null);
+  const [codexControlLoading, setCodexControlLoading] = useState(false);
+  const [codexControlError, setCodexControlError] = useState<string | undefined>();
+  const [selectedCodexSurfaceId, setSelectedCodexSurfaceId] = useState<string | undefined>();
+  const [codexDocument, setCodexDocument] = useState<CodexControlDocument | null>(null);
+  const [codexDraft, setCodexDraft] = useState("");
+  const [codexDocumentLoading, setCodexDocumentLoading] = useState(false);
+  const [codexSaveStatus, setCodexSaveStatus] = useState<string | undefined>();
   const warnings = props.doctor.filter((item) => item.status === "warn").length;
   const translateDiagnosticHelp = (key: string, options?: Record<string, unknown>) =>
     String(options ? t(key, options) : t(key));
+  const refreshCodexControl = () => {
+    setCodexControlLoading(true);
+    setCodexControlError(undefined);
+    window.agentscope
+      .listCodexControl()
+      .then((snapshot) => {
+        setCodexControl(snapshot);
+        setSelectedCodexSurfaceId((current) => current ?? firstEditableSurface(snapshot)?.id ?? snapshot.surfaces[0]?.id);
+      })
+      .catch((error: unknown) => setCodexControlError(errorMessage(error)))
+      .finally(() => setCodexControlLoading(false));
+  };
+  useEffect(() => {
+    if (section === "codexControl" && !codexControl && !codexControlLoading) refreshCodexControl();
+  }, [codexControl, codexControlLoading, section]);
+  const selectedCodexSurface = codexControl?.surfaces.find((surface) => surface.id === selectedCodexSurfaceId);
+  useEffect(() => {
+    if (section !== "codexControl" || !selectedCodexSurface) return undefined;
+    setCodexSaveStatus(undefined);
+    if (!selectedCodexSurface.editable) {
+      setCodexDocument(null);
+      setCodexDraft("");
+      return undefined;
+    }
+    let canceled = false;
+    setCodexDocumentLoading(true);
+    window.agentscope
+      .readCodexControlDocument(selectedCodexSurface.id)
+      .then((document) => {
+        if (canceled) return;
+        setCodexDocument(document);
+        setCodexDraft(document.content);
+      })
+      .catch((error: unknown) => {
+        if (canceled) return;
+        setCodexDocument(null);
+        setCodexDraft("");
+        setCodexSaveStatus(errorMessage(error));
+      })
+      .finally(() => {
+        if (!canceled) setCodexDocumentLoading(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [section, selectedCodexSurface?.id, selectedCodexSurface?.editable]);
+  const saveCodexDocument = () => {
+    if (!codexDocument) return;
+    setCodexDocumentLoading(true);
+    setCodexSaveStatus(undefined);
+    window.agentscope
+      .saveCodexControlDocument(codexDocument.id, codexDraft, codexDocument.sha256)
+      .then((result) => {
+        setCodexSaveStatus(
+          result.backupPath
+            ? t("settings.codexControl.savedWithBackup", { path: result.backupPath })
+            : t("settings.codexControl.saved")
+        );
+        return window.agentscope.readCodexControlDocument(codexDocument.id);
+      })
+      .then((document) => {
+        setCodexDocument(document);
+        setCodexDraft(document.content);
+        refreshCodexControl();
+      })
+      .catch((error: unknown) => setCodexSaveStatus(errorMessage(error)))
+      .finally(() => setCodexDocumentLoading(false));
+  };
   return (
     <>
       <PaneHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
@@ -2582,6 +2668,12 @@ function SettingsPanel(props: {
             icon={<Cpu size={16} />}
             label={t("settings.sections.runtime")}
             onClick={() => setSection("runtime")}
+          />
+          <SettingsNavItem
+            active={section === "codexControl"}
+            icon={<Code2 size={16} />}
+            label={t("settings.sections.codexControl")}
+            onClick={() => setSection("codexControl")}
           />
           <SettingsNavItem
             active={section === "diagnostics"}
@@ -3087,6 +3179,90 @@ function SettingsPanel(props: {
               </SettingGroup>
             </>
           )}
+          {section === "codexControl" && (
+            <>
+              <SettingGroup title={t("settings.sections.codexControl")}>
+                <div className="codexControlHeader">
+                  <div>
+                    <strong>{t("settings.codexControl.title")}</strong>
+                    <span>{t("settings.codexControl.detail")}</span>
+                    <code className="mono">{codexControl?.codexHome ?? props.appInfo?.codexHome ?? ""}</code>
+                  </div>
+                  <div className="settingInlineActions">
+                    <ActionButton
+                      label={t("common.action.refresh")}
+                      onClick={refreshCodexControl}
+                      disabled={codexControlLoading}
+                    />
+                    <ActionButton
+                      label={t("common.action.reveal")}
+                      onClick={() => props.onRevealPath(codexControl?.codexHome ?? props.appInfo?.codexHome)}
+                      disabled={!codexControl?.codexHome && !props.appInfo?.codexHome}
+                    />
+                  </div>
+                </div>
+                {codexControlError && <p className="inlineError">{codexControlError}</p>}
+                <div className="codexControlLayout">
+                  <div className="codexSurfaceList" aria-label={t("settings.codexControl.surfaces")}>
+                    {(codexControl?.surfaces ?? []).map((surface) => (
+                      <button
+                        key={surface.id}
+                        type="button"
+                        className={`codexSurfaceCard ${selectedCodexSurfaceId === surface.id ? "active" : ""}`}
+                        onClick={() => setSelectedCodexSurfaceId(surface.id)}
+                      >
+                        <span>
+                          <strong>{surface.label}</strong>
+                          <em>{t(`settings.codexControl.kind.${surface.kind}`)}</em>
+                        </span>
+                        <Badge
+                          text={
+                            surface.editable
+                              ? t("settings.codexControl.editable")
+                              : t("settings.codexControl.readOnly")
+                          }
+                          tone={surface.status === "warn" || surface.status === "blocked" ? "warn" : "ok"}
+                        />
+                        <small>{surface.detail}</small>
+                      </button>
+                    ))}
+                    {codexControlLoading && <p className="inlineHint">{t("settings.codexControl.loading")}</p>}
+                  </div>
+                  <CodexControlDetail
+                    surface={selectedCodexSurface}
+                    document={codexDocument}
+                    draft={codexDraft}
+                    loading={codexDocumentLoading}
+                    saveStatus={codexSaveStatus}
+                    onDraftChange={setCodexDraft}
+                    onSave={saveCodexDocument}
+                    onRevealPath={(targetPath) => props.onRevealPath(targetPath)}
+                    dirty={!!codexDocument && codexDraft !== codexDocument.content}
+                  />
+                </div>
+              </SettingGroup>
+              <SettingGroup title={t("settings.codexControl.mcpTitle")}>
+                {codexControl?.mcpServers.length ? (
+                  <div className="codexMcpGrid">
+                    {codexControl.mcpServers.map((server) => (
+                      <div className="codexMcpCard" key={`${server.source}:${server.name}`}>
+                        <div>
+                          <strong>{server.name}</strong>
+                          <span>{server.table}</span>
+                        </div>
+                        <Badge
+                          text={server.enabled === false ? t("common.status.readOnly") : server.transport ?? "mcp"}
+                          tone={server.enabled === false ? "warn" : "ok"}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="inlineHint">{t("settings.codexControl.noMcp")}</p>
+                )}
+              </SettingGroup>
+            </>
+          )}
           {section === "diagnostics" && (
             <SettingGroup title={t("settings.sections.diagnostics")}>
               <SettingRow
@@ -3153,6 +3329,120 @@ function SettingRow(props: { label: string; detail: string; children: ReactNode 
       </div>
       <div className="settingControl">{props.children}</div>
     </div>
+  );
+}
+
+function CodexControlDetail(props: {
+  surface?: CodexControlSurface | undefined;
+  document: CodexControlDocument | null;
+  draft: string;
+  loading: boolean;
+  saveStatus?: string | undefined;
+  dirty: boolean;
+  onDraftChange: (value: string) => void;
+  onSave: () => void;
+  onRevealPath: (targetPath?: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!props.surface) {
+    return (
+      <div className="codexControlDetail">
+        <EmptyState
+          icon={<Code2 size={22} />}
+          title={t("settings.codexControl.emptyTitle")}
+          detail={t("settings.codexControl.emptyDetail")}
+        />
+      </div>
+    );
+  }
+  const summaryEntries = Object.entries(props.surface.summary ?? {});
+  return (
+    <div className="codexControlDetail">
+      <div className="codexControlMeta">
+        <div>
+          <strong>{props.surface.label}</strong>
+          <span>{props.surface.detail}</span>
+          {props.surface.path && <code className="mono">{props.surface.path}</code>}
+        </div>
+        <div className="settingInlineActions">
+          <Badge
+            text={props.surface.editable ? t("settings.codexControl.editable") : t("settings.codexControl.readOnly")}
+            tone={props.surface.status === "ok" ? "ok" : "warn"}
+          />
+          <ActionButton
+            label={t("common.action.reveal")}
+            onClick={() => props.onRevealPath(props.surface?.path)}
+            disabled={!props.surface.path}
+          />
+        </div>
+      </div>
+      <div className="codexControlFacts">
+        <FactPill label={t("settings.codexControl.exists")} value={props.surface.exists ? "yes" : "no"} />
+        {props.surface.bytes !== undefined && (
+          <FactPill label={t("settings.codexControl.bytes")} value={formatBytes(props.surface.bytes) ?? String(props.surface.bytes)} />
+        )}
+        {props.surface.updatedAt && (
+          <FactPill label={t("settings.codexControl.updated")} value={formatDate(props.surface.updatedAt)} />
+        )}
+        {summaryEntries.map(([key, value]) => (
+          <FactPill key={key} label={key} value={String(value)} />
+        ))}
+      </div>
+      {props.surface.warnings.length > 0 && (
+        <div className="codexControlWarnings">
+          {props.surface.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      )}
+      {props.surface.editable ? (
+        <>
+          <textarea
+            className="codexControlEditor mono"
+            value={props.draft}
+            onChange={(event) => props.onDraftChange(event.target.value)}
+            spellCheck={false}
+            disabled={props.loading || props.document?.editable === false}
+            placeholder={props.loading ? t("settings.codexControl.loading") : ""}
+          />
+          <div className="codexEditorActions">
+            <span className="inlineHint">
+              {props.document?.redacted
+                ? t("settings.codexControl.redacted")
+                : t("settings.codexControl.backupBeforeSave")}
+            </span>
+            <ActionButton
+              label={t("settings.codexControl.save")}
+              onClick={props.onSave}
+              disabled={props.loading || !props.document?.editable || !props.dirty}
+            />
+          </div>
+        </>
+      ) : (
+        <div className="codexReadOnlyPanel">
+          <FileText size={18} />
+          <span>{t("settings.codexControl.readOnlyDetail")}</span>
+        </div>
+      )}
+      {props.saveStatus && <p className="inlineHint">{props.saveStatus}</p>}
+      <div className="codexEvidenceList">
+        {props.surface.evidence.map((evidence, index) => (
+          <div key={`${evidence.source}:${index}`}>
+            <strong>{evidence.source}</strong>
+            <span>{evidence.detail}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FactPill(props: { label: string; value: string }) {
+  return (
+    <span className="factPill">
+      <em>{props.label}</em>
+      <strong className="mono">{props.value}</strong>
+    </span>
   );
 }
 
@@ -5137,6 +5427,30 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function smokeInitialView(): View | undefined {
+  if (!smokeModeEnabled()) return undefined;
+  const value = new URLSearchParams(window.location.search).get("view")?.trim() ?? "";
+  return isView(value) ? value : undefined;
+}
+
+function smokeInitialSettingsSection(): SettingsSection | undefined {
+  if (!smokeModeEnabled()) return undefined;
+  const value = new URLSearchParams(window.location.search).get("settingsSection")?.trim() ?? "";
+  return isSettingsSection(value) ? value : undefined;
+}
+
+function smokeModeEnabled(): boolean {
+  return new URLSearchParams(window.location.search).get("agentscopeSmoke") === "1";
+}
+
+function isView(value: string): value is View {
+  return ["processes", "sessions", "graph", "doctor", "settings"].includes(value);
+}
+
+function isSettingsSection(value: string): value is SettingsSection {
+  return ["general", "appearance", "indexing", "runtime", "codexControl", "diagnostics"].includes(value);
+}
+
 function journalPathFromError(message: string): string | undefined {
   const match = /\bjournalPath=([^\r\n]+?)(?=\s+(?:backupDir|quarantineDir|journalPath|restoreJournalPath)=|$)/.exec(message);
   return match?.[1]?.trim();
@@ -5271,6 +5585,10 @@ function basename(value?: string): string | undefined {
 
 function cleanTitle(value: string): string {
   return value.replaceAll("_", " ").replace(/\s+/g, " ").trim();
+}
+
+function firstEditableSurface(snapshot: CodexControlSnapshot): CodexControlSurface | undefined {
+  return snapshot.surfaces.find((surface) => surface.editable) ?? snapshot.surfaces[0];
 }
 
 function Notification(props: { notice: NoticeState; onClose: () => void; onRevealPath: (targetPath: string) => void }) {

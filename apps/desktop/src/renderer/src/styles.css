@@ -1861,6 +1861,329 @@ input {
   overflow-wrap: anywhere;
 }
 
+.codexControlHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px;
+}
+
+.codexControlHeader strong,
+.codexControlHeader span,
+.codexControlHeader code {
+  display: block;
+}
+
+.codexControlHeader strong {
+  font-size: 13px;
+}
+
+.codexControlHeader span,
+.inlineHint,
+.inlineError {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.inlineError {
+  color: var(--danger);
+  margin: 0;
+  padding: 0 14px 12px;
+}
+
+.codexControlHeader code {
+  margin-top: 5px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.codexControlLayout {
+  min-height: 420px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px 14px;
+}
+
+.codexSurfaceList {
+  min-height: 0;
+  max-height: 250px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 7px;
+  padding-right: 3px;
+}
+
+.codexSurfaceCard {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 10px;
+  align-items: start;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 60%, transparent);
+  color: var(--text);
+  padding: 10px;
+  text-align: left;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.codexSurfaceCard:hover,
+.codexSurfaceCard.active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+}
+
+.codexSurfaceCard:active {
+  transform: translateY(1px);
+}
+
+.codexSurfaceCard span,
+.codexSurfaceCard small {
+  min-width: 0;
+}
+
+.codexSurfaceCard strong,
+.codexSurfaceCard em,
+.codexSurfaceCard small {
+  display: block;
+}
+
+.codexSurfaceCard strong {
+  font-size: 12px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codexSurfaceCard em {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.codexSurfaceCard small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.codexControlDetail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 36%, transparent);
+  padding: 12px;
+}
+
+.codexControlMeta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.codexControlMeta strong,
+.codexControlMeta span,
+.codexControlMeta code {
+  display: block;
+}
+
+.codexControlMeta strong {
+  font-size: 14px;
+}
+
+.codexControlMeta span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.codexControlMeta code {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.codexControlFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.factPill {
+  min-width: 86px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  padding: 6px 8px;
+}
+
+.factPill em,
+.factPill strong {
+  display: block;
+}
+
+.factPill em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.factPill strong {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.codexControlWarnings {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.codexControlWarnings span {
+  border-left: 2px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  color: color-mix(in srgb, var(--warn) 72%, var(--text));
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.codexControlEditor {
+  width: 100%;
+  min-height: 260px;
+  max-height: 520px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, #050607 48%, var(--surface));
+  color: var(--text);
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  outline: none;
+}
+
+@container (min-width: 760px) {
+  .codexControlLayout {
+    grid-template-columns: minmax(220px, 34%) minmax(0, 1fr);
+  }
+
+  .codexSurfaceList {
+    max-height: 620px;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.codexControlEditor:focus {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.codexEditorActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.codexEditorActions .inlineHint {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.codexReadOnlyPanel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  color: var(--muted);
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.codexEvidenceList {
+  display: grid;
+  gap: 6px;
+}
+
+.codexEvidenceList div {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 7px;
+}
+
+.codexEvidenceList strong,
+.codexEvidenceList span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.codexEvidenceList span {
+  color: var(--muted);
+}
+
+.codexMcpGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px 14px;
+}
+
+.codexMcpCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 56%, transparent);
+  padding: 9px 10px;
+}
+
+.codexMcpCard strong,
+.codexMcpCard span {
+  display: block;
+  min-width: 0;
+}
+
+.codexMcpCard strong {
+  font-size: 12px;
+}
+
+.codexMcpCard span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .toggle {
   position: relative;
   width: 34px;

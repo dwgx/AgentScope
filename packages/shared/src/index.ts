@@ -278,4 +278,75 @@ export interface SessionRestoreResult {
   databaseChanges?: SessionOperationDatabaseChange[] | undefined;
 }
 
+export type CodexControlSurfaceKind =
+  | "config"
+  | "agents"
+  | "rules"
+  | "skill"
+  | "plugin"
+  | "mcp"
+  | "browser"
+  | "computer_use"
+  | "memory"
+  | "archive";
+
+export type CodexControlSurfaceStatus = "ok" | "warn" | "blocked";
+
+export interface CodexControlSurface {
+  id: string;
+  kind: CodexControlSurfaceKind;
+  label: string;
+  path?: string | undefined;
+  exists: boolean;
+  editable: boolean;
+  status: CodexControlSurfaceStatus;
+  detail: string;
+  bytes?: number | undefined;
+  updatedAt?: string | undefined;
+  summary?: Record<string, string | number | boolean> | undefined;
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexMcpServerSummary {
+  name: string;
+  source: "user_config" | "plugin_config";
+  enabled?: boolean | undefined;
+  transport?: "stdio" | "http" | "plugin" | "unknown" | undefined;
+  table: string;
+  evidence: Evidence[];
+}
+
+export interface CodexControlSnapshot {
+  codexHome: string;
+  surfaces: CodexControlSurface[];
+  mcpServers: CodexMcpServerSummary[];
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexControlDocument {
+  id: string;
+  kind: CodexControlSurfaceKind;
+  label: string;
+  path: string;
+  content: string;
+  sha256: string;
+  bytes: number;
+  updatedAt?: string | undefined;
+  editable: boolean;
+  redacted: boolean;
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexControlSaveResult {
+  id: string;
+  path: string;
+  backupPath?: string | undefined;
+  sha256: string;
+  bytes: number;
+  evidence: Evidence[];
+}
+
 export * from "./launcher.js";

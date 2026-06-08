@@ -291,6 +291,7 @@ export const koKR = {
       appearance: "모양",
       indexing: "색인",
       runtime: "런타임",
+      codexControl: "Codex 제어",
       diagnostics: "진단",
       workspace: "작업 영역",
       typography: "글꼴",

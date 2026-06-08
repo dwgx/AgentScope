@@ -290,6 +290,7 @@ export const zhCN = {
       appearance: "外观",
       indexing: "索引",
       runtime: "运行时",
+      codexControl: "Codex 控制",
       diagnostics: "诊断",
       workspace: "工作区",
       typography: "字体",
@@ -363,6 +364,41 @@ export const zhCN = {
     clearCache: {
       label: "清理软件缓存",
       detail: "清理 AgentScope 应用数据目录下的 Electron 渲染缓存。"
+    },
+    codexControl: {
+      title: "Codex 配置控制面",
+      detail:
+        "仅编辑 allowlist 内的用户 Codex 文件。auth、credentials、logs、history 正文、插件缓存和 memory 正文均保持阻止。",
+      surfaces: "Codex 控制面",
+      loading: "正在加载 Codex 控制面...",
+      editable: "可编辑",
+      readOnly: "只读",
+      readOnlyDetail:
+        "这个面只作为证据展示。它是状态、缓存、供应商管理或承载正文内容，AgentScope 不会修改。",
+      emptyTitle: "没有选中控制面",
+      emptyDetail: "选择一个 Codex 配置面查看证据，或编辑会先备份的文档。",
+      save: "保存",
+      saved: "已保存。原文件不存在，无需备份。",
+      savedWithBackup: "已保存。备份：{{path}}",
+      backupBeforeSave: "保存前会校验 sha256，并先写入 ~/.agentscope 备份。",
+      redacted: "检测到敏感键并已脱敏；请定位后在 AgentScope 外部编辑。",
+      exists: "存在",
+      bytes: "字节",
+      updated: "更新",
+      mcpTitle: "config.toml 中的 MCP 服务器",
+      noMcp: "当前 config.toml 没有找到 MCP server 表。",
+      kind: {
+        config: "配置",
+        agents: "指令",
+        rules: "规则",
+        skill: "技能",
+        plugin: "插件",
+        mcp: "MCP",
+        browser: "浏览器",
+        computer_use: "电脑操控",
+        memory: "记忆",
+        archive: "已归档"
+      }
     },
     theme: {
       label: "主题",

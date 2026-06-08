@@ -304,6 +304,7 @@ export const enUS = {
       appearance: "Appearance",
       indexing: "Indexing",
       runtime: "Runtime",
+      codexControl: "Codex Control",
       diagnostics: "Diagnostics",
       workspace: "Workspace",
       typography: "Typography",
@@ -511,6 +512,41 @@ export const enUS = {
         "{{count}} warning across Codex, Claude, SQLite, JSONL, and process scan.",
       warningsDetail_other:
         "{{count}} warnings across Codex, Claude, SQLite, JSONL, and process scan."
+    },
+    codexControl: {
+      title: "Codex configuration surfaces",
+      detail:
+        "Edits only allowlisted user-owned Codex files. Auth, credentials, logs, history bodies, plugin cache, and memory bodies stay blocked.",
+      surfaces: "Codex control surfaces",
+      loading: "Loading Codex control surfaces...",
+      editable: "editable",
+      readOnly: "read-only",
+      readOnlyDetail:
+        "This surface is shown as evidence only. AgentScope does not modify it because it is state, cache, vendor-managed, or content-bearing.",
+      emptyTitle: "No surface selected",
+      emptyDetail: "Choose a Codex config surface to inspect evidence or edit a backed-up document.",
+      save: "Save",
+      saved: "Saved. No prior file existed, so no backup was needed.",
+      savedWithBackup: "Saved. Backup: {{path}}",
+      backupBeforeSave: "Saving checks the sha256 and writes a backup under ~/.agentscope first.",
+      redacted: "Sensitive key names were redacted; reload/reveal and edit outside AgentScope.",
+      exists: "exists",
+      bytes: "bytes",
+      updated: "updated",
+      mcpTitle: "MCP servers from config.toml",
+      noMcp: "No MCP server table was found in the current config.toml.",
+      kind: {
+        config: "Config",
+        agents: "Instructions",
+        rules: "Rules",
+        skill: "Skill",
+        plugin: "Plugin",
+        mcp: "MCP",
+        browser: "Browser",
+        computer_use: "Computer Use",
+        memory: "Memory",
+        archive: "Archives"
+      }
     }
   },
   inspector: {
