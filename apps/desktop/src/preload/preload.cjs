@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("agentscope", {
   search: (query, limit = 50, options) => ipcRenderer.invoke("search:run", query, limit, options),
   exportSnapshot: () => ipcRenderer.invoke("snapshot:export"),
   getAppInfo: () => ipcRenderer.invoke("app:info"),
+  setControlMode: (mode) => ipcRenderer.invoke("app:setControlMode", mode),
   listFonts: () => ipcRenderer.invoke("fonts:list"),
   listCodexControl: () => ipcRenderer.invoke("codexControl:list"),
   readCodexControlDocument: (id) => ipcRenderer.invoke("codexControl:read", id),

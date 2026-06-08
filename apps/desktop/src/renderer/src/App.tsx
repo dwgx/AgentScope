@@ -287,10 +287,28 @@ function App() {
   const [installedFonts, setInstalledFonts] = useState<string[]>([]);
   const [quarantinedSessions, setQuarantinedSessions] = useState<QuarantinedSession[]>([]);
 
+  function syncControlMode(mode: ControlMode) {
+    void window.agentscope
+      .setControlMode(mode)
+      .then((result) => {
+        if (result.controlMode !== mode) {
+          setSettings((current) => {
+            const next = { ...current, controlMode: result.controlMode };
+            saveSettings(next);
+            return next;
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+      });
+  }
+
   function updateSettings(patch: Partial<AppSettings>) {
     setSettings((current) => {
       const next = { ...current, ...patch };
       saveSettings(next);
+      if (patch.controlMode) syncControlMode(next.controlMode);
       return next;
     });
   }
@@ -374,6 +392,10 @@ function App() {
     void window.agentscope.getAppInfo().then(setAppInfo);
     void window.agentscope.listFonts().then((fonts) => setInstalledFonts(fonts));
   }, []);
+
+  useEffect(() => {
+    syncControlMode(settings.controlMode);
+  }, [settings.controlMode]);
 
   useEffect(() => {
     const locale = resolveAppLocale(settings.language, appInfo?.locale);
@@ -2622,6 +2644,7 @@ function SettingsPanel(props: {
     if (section === "codexControl" && !codexControl && !codexControlLoading) refreshCodexControl();
   }, [codexControl, codexControlLoading, section]);
   const selectedCodexSurface = codexControl?.surfaces.find((surface) => surface.id === selectedCodexSurfaceId);
+  const readOnlyMode = props.settings.controlMode === "readOnly";
   useEffect(() => {
     if (section !== "codexControl" || !selectedCodexSurface) return undefined;
     setCodexSaveStatus(undefined);
@@ -2654,6 +2677,10 @@ function SettingsPanel(props: {
   }, [section, selectedCodexSurface?.id, selectedCodexSurface?.editable]);
   const saveCodexDocument = () => {
     if (!codexDocument) return;
+    if (readOnlyMode) {
+      setCodexSaveStatus(t("settings.controlMode.readOnlyBlocked"));
+      return;
+    }
     setCodexDocumentLoading(true);
     setCodexSaveStatus(undefined);
     window.agentscope
@@ -2676,6 +2703,10 @@ function SettingsPanel(props: {
   };
   const saveCodexModes = () => {
     if (!codexModes) return;
+    if (readOnlyMode) {
+      setCodexModeStatus(t("settings.controlMode.readOnlyBlocked"));
+      return;
+    }
     setCodexModeLoading(true);
     setCodexModeStatus(undefined);
     window.agentscope
@@ -2828,8 +2859,8 @@ function SettingsPanel(props: {
                     }
                   >
                     {props.settings.includeSqlitePreviewSearch
-                      ? t("common.action.show")
-                      : t("common.action.hide")}
+                      ? t("common.action.hide")
+                      : t("common.action.show")}
                   </button>
                 </SettingRow>
                 <SettingRow
@@ -3265,6 +3296,7 @@ function SettingsPanel(props: {
                   draft={codexModeDraft}
                   loading={codexModeLoading}
                   status={codexModeStatus}
+                  readOnlyMode={readOnlyMode}
                   onDraftChange={setCodexModeDraft}
                   onRefresh={refreshCodexModes}
                   onSave={saveCodexModes}
@@ -3305,6 +3337,7 @@ function SettingsPanel(props: {
                     onSave={saveCodexDocument}
                     onRevealPath={(targetPath) => props.onRevealPath(targetPath)}
                     dirty={!!codexDocument && codexDraft !== codexDocument.content}
+                    readOnlyMode={readOnlyMode}
                   />
                 </div>
               </SettingGroup>
@@ -3404,6 +3437,7 @@ function CodexModeConfigPanel(props: {
   draft: CodexModeDraft;
   loading: boolean;
   status?: string | undefined;
+  readOnlyMode: boolean;
   onDraftChange: (next: CodexModeDraft) => void;
   onRefresh: () => void;
   onSave: () => void;
@@ -3419,7 +3453,7 @@ function CodexModeConfigPanel(props: {
     ? props.snapshot.planReasoningEffortValues
     : fallbackPlanReasoningEfforts;
   const dirty = props.snapshot ? !codexModeDraftEqualsSnapshot(props.draft, props.snapshot) : false;
-  const disabled = props.loading || !props.snapshot;
+  const disabled = props.loading || !props.snapshot || props.readOnlyMode;
   const mode = (id: CodexModeId) => props.snapshot?.modes[id];
   const setDraft = (patch: Partial<CodexModeDraft>) => props.onDraftChange({ ...props.draft, ...patch });
   const defaultModel = props.draft.defaultModel || props.snapshot?.modes.default.model || "";
@@ -3630,6 +3664,7 @@ function CodexControlDetail(props: {
   onDraftChange: (value: string) => void;
   onSave: () => void;
   onRevealPath: (targetPath?: string) => void;
+  readOnlyMode: boolean;
 }) {
   const { t } = useTranslation();
   if (!props.surface) {
@@ -3690,7 +3725,7 @@ function CodexControlDetail(props: {
             value={props.draft}
             onChange={(event) => props.onDraftChange(event.target.value)}
             spellCheck={false}
-            disabled={props.loading || props.document?.editable === false}
+            disabled={props.loading || props.readOnlyMode || props.document?.editable === false}
             placeholder={props.loading ? t("settings.codexControl.loading") : ""}
           />
           <div className="codexEditorActions">
@@ -3702,7 +3737,7 @@ function CodexControlDetail(props: {
             <ActionButton
               label={t("settings.codexControl.save")}
               onClick={props.onSave}
-              disabled={props.loading || !props.document?.editable || !props.dirty}
+              disabled={props.loading || props.readOnlyMode || !props.document?.editable || !props.dirty}
             />
           </div>
         </>
@@ -5959,8 +5994,8 @@ function Notification(props: { notice: NoticeState; onClose: () => void; onRevea
       </div>
       {props.notice.actions?.length ? (
         <div className="notificationActions">
-          {props.notice.actions.map((action) => (
-            <button key={action.label} type="button" onClick={action.onClick}>
+          {props.notice.actions.map((action, index) => (
+            <button key={`${action.label}:${index}`} type="button" onClick={action.onClick}>
               {action.label}
             </button>
           ))}

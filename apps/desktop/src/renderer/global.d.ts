@@ -15,7 +15,8 @@ import type {
   CodexControlSnapshot,
   CodexModeConfigPatch,
   CodexModeConfigSaveResult,
-  CodexModeConfigSnapshot
+  CodexModeConfigSnapshot,
+  SessionCandidateMatch
 } from "@agentscope/shared";
 
 export interface AppInfo {
@@ -36,6 +37,7 @@ export interface AgentScopeApi {
   search(query: string, limit?: number, options?: { includeSqlitePreview?: boolean }): Promise<Record<string, unknown>[]>;
   exportSnapshot(): Promise<{ canceled: boolean; path?: string }>;
   getAppInfo(): Promise<AppInfo>;
+  setControlMode(mode: "safe" | "readOnly"): Promise<{ controlMode: "safe" | "readOnly" }>;
   listFonts(): Promise<string[]>;
   listCodexControl(): Promise<CodexControlSnapshot>;
   readCodexControlDocument(id: string): Promise<CodexControlDocument>;
@@ -55,7 +57,7 @@ export interface AgentScopeApi {
   openExternal(url: string): Promise<boolean>;
   openPath(targetPath: string): Promise<string>;
   revealPath(targetPath: string): Promise<string>;
-  inspectPid(pid: number): Promise<Record<string, unknown>>;
+  inspectPid(pid: number): Promise<{ process?: unknown; sessions: SessionCandidateMatch[] }>;
   inspectSession(sessionId: string): Promise<Record<string, unknown>>;
   repairDiagnostic(name: string): Promise<{
     ok: boolean;

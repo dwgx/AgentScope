@@ -104,6 +104,10 @@ Current behavior:
 
 Known limits:
 
+- Codex delete spans multiple SQLite databases. AgentScope backs up those
+  databases first and attempts compensating restore from `sqlite-backup` if a
+  later DB step fails, but the journal must still be treated as recovery
+  evidence for any failed delete.
 - Codex row restore requires compatible target SQLite tables and columns; schema
   drift is rejected instead of partially reconstructing rows.
 - Codex process-to-thread mapping is still partly heuristic because Codex does

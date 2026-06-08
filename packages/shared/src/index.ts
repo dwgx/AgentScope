@@ -49,6 +49,11 @@ export interface AgentProcess {
 export interface SessionCandidate {
   agent: AgentKind;
   sessionId: string;
+  pid?: number | undefined;
+  ppid?: number | undefined;
+  processName?: string | undefined;
+  processRole?: AgentProcessRole | undefined;
+  rootPid?: number | undefined;
   title?: string | undefined;
   cwd?: string | undefined;
   transcriptPath?: string | undefined;
@@ -58,6 +63,11 @@ export interface SessionCandidate {
   startedAt?: string | undefined;
   updatedAt?: string | undefined;
   reasons: Evidence[];
+}
+
+export interface SessionCandidateMatch {
+  session: AgentSession;
+  candidate: SessionCandidate;
 }
 
 export interface SessionCandidateScorePart extends Evidence {

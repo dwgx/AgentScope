@@ -234,7 +234,7 @@ export async function deleteSession(
 
     if (session.agent === "codex") {
       await backupCodexDatabases(options.home, quarantineDir, journal);
-      databaseChanges.push(...applyCodexDatabaseDelete(plan, options.home, journal));
+      databaseChanges.push(...applyCodexDatabaseDelete(plan, options.home, quarantineDir, journal));
     }
 
     for (const file of plan.files) {
@@ -1069,6 +1069,7 @@ async function patchClaudeDaemonRoster(
 function applyCodexDatabaseDelete(
   plan: SessionOperationPlan,
   home: string | undefined,
+  quarantineDir: string,
   journal?: DeleteJournal | undefined
 ): SessionOperationDatabaseChange[] {
   const root = codexHome(home);
@@ -1119,6 +1120,7 @@ function applyCodexDatabaseDelete(
         database: statePath,
         error: error instanceof Error ? error.message : String(error)
       });
+      rollbackCodexDatabaseDeletes(applied, quarantineDir, journal);
       throw error;
     } finally {
       stateDb.close();
@@ -1152,12 +1154,75 @@ function applyCodexDatabaseDelete(
         table,
         error: error instanceof Error ? error.message : String(error)
       });
+      rollbackCodexDatabaseDeletes(applied, quarantineDir, journal);
       throw error;
     } finally {
       db.close();
     }
   }
   return applied.filter((change) => change.estimatedRows !== 0);
+}
+
+function rollbackCodexDatabaseDeletes(
+  applied: SessionOperationDatabaseChange[],
+  quarantineDir: string,
+  journal?: DeleteJournal | undefined
+): void {
+  const seen = new Set<string>();
+  for (const change of [...applied].reverse()) {
+    if (change.action !== "delete" || !change.estimatedRows) continue;
+    const database = path.resolve(change.database);
+    const key = database.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const backupPath = path.join(quarantineDir, "sqlite-backup", path.basename(database));
+    appendJournalStepSync(journal, {
+      phase: "sqlite_delete",
+      action: "rollback_restore",
+      status: "started",
+      database,
+      path: backupPath,
+      targetPath: database,
+      detail: "Restoring SQLite database from delete-time backup after a later Codex DB delete failed."
+    });
+    try {
+      restoreSqliteBackupFiles(backupPath, database);
+      appendJournalStepSync(journal, {
+        phase: "sqlite_delete",
+        action: "rollback_restore",
+        status: "succeeded",
+        database,
+        path: backupPath,
+        targetPath: database,
+        sha256: hashPathSync(database)
+      });
+    } catch (error) {
+      appendJournalStepSync(journal, {
+        phase: "sqlite_delete",
+        action: "rollback_restore",
+        status: "failed",
+        database,
+        path: backupPath,
+        targetPath: database,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  }
+}
+
+function restoreSqliteBackupFiles(backupPath: string, targetPath: string): void {
+  if (!fs.existsSync(backupPath)) throw new Error(`SQLite backup is missing: ${backupPath}`);
+  fs.copyFileSync(backupPath, targetPath);
+  for (const suffix of ["-wal", "-shm"]) {
+    const backupSidecar = `${backupPath}${suffix}`;
+    const targetSidecar = `${targetPath}${suffix}`;
+    if (fs.existsSync(backupSidecar)) {
+      fs.copyFileSync(backupSidecar, targetSidecar);
+    } else if (fs.existsSync(targetSidecar)) {
+      fs.rmSync(targetSidecar, { force: true });
+    }
+  }
 }
 
 async function backupCodexDatabases(home: string | undefined, quarantineDir: string, journal?: DeleteJournal | undefined): Promise<void> {

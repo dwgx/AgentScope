@@ -7,6 +7,7 @@ import type {
   Relation,
   ScopeSnapshot,
   SessionCandidate,
+  SessionCandidateMatch,
   SessionCandidateScorePart,
   Transcript
 } from "@agentscope/shared";
@@ -50,11 +51,23 @@ export function findProcess(snapshot: ScopeSnapshot, pid: number): AgentProcess 
   return snapshot.processes.find((process) => process.pid === pid);
 }
 
-export function sessionsForPid(snapshot: ScopeSnapshot, pid: number): AgentSession[] {
-  const exact = snapshot.sessions.filter((session) => session.pid === pid);
-  if (exact.length) return exact;
+export function sessionsForPid(snapshot: ScopeSnapshot, pid: number): SessionCandidateMatch[] {
   const process = findProcess(snapshot, pid);
-  return process ? sessionCandidatesForProcess(snapshot, process, 5).map((candidate) => sessionFromCandidate(snapshot, candidate)).filter(isDefined) : [];
+  const exact = snapshot.sessions.filter((session) => session.pid === pid && process && canAttachExactPid(session, process));
+  if (exact.length) {
+    return exact.map((session) => ({
+      session,
+      candidate: exactCandidateFromSession(session)
+    }));
+  }
+  return process
+    ? sessionCandidatesForProcess(snapshot, process, 5)
+        .map((candidate) => {
+          const session = sessionFromCandidate(snapshot, candidate);
+          return session ? { session, candidate } : undefined;
+        })
+        .filter(isDefined)
+    : [];
 }
 
 export function heuristicSessionsForProcess(snapshot: ScopeSnapshot, process: AgentProcess, limit: number): AgentSession[] {
@@ -136,12 +149,20 @@ function attachProcesses(sessions: AgentSession[], processes: AgentProcess[], re
       session.evidence.push({ source: "process.match.stale_pid", detail: "Session carries a stored PID, but no active Win32_Process row currently matches it.", field: "pid" });
       continue;
     }
+    if (!canAttachExactPid(session, process)) {
+      session.evidence.push({
+        source: "process.match.stale_pid",
+        detail: "A process row has this PID, but agent or runtime evidence did not match; AgentScope refused to upgrade it to exact.",
+        field: "pid,agent"
+      });
+      continue;
+    }
     session.ppid = process.ppid;
     session.processName = process.processName;
     session.commandLine = process.commandLine;
     session.path = process.executablePath;
     session.confidence = bestConfidence(session.confidence, "exact");
-    session.evidence.push({ source: "process.match", detail: "Active process matched session by explicit PID.", field: "pid" });
+    session.evidence.push({ source: "process.match", detail: "Active process matched session by explicit PID and agent.", field: "pid,agent" });
     relations.push({
       kind: "process_parent",
       sourceId: process.ppid === undefined ? "unknown" : String(process.ppid),
@@ -309,6 +330,11 @@ function scoreSessionForProcess(process: AgentProcess, session: AgentSession): S
   return {
     agent: session.agent,
     sessionId: session.sessionId,
+    pid: process.pid,
+    ppid: process.ppid,
+    processName: process.processName,
+    processRole: process.processRole,
+    rootPid: process.rootPid,
     title: session.title,
     cwd: session.cwd,
     transcriptPath: session.transcriptPath,
@@ -350,12 +376,50 @@ function canAttachHeuristicProcess(candidate: SessionCandidate): boolean {
   return hasStrongReason(candidate.reasons);
 }
 
+function canAttachExactPid(session: AgentSession, process: AgentProcess): boolean {
+  if (session.agent === "unknown") return false;
+  if (process.agent !== "unknown" && process.agent !== session.agent) return false;
+  return true;
+}
+
+function exactCandidateFromSession(session: AgentSession): SessionCandidate {
+  return {
+    agent: session.agent,
+    sessionId: session.sessionId,
+    pid: session.pid,
+    ppid: session.ppid,
+    processName: session.processName,
+    title: session.title,
+    cwd: session.cwd,
+    transcriptPath: session.transcriptPath,
+    confidence: "exact",
+    score: 1000,
+    startedAt: session.startedAt,
+    updatedAt: session.updatedAt,
+    reasons: [
+      {
+        source: "process.match.pid",
+        detail: "Session PID exactly matches an active process that passed runtime attach checks.",
+        field: "pid,agent"
+      }
+    ],
+    scoreParts: [
+      {
+        source: "process.match.pid",
+        detail: "Session PID exactly matches an active process that passed runtime attach checks.",
+        field: "pid,agent",
+        points: 1000
+      }
+    ]
+  };
+}
+
 function sessionFromCandidate(snapshot: ScopeSnapshot, candidate: SessionCandidate): AgentSession | undefined {
   return snapshot.sessions.find((session) => session.agent === candidate.agent && session.sessionId === candidate.sessionId);
 }
 
 function candidateConfidence(process: AgentProcess, session: AgentSession, reasons: Evidence[]): Confidence {
-  if (session.pid !== undefined && session.pid === process.pid) return "exact";
+  if (session.pid !== undefined && session.pid === process.pid && canAttachExactPid(session, process)) return "exact";
   return hasStrongReason(reasons) ? "heuristic" : "unknown";
 }
 
@@ -370,7 +434,7 @@ function mergeRuntimeCandidates(
   const out: SessionCandidate[] = [];
   const seen = new Set<string>();
   for (const candidate of [...(left ?? []), ...(right ?? [])]) {
-    const key = `${candidate.agent}:${candidate.sessionId}:${candidate.score}:${candidate.confidence}`;
+    const key = `${candidate.agent}:${candidate.sessionId}:${candidate.pid ?? "no-pid"}:${candidate.score}:${candidate.confidence}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(candidate);

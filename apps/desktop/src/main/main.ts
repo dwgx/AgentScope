@@ -27,6 +27,7 @@ const execFileAsync = promisify(execFile);
 let mainWindow: BrowserWindow | undefined;
 let corePromise: Promise<typeof AgentScopeCore> | undefined;
 let lastCoreError: string | undefined;
+let controlMode: "safe" | "readOnly" = "safe";
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -110,6 +111,14 @@ ipcMain.handle("search:run", async (_event, query: string, limit = 50, options?:
 );
 ipcMain.handle("snapshot:export", async () => exportSnapshot());
 ipcMain.handle("app:info", async () => appInfo());
+ipcMain.handle("app:setControlMode", async (_event, mode: string) => {
+  if (mode !== "safe" && mode !== "readOnly") throw new Error("Unsupported AgentScope control mode.");
+  if (mode === "safe" && controlMode === "readOnly" && !(await confirmControlModeSafe())) {
+    return { controlMode };
+  }
+  controlMode = mode;
+  return { controlMode };
+});
 ipcMain.handle("fonts:list", async () => listInstalledFonts());
 ipcMain.handle("codexControl:list", async () => {
   const core = await loadCore();
@@ -120,6 +129,7 @@ ipcMain.handle("codexControl:read", async (_event, id: string) => {
   return core.readCodexControlDocument(id);
 });
 ipcMain.handle("codexControl:save", async (_event, id: string, content: string, expectedSha256: string) => {
+  assertWriteControlAllowed("Codex control save");
   const core = await loadCore();
   return core.saveCodexControlDocument(id, content, expectedSha256);
 });
@@ -128,6 +138,7 @@ ipcMain.handle("codexControl:readModes", async () => {
   return core.readCodexModeConfig();
 });
 ipcMain.handle("codexControl:saveModes", async (_event, patch: CodexModeConfigPatch, expectedSha256: string) => {
+  assertWriteControlAllowed("Codex mode save");
   const core = await loadCore();
   return core.saveCodexModeConfig(patch, expectedSha256);
 });
@@ -177,6 +188,7 @@ ipcMain.handle("inspect:session", async (_event, sessionId: string) => {
   };
 });
 ipcMain.handle("diagnostic:repair", async (_event, name: string) => {
+  assertWriteControlAllowed("Diagnostic repair");
   if (isNativeSqliteDiagnostic(name) && !(await confirmNativeSqliteRepair(name))) {
     return {
       ok: false,
@@ -189,17 +201,21 @@ ipcMain.handle("diagnostic:repair", async (_event, name: string) => {
   return repairDiagnostic(name);
 });
 ipcMain.handle("session:backup", async (_event, agent: string, sessionId: string) => {
+  assertWriteControlAllowed("Session backup");
   const core = await loadCore();
   return core.backupSession(sessionId, asAgent(agent));
 });
 ipcMain.handle("session:delete", async (_event, agent: string, sessionId: string, createdAt?: string) => {
+  assertWriteControlAllowed("Session delete");
   const core = await loadCore();
   return core.deleteSession(sessionId, asAgent(agent), createdAt ? { now: new Date(createdAt) } : undefined);
 });
 ipcMain.handle("session:launch", async (_event, agent: string, sessionId: string, action: string, context?: SessionLaunchContext) => {
+  assertWriteControlAllowed("Session launch");
   return launchSessionCommand(agent, sessionId, action, context);
 });
 ipcMain.handle("session:import", async (_event, backupDir: string) => {
+  assertWriteControlAllowed("Session import");
   if (await isAllowedAgentScopeQuarantinePath(backupDir)) {
     const core = await loadCore();
     return core.restoreQuarantinedSession(backupDir);
@@ -215,6 +231,7 @@ ipcMain.handle("session:listQuarantine", async () => {
   return core.listQuarantinedSessions();
 });
 ipcMain.handle("session:restore", async (_event, quarantineDirOrJournalPath: string) => {
+  assertWriteControlAllowed("Session restore");
   if (!(await isAllowedAgentScopeQuarantinePath(quarantineDirOrJournalPath))) {
     throw new Error("Restore is limited to AgentScope quarantine directories.");
   }
@@ -222,10 +239,12 @@ ipcMain.handle("session:restore", async (_event, quarantineDirOrJournalPath: str
   return core.restoreQuarantinedSession(quarantineDirOrJournalPath);
 });
 ipcMain.handle("session:deletePlan", async (_event, agent: string, sessionId: string) => {
+  assertWriteControlAllowed("Session delete plan");
   const core = await loadCore();
   return core.writeSessionDeletePlan(sessionId, asAgent(agent));
 });
 ipcMain.handle("session:importPlan", async (_event, backupDir: string) => {
+  assertWriteControlAllowed("Session import plan");
   if (await isAllowedAgentScopeQuarantinePath(backupDir)) {
     const core = await loadCore();
     return core.planSessionRestore(backupDir);
@@ -237,6 +256,7 @@ ipcMain.handle("session:importPlan", async (_event, backupDir: string) => {
   return core.planSessionImport(backupDir);
 });
 ipcMain.handle("session:chooseImportPlan", async () => {
+  assertWriteControlAllowed("Session import plan");
   const backupRoot = path.join(os.homedir(), ".agentscope", "backups");
   await fs.promises.mkdir(backupRoot, { recursive: true });
   const options = {
@@ -257,6 +277,7 @@ ipcMain.handle("session:chooseImportPlan", async () => {
   return core.planSessionImport(result.filePaths[0]);
 });
 ipcMain.handle("session:chooseImport", async () => {
+  assertWriteControlAllowed("Session import");
   const agentScopeRoot = path.join(os.homedir(), ".agentscope");
   const backupRoot = path.join(agentScopeRoot, "backups");
   await fs.promises.mkdir(backupRoot, { recursive: true });
@@ -625,6 +646,24 @@ async function confirmNativeSqliteRepair(name: string): Promise<boolean> {
   return result.response === 1;
 }
 
+async function confirmControlModeSafe(): Promise<boolean> {
+  const options = {
+    type: "warning" as const,
+    buttons: ["Stay read-only", "Enable safe controls"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: "Confirm AgentScope control mode",
+    message: "Enable AgentScope safe controls?",
+    detail: [
+      "Safe mode allows AgentScope to write allowlisted Codex config files, create backups, delete sessions through backup/quarantine/journal, restore quarantine entries, import AgentScope backups, launch resume/fork commands, and run confirmed diagnostic repair.",
+      "Read-only mode keeps these actions blocked in the main process."
+    ].join("\n")
+  };
+  const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+  return result.response === 1;
+}
+
 async function launchSessionCommand(
   agentValue: string,
   sessionId: string,
@@ -820,6 +859,11 @@ function asAgent(value: string): "codex" | "claude" | undefined {
   return value === "codex" || value === "claude" ? value : undefined;
 }
 
+function assertWriteControlAllowed(action: string): void {
+  if (controlMode !== "safe") {
+    throw new Error(`${action} is blocked because AgentScope control mode is read-only.`);
+  }
+}
 
 async function findProcess(snapshot: ScopeSnapshot, pid: number) {
   const core = await loadCore();

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentProcess, AgentSession, ScopeSnapshot } from "@agentscope/shared";
 import { annotateProcessTree, classifyProcess } from "./processes.js";
 import { readRolloutMetadata } from "./codex.js";
-import { heuristicSessionsForProcess, mergeSessions, sessionCandidatesForProcess } from "./scope.js";
+import { heuristicSessionsForProcess, mergeSessions, sessionCandidatesForProcess, sessionsForPid } from "./scope.js";
 
 describe("scope confidence", () => {
   it("merges to the best index confidence", () => {
@@ -86,6 +86,57 @@ describe("scope confidence", () => {
     expect(session.confidence).toBe("indexed");
     expect(session.pid).toBeUndefined();
     expect(session.commandLine).toBeUndefined();
+  });
+
+  it("returns process inspection matches with candidate confidence instead of naked sessions", () => {
+    const session = baseSession("runtime-thread", "indexed");
+    session.cwd = String.raw`D:\Project\AgentScope`;
+    const process: AgentProcess = {
+      pid: 10,
+      ppid: 1,
+      processName: "codex.exe",
+      commandLine: String.raw`codex --cwd D:\Project\AgentScope`,
+      agent: "codex",
+      evidence: []
+    };
+    const snapshot: ScopeSnapshot = {
+      processes: [process],
+      sessions: [session],
+      transcripts: [],
+      indexRecords: [],
+      relations: []
+    };
+
+    const [match] = sessionsForPid(snapshot, 10);
+
+    expect(match?.session.sessionId).toBe("runtime-thread");
+    expect(match?.session.confidence).toBe("indexed");
+    expect(match?.candidate.confidence).toBe("heuristic");
+    expect(match?.candidate.pid).toBe(10);
+  });
+
+  it("does not upgrade a stale pid to exact when the active process has a different agent", () => {
+    const session = baseSession("stale-thread", "indexed");
+    session.agent = "claude";
+    session.pid = 9352;
+    const process: AgentProcess = {
+      pid: 9352,
+      ppid: 1,
+      processName: "codex.exe",
+      commandLine: "codex",
+      agent: "codex",
+      evidence: []
+    };
+    const snapshot: ScopeSnapshot = {
+      processes: [process],
+      sessions: [session],
+      transcripts: [],
+      indexRecords: [],
+      relations: []
+    };
+
+    expect(sessionCandidatesForProcess(snapshot, process, 5)[0]?.confidence).not.toBe("exact");
+    expect(sessionsForPid(snapshot, 9352).some((match) => match.candidate.confidence === "exact")).toBe(false);
   });
 
   it("does not treat executable paths under the user profile as cwd evidence", () => {

@@ -1,6 +1,6 @@
 # AgentScope Next-AI Handoff
 
-Last updated: 2026-06-08.
+Last updated: 2026-06-09.
 
 This is the primary handoff for the next AI working on AgentScope. Read it before editing code, then read `AGENTS.md`, `README.md`, and `docs/research-local-agent-stores.md`.
 
@@ -37,13 +37,18 @@ The user strongly dislikes:
 Current latest commit at handoff time:
 
 ```text
-085a8de Update handoff for next AgentScope agent
+70d322e Add Codex local storage metadata surfaces
 ```
 
 Recent important commits:
 
 ```text
-085a8de Update handoff for next AgentScope agent
+70d322e Add Codex local storage metadata surfaces
+eee78b5 Align Codex mode reasoning controls
+0a33ff0 Add Codex mode defaults control
+172d9e5 Add safe Codex control settings
+e3c64a7 Clarify restore state and classify Codex subagents
+8b81b1d Correct handoff baseline and workflow notes
 553cd42 Confirm diagnostic repair before package rebuild
 b454097 Tighten import path validation audit fixes
 39db692 Harden session control safety layer
@@ -54,7 +59,7 @@ c14d4f8 Fix launcher resolution and UI control states
 a4b47c1 Polish UI positioning and path feedback
 ```
 
-The workspace was clean after `085a8de`.
+The workspace was clean after `70d322e`.
 
 ## Commands To Run
 

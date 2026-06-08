@@ -198,7 +198,7 @@ describe("session operations", () => {
     expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.status === "failed")).toBe(true);
   });
 
-  it("keeps Codex files in place and records prior sqlite delete evidence when a later DB fails", async () => {
+  it("rolls back prior Codex sqlite deletes when a later DB fails", async () => {
     const home = tempHome();
     const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-partial-fail-"));
     const sessionId = "56565656-5555-4555-8555-565656565656";
@@ -231,6 +231,11 @@ describe("session operations", () => {
     const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
     expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.status === "succeeded" && step.table === "threads")).toBe(true);
     expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.status === "failed" && step.table === "thread_goals")).toBe(true);
+    expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.action === "rollback_restore" && step.status === "succeeded")).toBe(true);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    const restored = state.prepare("SELECT COUNT(*) count FROM threads WHERE id = ?").get(sessionId) as { count: number };
+    state.close();
+    expect(restored.count).toBe(1);
   });
 
   it("imports an AgentScope backup when target files are absent", async () => {
