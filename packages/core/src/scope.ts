@@ -1,6 +1,7 @@
 import type {
   AgentProcess,
   AgentSession,
+  AgentSessionKind,
   Confidence,
   Evidence,
   Relation,
@@ -80,6 +81,7 @@ export function mergeSessions(items: AgentSession[]): AgentSession[] {
       merged.set(key, {
         ...item,
         childSessionIds: [...item.childSessionIds],
+        sessionKindEvidence: item.sessionKindEvidence ? [...item.sessionKindEvidence] : undefined,
         runtimeCandidates: item.runtimeCandidates ? [...item.runtimeCandidates] : undefined,
         evidence: [...item.evidence]
       });
@@ -176,6 +178,8 @@ function applyRelations(sessions: AgentSession[], relations: Relation[]): void {
     if (parent && !parent.childSessionIds.includes(relation.targetId)) parent.childSessionIds.push(relation.targetId);
     if (child) {
       child.parentSessionId = relation.sourceId;
+      child.sessionKind = strongerSessionKind(child.sessionKind, relation.kind === "subagent" ? "subagent" : "child");
+      child.sessionKindEvidence = appendEvidenceUnique(child.sessionKindEvidence ?? [], relation.evidence);
       child.evidence = appendEvidenceUnique(child.evidence, relation.evidence);
     }
   }
@@ -192,6 +196,8 @@ function mergeSession(target: AgentSession, source: AgentSession): void {
   target.transcriptPath ||= source.transcriptPath;
   target.indexSource ||= source.indexSource;
   target.parentSessionId ||= source.parentSessionId;
+  target.sessionKind = strongerSessionKind(target.sessionKind, source.sessionKind);
+  target.sessionKindEvidence = appendEvidenceUnique(target.sessionKindEvidence ?? [], source.sessionKindEvidence ?? []);
   for (const child of source.childSessionIds) {
     if (!target.childSessionIds.includes(child)) target.childSessionIds.push(child);
   }
@@ -203,6 +209,21 @@ function mergeSession(target: AgentSession, source: AgentSession): void {
   target.runtimeCandidates = mergeRuntimeCandidates(target.runtimeCandidates, source.runtimeCandidates);
   target.confidence = bestConfidence(target.confidence, source.confidence);
   target.evidence = appendEvidenceUnique(target.evidence, source.evidence);
+}
+
+function strongerSessionKind(
+  left: AgentSessionKind | undefined,
+  right: AgentSessionKind | undefined
+): AgentSessionKind | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  const rank: Record<AgentSessionKind, number> = {
+    session: 0,
+    child: 1,
+    subagent_candidate: 2,
+    subagent: 3
+  };
+  return rank[left] >= rank[right] ? left : right;
 }
 
 function scoreSessionForProcess(process: AgentProcess, session: AgentSession): SessionCandidate {

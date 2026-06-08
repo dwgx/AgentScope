@@ -194,6 +194,18 @@ export const koKR = {
       groupCount_other: "{{count}}개 세션",
       children_one: "{{count}}개 자식 세션",
       children_other: "{{count}}개 자식 세션",
+      kind: {
+        child: "자식",
+        subagent: "하위 에이전트",
+        subagentCandidate: "하위 에이전트 후보"
+      },
+      kindFilter: {
+        label: "종류",
+        all: "전체",
+        root: "루트",
+        child: "자식",
+        subagent: "하위 에이전트"
+      },
       context: {
         selectedCount: "{{count}}개 세션 선택됨"
       },
@@ -206,9 +218,20 @@ export const koKR = {
         subtitle: "{{count}}개 격리, {{restorable}}개 복원 가능",
         empty: "격리된 세션이 없습니다.",
         restore: "복원",
+        restoreTitle: "검증된 백업에서 이 격리 세션을 복원합니다.",
+        restoredAction: "복원됨",
+        blockedAction: "차단됨",
+        unavailableAction: "사용 불가",
         restoreBlocked: "이 격리 항목은 복원할 수 없습니다.",
         parent: "부모 {{id}}",
         evidence: "{{files}} files / {{db}} DB steps",
+        reason: {
+          restored: "이미 복원됨",
+          conflict: "로컬 충돌",
+          missingBackup: "백업 없음",
+          invalid: "Journal 무효",
+          blocked: "차단됨"
+        },
         status: {
           restorable: "복원 가능",
           restored: "복원됨",

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import type { AgentSession, IndexRecord, Relation, Transcript } from "@agentscope/shared";
+import type { AgentSession, AgentSessionKind, Evidence, IndexRecord, Relation, Transcript } from "@agentscope/shared";
 import { analyzeTranscriptActivity } from "./activity.js";
 import { codexHome, normalizeWindowsPath } from "./paths.js";
 import { iterateJsonl } from "./jsonl.js";
@@ -70,6 +70,7 @@ export function loadCodexIndex(home?: string): {
       ];
       const metadata = safeCodexThreadMetadata(row);
       const mergedMetadata = compactMetadata({ ...metadata, ...(logMetadata.get(sessionId) ?? {}) });
+      const kindEvidence = codexSessionKindEvidence(metadata);
       sessions.push({
         agent: "codex",
         sessionId,
@@ -77,12 +78,14 @@ export function loadCodexIndex(home?: string): {
         transcriptPath: rolloutPath,
         indexSource: "codex.sqlite.threads",
         childSessionIds: [],
+        sessionKind: kindEvidence.kind,
+        sessionKindEvidence: kindEvidence.evidence,
         confidence: "indexed",
         title: stringValue(row.title),
         startedAt: stringValue(row.created_at) ?? startedAt,
         updatedAt: stringValue(row.updated_at),
         indexMetadata: mergedMetadata,
-        evidence
+        evidence: appendEvidenceUnique(evidence, kindEvidence.evidence)
       });
       records.push({
         agent: "codex",
@@ -114,7 +117,7 @@ export function loadCodexIndex(home?: string): {
         });
       }
     }
-    const relations = mergeRelations([...loadSpawnEdges(db, evidencePath), ...sourceRelations]);
+    const relations = classifyRelationsWithSessions(mergeRelations([...loadSpawnEdges(db, evidencePath), ...sourceRelations]), sessions);
     applyRelationsToSessions(sessions, relations);
     return { sessions, records, relations };
   } finally {
@@ -155,6 +158,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
         field: "filename,cwd,jsonl"
       }
     ];
+    const kindEvidence = codexSessionKindEvidence(metadata);
     transcripts.push({ agent: "codex", sessionId, path: filePath, cwd, updatedAt, activity, evidence });
     sessions.push({
       agent: "codex",
@@ -163,13 +167,15 @@ export async function scanCodexRollouts(home?: string): Promise<{
       transcriptPath: filePath,
       indexSource: "codex.sessions.rollout",
       childSessionIds: [],
+      sessionKind: kindEvidence.kind,
+      sessionKindEvidence: kindEvidence.evidence,
       confidence: "indexed",
       title: stringValue(metadata.title),
       startedAt,
       updatedAt,
       indexMetadata: compactMetadata({ ...metadata, activity_line_count: activity.lineCount }),
       activity,
-      evidence
+      evidence: appendEvidenceUnique(evidence, kindEvidence.evidence)
     });
     records.push({
       agent: "codex",
@@ -186,18 +192,21 @@ export async function scanCodexRollouts(home?: string): Promise<{
     const parentSessionId = stringValue(metadata.parent_thread_id) ?? stringValue(metadata.parent_id);
     if (parentSessionId && parentSessionId !== sessionId) {
       relations.push({
-        kind: "parent_child",
+        kind: kindEvidence.kind === "subagent" ? "subagent" : "parent_child",
         sourceId: parentSessionId,
         targetId: sessionId,
         confidence: "indexed",
-        evidence: [
-          {
-            source: "codex.sessions.rollout.parent",
-            detail: "Parent/child relation inferred from Codex rollout JSONL metadata.",
-            path: filePath,
-            field: "parent_thread_id,parent_id"
-          }
-        ]
+        evidence: appendEvidenceUnique(
+          [
+            {
+              source: "codex.sessions.rollout.parent",
+              detail: "Parent/child relation inferred from Codex rollout JSONL metadata.",
+              path: filePath,
+              field: "parent_thread_id,parent_id"
+            }
+          ],
+          kindEvidence.evidence
+        )
       });
     }
   }
@@ -416,6 +425,20 @@ function mergeRelations(relations: Relation[]): Relation[] {
   return [...merged.values()];
 }
 
+function classifyRelationsWithSessions(relations: Relation[], sessions: AgentSession[]): Relation[] {
+  const byId = new Map(sessions.map((session) => [session.sessionId, session]));
+  return relations.map((relation) => {
+    if (relation.kind !== "parent_child") return relation;
+    const target = byId.get(relation.targetId);
+    if (target?.sessionKind !== "subagent") return relation;
+    return {
+      ...relation,
+      kind: "subagent" as const,
+      evidence: appendEvidenceUnique(relation.evidence, target.sessionKindEvidence ?? [])
+    };
+  });
+}
+
 function bestConfidence(left: Relation["confidence"], right: Relation["confidence"]): Relation["confidence"] {
   const rank: Record<Relation["confidence"], number> = {
     unknown: 0,
@@ -461,15 +484,61 @@ function parentThreadFromObject(value: Record<string, unknown>, depth = 0): stri
 function applyRelationsToSessions(sessions: AgentSession[], relations: Relation[]): void {
   const byId = new Map(sessions.map((session) => [session.sessionId, session]));
   for (const relation of relations) {
-    if (relation.kind !== "parent_child") continue;
+    if (relation.kind !== "parent_child" && relation.kind !== "subagent") continue;
     const parent = byId.get(relation.sourceId);
     const child = byId.get(relation.targetId);
     if (parent && !parent.childSessionIds.includes(relation.targetId)) parent.childSessionIds.push(relation.targetId);
     if (child) {
       child.parentSessionId = relation.sourceId;
       child.evidence = appendEvidenceUnique(child.evidence, relation.evidence);
+      const nextKind = relation.kind === "subagent" ? "subagent" : child.sessionKind === "subagent" ? "subagent" : "child";
+      setSessionKind(child, nextKind, relation.evidence);
     }
   }
+}
+
+function codexSessionKindEvidence(metadata: Record<string, unknown>): {
+  kind: AgentSessionKind;
+  evidence: Evidence[];
+} {
+  const evidence: Evidence[] = [];
+  const agentNickname = stringValue(metadata.agent_nickname);
+  const agentRole = stringValue(metadata.agent_role);
+  const agentPath = stringValue(metadata.agent_path);
+  const threadSource = stringValue(metadata.thread_source) ?? stringValue(metadata.source);
+  if (agentNickname || agentRole || agentPath) {
+    evidence.push({
+      source: "codex.sqlite.threads.agent_metadata",
+      detail: "Codex thread has agent_nickname, agent_role, or agent_path metadata; AgentScope classifies it as a subagent.",
+      field: "agent_nickname,agent_role,agent_path"
+    });
+    return { kind: "subagent", evidence };
+  }
+  if (threadSource && /subagent|agent|spawn|child/i.test(threadSource)) {
+    evidence.push({
+      source: "codex.sqlite.threads.thread_source",
+      detail: "Codex thread source metadata suggests this is a spawned child or subagent thread.",
+      field: "thread_source,source"
+    });
+    return { kind: "subagent_candidate", evidence };
+  }
+  return { kind: "session", evidence };
+}
+
+function setSessionKind(session: AgentSession, kind: AgentSessionKind, evidence: Evidence[]): void {
+  const current = session.sessionKind ?? "session";
+  session.sessionKind = strongerSessionKind(current, kind);
+  session.sessionKindEvidence = appendEvidenceUnique(session.sessionKindEvidence ?? [], evidence);
+}
+
+function strongerSessionKind(left: AgentSessionKind, right: AgentSessionKind): AgentSessionKind {
+  const rank: Record<AgentSessionKind, number> = {
+    session: 0,
+    child: 1,
+    subagent_candidate: 2,
+    subagent: 3
+  };
+  return rank[left] >= rank[right] ? left : right;
 }
 
 function collectMetadata(value: Record<string, unknown>, metadata: Record<string, unknown>): void {

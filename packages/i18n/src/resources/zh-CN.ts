@@ -194,6 +194,18 @@ export const zhCN = {
       groupCount_other: "{{count}} 个会话",
       children_one: "{{count}} 个子会话",
       children_other: "{{count}} 个子会话",
+      kind: {
+        child: "子级",
+        subagent: "子代理",
+        subagentCandidate: "子代理候选"
+      },
+      kindFilter: {
+        label: "类型",
+        all: "全部",
+        root: "根会话",
+        child: "子级",
+        subagent: "子代理"
+      },
       context: {
         selectedCount: "已选择 {{count}} 个会话"
       },
@@ -206,9 +218,20 @@ export const zhCN = {
         subtitle: "{{count}} 个隔离项，{{restorable}} 个可恢复",
         empty: "没有隔离会话。",
         restore: "恢复",
+        restoreTitle: "从已验证备份恢复这个隔离会话。",
+        restoredAction: "已恢复",
+        blockedAction: "已阻止",
+        unavailableAction: "不可用",
         restoreBlocked: "这个隔离项当前不可恢复。",
         parent: "父级 {{id}}",
         evidence: "{{files}} 个文件 / {{db}} 个 DB 步骤",
+        reason: {
+          restored: "已经恢复",
+          conflict: "本机冲突",
+          missingBackup: "缺少备份",
+          invalid: "Journal 无效",
+          blocked: "已阻止"
+        },
         status: {
           restorable: "可恢复",
           restored: "已恢复",

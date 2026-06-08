@@ -208,6 +208,18 @@ export const enUS = {
       groupCount_other: "{{count}} sessions",
       children_one: "{{count}} child",
       children_other: "{{count}} children",
+      kind: {
+        child: "child",
+        subagent: "subagent",
+        subagentCandidate: "subagent candidate"
+      },
+      kindFilter: {
+        label: "Type",
+        all: "All",
+        root: "Root",
+        child: "Child",
+        subagent: "Subagent"
+      },
       context: {
         selectedCount: "{{count}} sessions selected"
       },
@@ -220,9 +232,20 @@ export const enUS = {
         subtitle: "{{count}} quarantined, {{restorable}} restorable",
         empty: "No quarantined sessions.",
         restore: "Restore",
+        restoreTitle: "Restore this quarantined session from its validated backup.",
+        restoredAction: "Restored",
+        blockedAction: "Blocked",
+        unavailableAction: "Unavailable",
         restoreBlocked: "This quarantine entry is not restorable.",
         parent: "Parent {{id}}",
         evidence: "{{files}} files / {{db}} DB steps",
+        reason: {
+          restored: "Already restored",
+          conflict: "Local conflict",
+          missingBackup: "Missing backup",
+          invalid: "Invalid journal",
+          blocked: "Blocked"
+        },
         status: {
           restorable: "restorable",
           restored: "restored",

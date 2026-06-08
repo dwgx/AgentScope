@@ -15,6 +15,8 @@ export type AgentProcessRole =
   | "agent_helper"
   | "unknown";
 
+export type AgentSessionKind = "session" | "child" | "subagent" | "subagent_candidate";
+
 export interface Evidence {
   source: string;
   detail: string;
@@ -111,6 +113,8 @@ export interface AgentSession {
   indexSource?: string | undefined;
   parentSessionId?: string | undefined;
   childSessionIds: string[];
+  sessionKind?: AgentSessionKind | undefined;
+  sessionKindEvidence?: Evidence[] | undefined;
   confidence: Confidence;
   title?: string | undefined;
   startedAt?: string | undefined;

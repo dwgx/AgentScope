@@ -195,6 +195,18 @@ export const jaJP = {
       groupCount_other: "{{count}} 件のセッション",
       children_one: "{{count}} 件の子セッション",
       children_other: "{{count}} 件の子セッション",
+      kind: {
+        child: "子",
+        subagent: "サブエージェント",
+        subagentCandidate: "サブエージェント候補"
+      },
+      kindFilter: {
+        label: "種類",
+        all: "すべて",
+        root: "ルート",
+        child: "子",
+        subagent: "サブエージェント"
+      },
       context: {
         selectedCount: "{{count}} セッションを選択中"
       },
@@ -207,9 +219,20 @@ export const jaJP = {
         subtitle: "{{count}} 件隔離、{{restorable}} 件復元可能",
         empty: "隔離されたセッションはありません。",
         restore: "復元",
+        restoreTitle: "検証済みバックアップからこの隔離セッションを復元します。",
+        restoredAction: "復元済み",
+        blockedAction: "ブロック",
+        unavailableAction: "不可",
         restoreBlocked: "この隔離項目は復元できません。",
         parent: "親 {{id}}",
         evidence: "{{files}} files / {{db}} DB steps",
+        reason: {
+          restored: "復元済み",
+          conflict: "ローカル競合",
+          missingBackup: "バックアップなし",
+          invalid: "Journal 無効",
+          blocked: "ブロック"
+        },
         status: {
           restorable: "復元可能",
           restored: "復元済み",

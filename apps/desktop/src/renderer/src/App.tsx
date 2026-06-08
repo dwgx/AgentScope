@@ -62,6 +62,7 @@ type SessionLaunchAction = "resume" | "fork";
 type ProcessSortMode = "time" | "memory" | "runtime" | "score" | "tree";
 type ProcessGroupMode = "task" | "role" | "agent" | "parent" | "cwd" | "none";
 type SessionGroupMode = "agent" | "cwd" | "parent" | "none";
+type SessionKindFilter = "all" | "root" | "child" | "subagent";
 type RelationKindFilter = "all" | Relation["kind"];
 type RelationConfidenceFilter = "all" | Relation["confidence"];
 type NoticePathRole =
@@ -1894,6 +1895,7 @@ function SessionList(props: {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
   const [groupMode, setGroupMode] = useState<SessionGroupMode>("none");
+  const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [selectedSessionKeys, setSelectedSessionKeys] = useState<Set<string>>(() => new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
@@ -1904,8 +1906,8 @@ function SessionList(props: {
     y: number;
   } | null>(null);
   const groups = useMemo(
-    () => groupSessions(props.sessions, groupMode),
-    [props.sessions, groupMode]
+    () => groupSessions(filterSessionsByKind(props.sessions, kindFilter), groupMode),
+    [props.sessions, kindFilter, groupMode]
   );
   const visibleSessions = useMemo(
     () =>
@@ -1991,6 +1993,14 @@ function SessionList(props: {
         onOpenPath={props.onOpenPath}
       />
       <div className="listToolbar">
+        <ToolbarControl label={t("views.sessions.kindFilter.label")}>
+          <MiniSegmentedControl
+            value={kindFilter}
+            values={["all", "root", "child", "subagent"]}
+            label={(value) => t(`views.sessions.kindFilter.${value}`)}
+            onChange={(value) => setKindFilter(value as SessionKindFilter)}
+          />
+        </ToolbarControl>
         <MiniSegmentedControl
           value={groupMode}
           values={["cwd", "parent", "agent", "none"]}
@@ -2123,7 +2133,12 @@ function RecycleBinPanel(props: {
                     <span>{t("views.sessions.recycle.evidence", { files: item.movedFiles, db: item.databaseDeletes })}</span>
                   </div>
                   <div className="recyclePath mono">{item.cwd || item.transcriptPath || item.quarantineDir}</div>
-                  {item.blockers[0] && <div className="recycleBlocker">{item.blockers[0]}</div>}
+                  {item.blockers[0] && (
+                    <div className="recycleBlocker">
+                      <strong>{t(restoreBlockerLabelKey(item))}</strong>
+                      <span>{item.blockers[0]}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="recycleActions">
                   <button className="iconButton tiny" type="button" title={t("common.action.openJournal")} onClick={() => props.onOpenPath(item.journalPath)}>
@@ -2135,10 +2150,11 @@ function RecycleBinPanel(props: {
                   <button
                     className="compactAction"
                     type="button"
+                    title={restoreActionTitle(item, t("views.sessions.recycle.restoreTitle"))}
                     disabled={!item.restorePossible}
                     onClick={() => props.onRestore(item)}
                   >
-                    {t("views.sessions.recycle.restore")}
+                    {t(restoreActionLabelKey(item))}
                   </button>
                 </div>
               </div>
@@ -2169,6 +2185,7 @@ function SessionRow(props: {
 }) {
   const { t } = useTranslation();
   const session = props.session;
+  const kindLabel = sessionKindLabel(session);
   const rowRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (!props.highlighted) return;
@@ -2194,6 +2211,7 @@ function SessionRow(props: {
         </div>
         <div className="rowMeta">
           <span className="mono">{short(session.sessionId)}</span>
+          {kindLabel && <span>{kindLabel}</span>}
           {session.pid !== undefined && <span>PID {session.pid}</span>}
           {session.childSessionIds.length > 0 && (
             <span>{t("views.sessions.children", { count: session.childSessionIds.length })}</span>
@@ -4712,6 +4730,13 @@ function groupSessions(
   return [...groups.values()];
 }
 
+function filterSessionsByKind(sessions: AgentSession[], filter: SessionKindFilter): AgentSession[] {
+  if (filter === "all") return sessions;
+  if (filter === "root") return sessions.filter((session) => !session.parentSessionId && session.sessionKind !== "subagent" && session.sessionKind !== "subagent_candidate");
+  if (filter === "child") return sessions.filter((session) => session.parentSessionId || session.sessionKind === "child");
+  return sessions.filter((session) => session.sessionKind === "subagent" || session.sessionKind === "subagent_candidate");
+}
+
 function sessionGroupKey(session: AgentSession, groupMode: SessionGroupMode): string {
   if (groupMode === "none") return "all";
   if (groupMode === "parent") return `parent:${session.parentSessionId ?? "root"}`;
@@ -4734,6 +4759,35 @@ function sessionGroupLabel(
   }
   if (groupMode === "agent") return session.agent;
   return session.cwd ?? i18n.t("views.sessions.noCwd");
+}
+
+function sessionKindLabel(session: AgentSession): string | undefined {
+  if (session.sessionKind === "subagent") return i18n.t("views.sessions.kind.subagent");
+  if (session.sessionKind === "subagent_candidate") return i18n.t("views.sessions.kind.subagentCandidate");
+  if (session.sessionKind === "child" || session.parentSessionId) return i18n.t("views.sessions.kind.child");
+  return undefined;
+}
+
+function restoreBlockerLabelKey(item: QuarantinedSession): string {
+  if (item.restoreStatus === "restored") return "views.sessions.recycle.reason.restored";
+  if (item.restoreStatus === "missing_backup") return "views.sessions.recycle.reason.missingBackup";
+  if (item.restoreStatus === "invalid") return "views.sessions.recycle.reason.invalid";
+  if (item.blockers.some((blocker) => /already exists|target already exists|conflict/i.test(blocker))) {
+    return "views.sessions.recycle.reason.conflict";
+  }
+  return "views.sessions.recycle.reason.blocked";
+}
+
+function restoreActionLabelKey(item: QuarantinedSession): string {
+  if (item.restoreStatus === "restored") return "views.sessions.recycle.restoredAction";
+  if (item.restoreStatus === "blocked") return "views.sessions.recycle.blockedAction";
+  if (item.restoreStatus === "missing_backup" || item.restoreStatus === "invalid") return "views.sessions.recycle.unavailableAction";
+  return "views.sessions.recycle.restore";
+}
+
+function restoreActionTitle(item: QuarantinedSession, restoreTitle: string): string {
+  if (item.restorePossible) return restoreTitle;
+  return item.blockers[0] ?? restoreTitle;
 }
 
 function compareProcesses(left: AgentProcess, right: AgentProcess, sortMode: ProcessSortMode): number {
