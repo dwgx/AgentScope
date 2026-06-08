@@ -378,6 +378,18 @@ describe("session operations", () => {
     await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/Unsafe backup relative path/);
   });
 
+  it("rejects normalized backup relative paths that contain traversal segments", async () => {
+    const home = tempHome();
+    const backupDir = makeBackupFixture(home, "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc");
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    const copiedFiles = manifest.copiedFiles as Array<Record<string, unknown>>;
+    copiedFiles[0]!.backupRelativePath = "nested\\..\\transcript.jsonl";
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/Unsafe backup relative path/);
+  });
+
   it("rejects import targets outside agent session stores", async () => {
     const home = tempHome();
     const backupDir = makeBackupFixture(home, "12121212-aaaa-4aaa-8aaa-121212121212");
@@ -432,7 +444,7 @@ describe("session operations", () => {
     const backupDir = makeBackupFixture(home, "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
     fs.writeFileSync(path.join(backupDir, "files", "transcript.jsonl"), "tampered\n");
 
-    await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/checksum mismatch/);
+    await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/checksum mismatch.*backupDir=/);
   });
 
   it("rejects non-AgentScope backup manifests", async () => {
@@ -541,6 +553,26 @@ describe("session operations", () => {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
     await expect(importSessionBackup(backup.backupDir, { home, outputRoot })).rejects.toThrow(/Unsupported Codex SQLite row bundle target|Unsafe Codex row bundle/);
+  });
+
+  it("rejects Codex SQLite row bundle paths with traversal segments", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-bundle-traversal-"));
+    const sessionId = "acacacac-1111-4aca-8aca-acacacacacac";
+    const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout);
+    const backup = await backupSession(sessionId, "codex", { home, outputRoot });
+    fs.rmSync(rollout);
+    recreateCodexEmptySchema(home);
+    const manifestPath = path.join(backup.backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { databaseBundles: Array<Record<string, unknown>> };
+    const threadsBundle = manifest.databaseBundles.find((bundle) => bundle.table === "threads")!;
+    threadsBundle.relativePath = "db\\..\\db\\state_5.sqlite-threads.json";
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backup.backupDir, { home, outputRoot })).rejects.toThrow(/Unsafe Codex row bundle relative path|Unsafe backup relative path/);
   });
 
   it("rejects Codex SQLite row bundles whose rows belong to another session", async () => {

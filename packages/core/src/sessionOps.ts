@@ -314,59 +314,63 @@ export async function importSessionBackup(
   backupDir: string,
   options: SessionOperationOptions = {}
 ): Promise<SessionImportResult> {
-  const planResult = await planSessionImport(backupDir, options);
-  const plan = planResult.plan;
-  if (plan.blockers.length) throw new Error(plan.blockers.join(" "));
-  const manifest = await readBackupManifest(backupDir);
-  const copiedFiles = manifestCopiedFiles(manifest);
-  if (!copiedFiles.length) throw new Error("Backup manifest has no copied files to import.");
-  await preflightImportFiles(manifest, backupDir, options.home);
-  preflightCodexDatabaseBundles(manifest, backupDir, options.home);
-  const importedFiles: SessionOperationFile[] = [];
-  const filesRoot = path.join(backupDir, "files");
-  await assertImportTargetsAbsent(copiedFiles);
-  if (plan.target) throw new Error("A session with this id already exists locally; delete or archive it before importing.");
   try {
-    for (const file of copiedFiles) {
-      const originalPath = typeof file.path === "string" ? file.path : undefined;
-      const backupRelativePath = typeof file.backupRelativePath === "string" ? file.backupRelativePath : undefined;
-      if (!originalPath || !backupRelativePath) continue;
-      const source = resolveSafeRelative(filesRoot, backupRelativePath);
-      if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
-      const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
-      const actualSha = await hashPath(source);
-      if (expectedSha && actualSha && expectedSha !== actualSha) {
-        throw new Error(`Backup checksum mismatch: ${source}`);
+    const planResult = await planSessionImport(backupDir, options);
+    const plan = planResult.plan;
+    if (plan.blockers.length) throw new Error(plan.blockers.join(" "));
+    const manifest = await readBackupManifest(backupDir);
+    const copiedFiles = manifestCopiedFiles(manifest);
+    if (!copiedFiles.length) throw new Error("Backup manifest has no copied files to import.");
+    await preflightImportFiles(manifest, backupDir, options.home);
+    preflightCodexDatabaseBundles(manifest, backupDir, options.home);
+    const importedFiles: SessionOperationFile[] = [];
+    const filesRoot = path.join(backupDir, "files");
+    await assertImportTargetsAbsent(copiedFiles);
+    if (plan.target) throw new Error("A session with this id already exists locally; delete or archive it before importing.");
+    try {
+      for (const file of copiedFiles) {
+        const originalPath = typeof file.path === "string" ? file.path : undefined;
+        const backupRelativePath = typeof file.backupRelativePath === "string" ? file.backupRelativePath : undefined;
+        if (!originalPath || !backupRelativePath) continue;
+        const source = resolveSafeRelative(filesRoot, backupRelativePath);
+        if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
+        const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
+        const actualSha = await hashPath(source);
+        if (expectedSha && actualSha && expectedSha !== actualSha) {
+          throw new Error(`Backup checksum mismatch: ${source}`);
+        }
+        validateBackupSourceTree(file, source);
+        await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
+        const stat = await fs.promises.stat(source);
+        if (stat.isDirectory()) {
+          await fs.promises.cp(source, originalPath, { recursive: true, force: false, errorOnExist: true });
+        } else {
+          await fs.promises.copyFile(source, originalPath);
+        }
+        importedFiles.push({
+          role: typeof file.role === "string" ? file.role : "backup_file",
+          path: originalPath,
+          exists: true,
+          bytes: stat.isDirectory() ? await directoryBytes(originalPath) : stat.size,
+          sha256: await hashPath(originalPath),
+          action: "copy",
+          evidence: [
+            {
+              source: "agentscope.backup.import",
+              detail: "File restored from AgentScope session backup manifest.",
+              path: source
+            }
+          ]
+        });
       }
-      validateBackupSourceTree(file, source);
-      await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
-      const stat = await fs.promises.stat(source);
-      if (stat.isDirectory()) {
-        await fs.promises.cp(source, originalPath, { recursive: true, force: false, errorOnExist: true });
-      } else {
-        await fs.promises.copyFile(source, originalPath);
-      }
-      importedFiles.push({
-        role: typeof file.role === "string" ? file.role : "backup_file",
-        path: originalPath,
-        exists: true,
-        bytes: stat.isDirectory() ? await directoryBytes(originalPath) : stat.size,
-        sha256: await hashPath(originalPath),
-        action: "copy",
-        evidence: [
-          {
-            source: "agentscope.backup.import",
-            detail: "File restored from AgentScope session backup manifest.",
-            path: source
-          }
-        ]
-      });
+      const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home) : [];
+      return { plan, backupDir, importedFiles, databaseChanges };
+    } catch (error) {
+      await removeImportedFiles(importedFiles).catch(() => undefined);
+      throw error;
     }
-    const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home) : [];
-    return { plan, backupDir, importedFiles, databaseChanges };
   } catch (error) {
-    await removeImportedFiles(importedFiles).catch(() => undefined);
-    throw error;
+    throw withImportOperationPaths(error, backupDir);
   }
 }
 
@@ -1297,6 +1301,13 @@ function withRestoreOperationPaths(
   const wrapped = new Error(
     `${message} backupDir=${backupDir} quarantineDir=${quarantineDir} journalPath=${journalPath} restoreJournalPath=${restoreJournalPath}`
   );
+  if (error instanceof Error && error.stack) wrapped.stack = error.stack;
+  return wrapped;
+}
+
+function withImportOperationPaths(error: unknown, backupDir: string): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const wrapped = new Error(`${message} backupDir=${backupDir}`);
   if (error instanceof Error && error.stack) wrapped.stack = error.stack;
   return wrapped;
 }
@@ -2303,6 +2314,7 @@ async function pruneEmptyParents(start: string, maxDepth: number): Promise<void>
 
 function resolveSafeRelative(root: string, relativePath: string): string {
   if (!relativePath || path.isAbsolute(relativePath)) throw new Error(`Unsafe backup relative path: ${relativePath}`);
+  if (relativePath.split(/[\\/]+/).some((part) => part === "..")) throw new Error(`Unsafe backup relative path: ${relativePath}`);
   const normalizedRelative = path.normalize(relativePath);
   if (normalizedRelative === ".." || normalizedRelative.startsWith(`..${path.sep}`) || normalizedRelative.includes(`${path.sep}..${path.sep}`)) {
     throw new Error(`Unsafe backup relative path: ${relativePath}`);
