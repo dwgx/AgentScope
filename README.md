@@ -38,8 +38,9 @@ and React/TypeScript renderer for the control surface.
   General, Appearance, Indexing, Runtime, and Diagnostics.
 - Supports explicit session backup, safe delete, and AgentScope backup import
   through the desktop UI. Delete writes a backup and quarantine journal first,
-  applies journaled row-level changes, then moves removable files to quarantine
-  and patches only known session references.
+  applies journaled row-level changes, then moves removable files to quarantine.
+  Claude global history/state references are inspect-only until reversible
+  patch/restore support exists.
 
 ## Commands
 

@@ -65,7 +65,7 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 - Codex SQLite writes must use a writable DB connection, busy timeout, and transaction.
 - Delete plan and execution must agree. If a table is marked `skip`, execution must not mutate it.
 - Import must accept only AgentScope backup manifests, reject path traversal, reject hash mismatch, and reject existing targets.
-- Import currently restores copied files only; it does not fully rebuild Codex SQLite rows. Document this limitation before extending.
+- Import restores copied files plus compatible Codex row-level bundles for selected tables. It still does not restore `logs_2.sqlite` log bodies and must reject schema drift instead of guessing.
 
 ## UI Rules
 
