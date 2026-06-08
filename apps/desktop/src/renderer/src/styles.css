@@ -1195,9 +1195,19 @@ input {
   overflow-wrap: anywhere;
 }
 
+.doctorFixHint {
+  display: block;
+  margin-top: 6px;
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .doctorActions {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
   gap: 6px;
   min-width: 0;
@@ -1557,6 +1567,16 @@ input {
   gap: 7px;
   min-width: 0;
   flex-wrap: wrap;
+}
+
+.settingActionHint {
+  flex-basis: 100%;
+  max-width: 280px;
+  color: color-mix(in srgb, var(--accent) 68%, var(--muted));
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .toggle {

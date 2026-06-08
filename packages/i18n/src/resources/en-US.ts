@@ -238,7 +238,17 @@ export const enUS = {
       emptyTitle: "Doctor has not run",
       emptyDetail: "Refresh to run local environment checks.",
       subtitle_one: "{{count}} environment check",
-      subtitle_other: "{{count}} environment checks"
+      subtitle_other: "{{count}} environment checks",
+      fix: {
+        nativeSqlite:
+          "Repair rebuilds AgentScope's packaged SQLite native module; this is an app runtime issue, not Codex data corruption.",
+        nativeCascade:
+          "This SQLite warning is blocked by native.better_sqlite3; fix the native module before editing Codex data.",
+        rebuild:
+          "Repair runs the fixed package rebuild path and reports the changed directories/files.",
+        revealPath: "Reveal the evidence path: {{path}}",
+        manual: "No automatic repair is registered; inspect the evidence path and keep data read-only."
+      }
     },
     loading: {
       title: "Reading local agent state",

@@ -225,7 +225,17 @@ export const jaJP = {
       emptyTitle: "Doctor は未実行です",
       emptyDetail: "更新してローカル環境チェックを実行してください。",
       subtitle_one: "{{count}} 件の環境チェック",
-      subtitle_other: "{{count}} 件の環境チェック"
+      subtitle_other: "{{count}} 件の環境チェック",
+      fix: {
+        nativeSqlite:
+          "修復は AgentScope のパッケージ済み SQLite ネイティブモジュールを再構築します。Codex データ破損ではなくアプリ実行環境の問題です。",
+        nativeCascade:
+          "この SQLite 警告は native.better_sqlite3 によってブロックされています。Codex データを触る前にネイティブモジュールを修復してください。",
+        rebuild:
+          "修復は固定されたパッケージ再構築手順を実行し、変更されたディレクトリとファイルを報告します。",
+        revealPath: "証拠パスを表示: {{path}}",
+        manual: "自動修復は登録されていません。証拠パスを確認し、データは読み取り専用のままにしてください。"
+      }
     },
     loading: {
       title: "ローカル Agent 状態を読み込み中",

@@ -421,7 +421,12 @@ function App() {
     const result = await window.agentscope.openPath(targetPath);
     showNotice(
       result
-        ? { message: t("toast.openFailed", { message: result }) }
+        ? {
+            message: t("toast.openFailed", { message: result }),
+            items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }],
+            actions: noticePathActions(targetPath),
+            ttlMs: 30000
+          }
         : {
             message: t("toast.pathOpened"),
             items: [{ label: t("common.path.path"), value: targetPath, path: targetPath }],
@@ -436,7 +441,9 @@ function App() {
     if (result) {
       showNotice({
         message: t("toast.operationFailed", { message: result }),
-        items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }]
+        items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }],
+        actions: noticePathActions(targetPath),
+        ttlMs: 30000
       });
       return;
     }
@@ -2208,6 +2215,8 @@ function DoctorPanel(props: {
   onRevealPath: (targetPath: string) => void;
 }) {
   const { t } = useTranslation();
+  const translateDiagnosticHelp = (key: string, options?: Record<string, unknown>) =>
+    String(options ? t(key, options) : t(key));
   if (props.loading) return <LoadingState />;
   if (!props.checks.length) {
     return (
@@ -2231,6 +2240,11 @@ function DoctorPanel(props: {
             <div>
               <strong>{check.name}</strong>
               <span>{check.detail}</span>
+              {check.status === "warn" && (
+                <em className="doctorFixHint">
+                  {diagnosticHelp(check.name, check.detail, translateDiagnosticHelp)}
+                </em>
+              )}
             </div>
             <div className="doctorActions">
               {check.status === "warn" && repairableDiagnostic(check.name) && (
@@ -2270,6 +2284,8 @@ function SettingsPanel(props: {
   const { t } = useTranslation();
   const [section, setSection] = useState<SettingsSection>("general");
   const warnings = props.doctor.filter((item) => item.status === "warn").length;
+  const translateDiagnosticHelp = (key: string, options?: Record<string, unknown>) =>
+    String(options ? t(key, options) : t(key));
   return (
     <>
       <PaneHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
@@ -2575,6 +2591,7 @@ function SettingsPanel(props: {
                   label={t("settings.fonts.unified")}
                   detail={t("settings.fonts.unifiedDetail")}
                   value={props.settings.unifiedFont}
+                  defaultValue={defaultSettings.unifiedFont}
                   fonts={props.installedFonts}
                   onChange={(unifiedFont) =>
                     props.updateSettings({ unifiedFont, fontPreset: "custom" })
@@ -2584,6 +2601,7 @@ function SettingsPanel(props: {
                   label={t("settings.fonts.latin")}
                   detail={t("settings.fonts.latinDetail")}
                   value={props.settings.latinFont}
+                  defaultValue={defaultSettings.latinFont}
                   fonts={props.installedFonts}
                   onChange={(latinFont) => props.updateSettings({ latinFont, fontPreset: "custom" })}
                 />
@@ -2591,6 +2609,7 @@ function SettingsPanel(props: {
                   label={t("settings.fonts.chinese")}
                   detail={t("settings.fonts.chineseDetail")}
                   value={props.settings.chineseFont}
+                  defaultValue={defaultSettings.chineseFont}
                   fonts={props.installedFonts}
                   onChange={(chineseFont) =>
                     props.updateSettings({ chineseFont, fontPreset: "custom" })
@@ -2600,6 +2619,7 @@ function SettingsPanel(props: {
                   label={t("settings.fonts.japanese")}
                   detail={t("settings.fonts.japaneseDetail")}
                   value={props.settings.japaneseFont}
+                  defaultValue={defaultSettings.japaneseFont}
                   fonts={props.installedFonts}
                   onChange={(japaneseFont) =>
                     props.updateSettings({ japaneseFont, fontPreset: "custom" })
@@ -2609,6 +2629,7 @@ function SettingsPanel(props: {
                   label={t("settings.fonts.korean")}
                   detail={t("settings.fonts.koreanDetail")}
                   value={props.settings.koreanFont}
+                  defaultValue={defaultSettings.koreanFont}
                   fonts={props.installedFonts}
                   onChange={(koreanFont) =>
                     props.updateSettings({ koreanFont, fontPreset: "custom" })
@@ -2618,6 +2639,7 @@ function SettingsPanel(props: {
                   label={t("settings.codeFont.label")}
                   detail={t("settings.codeFont.detail")}
                   value={props.settings.codeFont}
+                  defaultValue={defaultSettings.codeFont}
                   fonts={props.installedFonts}
                   onChange={(codeFont) => props.updateSettings({ codeFont, fontPreset: "custom" })}
                 />
@@ -2794,6 +2816,11 @@ function SettingsPanel(props: {
               {props.doctor.map((check) => (
                 <SettingRow key={check.name} label={check.name} detail={check.detail}>
                   <div className="settingInlineActions">
+                    {check.status === "warn" && (
+                      <span className="settingActionHint">
+                        {diagnosticHelp(check.name, check.detail, translateDiagnosticHelp)}
+                      </span>
+                    )}
                     {check.status === "warn" && repairableDiagnostic(check.name) && (
                       <ActionButton label={t("common.action.repair")} onClick={() => props.onRepairDiagnostic(check.name)} />
                     )}
@@ -4670,6 +4697,26 @@ function repairableDiagnostic(name: string): boolean {
     "codex.goals.tables",
     "codex.memories.tables"
   ].includes(name);
+}
+
+function diagnosticHelp(
+  name: string,
+  detail: string,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  if (name === "native.better_sqlite3") return t("views.doctor.fix.nativeSqlite");
+  if (isNativeSqliteCascade(name, detail)) return t("views.doctor.fix.nativeCascade");
+  const pathValue = firstPathInText(detail);
+  if (pathValue) return t("views.doctor.fix.revealPath", { path: pathValue });
+  if (repairableDiagnostic(name)) return t("views.doctor.fix.rebuild");
+  return t("views.doctor.fix.manual");
+}
+
+function isNativeSqliteCascade(name: string, detail: string): boolean {
+  return (
+    ["codex.sqlite.readable", "codex.logs.tables", "codex.goals.tables", "codex.memories.tables"].includes(name) &&
+    detail.includes("native.better_sqlite3")
+  );
 }
 
 function formatDuration(startTime: string, locale?: string): string {

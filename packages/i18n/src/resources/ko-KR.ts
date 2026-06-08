@@ -224,7 +224,17 @@ export const koKR = {
       emptyTitle: "Doctor가 아직 실행되지 않음",
       emptyDetail: "새로 고침하여 로컬 환경 검사를 실행하세요.",
       subtitle_one: "{{count}}개의 환경 검사",
-      subtitle_other: "{{count}}개의 환경 검사"
+      subtitle_other: "{{count}}개의 환경 검사",
+      fix: {
+        nativeSqlite:
+          "복구는 AgentScope 패키지의 SQLite 네이티브 모듈을 다시 빌드합니다. Codex 데이터 손상이 아니라 앱 런타임 문제입니다.",
+        nativeCascade:
+          "이 SQLite 경고는 native.better_sqlite3 때문에 차단되었습니다. Codex 데이터를 수정하기 전에 네이티브 모듈을 먼저 복구하세요.",
+        rebuild:
+          "복구는 고정된 패키지 재빌드 경로를 실행하고 변경된 디렉터리와 파일을 보고합니다.",
+        revealPath: "증거 경로 표시: {{path}}",
+        manual: "등록된 자동 복구가 없습니다. 증거 경로를 확인하고 데이터는 읽기 전용으로 유지하세요."
+      }
     },
     loading: {
       title: "로컬 Agent 상태 읽는 중",

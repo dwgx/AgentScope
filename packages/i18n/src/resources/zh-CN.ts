@@ -224,7 +224,16 @@ export const zhCN = {
       emptyTitle: "诊断尚未运行",
       emptyDetail: "刷新以运行本地环境检查。",
       subtitle_one: "{{count}} 项环境检查",
-      subtitle_other: "{{count}} 项环境检查"
+      subtitle_other: "{{count}} 项环境检查",
+      fix: {
+        nativeSqlite:
+          "修复会重新构建 AgentScope 打包版 SQLite 原生模块；这是应用运行时问题，不是 Codex 数据损坏。",
+        nativeCascade:
+          "这条 SQLite 警告被 native.better_sqlite3 阻断；先修原生模块，再考虑 Codex 数据。",
+        rebuild: "修复会运行固定的打包重建流程，并报告动过的目录和文件。",
+        revealPath: "定位证据路径：{{path}}",
+        manual: "没有注册自动修复；请检查证据路径，并保持数据只读。"
+      }
     },
     loading: {
       title: "正在读取本机 Agent 状态",
