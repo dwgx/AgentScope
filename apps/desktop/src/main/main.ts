@@ -139,18 +139,37 @@ ipcMain.handle("session:launch", async (_event, agent: string, sessionId: string
   return launchSessionCommand(agent, sessionId, action, cwd);
 });
 ipcMain.handle("session:import", async (_event, backupDir: string) => {
-  if (!(await isAllowedAgentScopeOperationPath(backupDir))) {
+  if (await isAllowedAgentScopeQuarantinePath(backupDir)) {
+    const core = await loadCore();
+    return core.restoreQuarantinedSession(backupDir);
+  }
+  if (!(await isAllowedAgentScopeBackupPath(backupDir))) {
     throw new Error("Import is limited to AgentScope backup directories.");
   }
   const core = await loadCore();
   return core.importSessionBackup(backupDir);
+});
+ipcMain.handle("session:listQuarantine", async () => {
+  const core = await loadCore();
+  return core.listQuarantinedSessions();
+});
+ipcMain.handle("session:restore", async (_event, quarantineDirOrJournalPath: string) => {
+  if (!(await isAllowedAgentScopeQuarantinePath(quarantineDirOrJournalPath))) {
+    throw new Error("Restore is limited to AgentScope quarantine directories.");
+  }
+  const core = await loadCore();
+  return core.restoreQuarantinedSession(quarantineDirOrJournalPath);
 });
 ipcMain.handle("session:deletePlan", async (_event, agent: string, sessionId: string) => {
   const core = await loadCore();
   return core.writeSessionDeletePlan(sessionId, asAgent(agent));
 });
 ipcMain.handle("session:importPlan", async (_event, backupDir: string) => {
-  if (!(await isAllowedAgentScopeOperationPath(backupDir))) {
+  if (await isAllowedAgentScopeQuarantinePath(backupDir)) {
+    const core = await loadCore();
+    return core.planSessionRestore(backupDir);
+  }
+  if (!(await isAllowedAgentScopeBackupPath(backupDir))) {
     throw new Error("Import planning is limited to AgentScope backup directories.");
   }
   const core = await loadCore();
@@ -166,23 +185,32 @@ ipcMain.handle("session:chooseImportPlan", async () => {
   };
   const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
   if (result.canceled || !result.filePaths[0]) return { canceled: true };
-  if (!(await isAllowedAgentScopeOperationPath(result.filePaths[0]))) {
+  if (await isAllowedAgentScopeQuarantinePath(result.filePaths[0])) {
+    const core = await loadCore();
+    return core.planSessionRestore(result.filePaths[0]);
+  }
+  if (!(await isAllowedAgentScopeBackupPath(result.filePaths[0]))) {
     throw new Error("Import planning is limited to AgentScope backup directories.");
   }
   const core = await loadCore();
   return core.planSessionImport(result.filePaths[0]);
 });
 ipcMain.handle("session:chooseImport", async () => {
-  const backupRoot = path.join(os.homedir(), ".agentscope", "backups");
+  const agentScopeRoot = path.join(os.homedir(), ".agentscope");
+  const backupRoot = path.join(agentScopeRoot, "backups");
   await fs.promises.mkdir(backupRoot, { recursive: true });
   const options = {
-    title: "Choose AgentScope backup directory",
-    defaultPath: backupRoot,
+    title: "Choose AgentScope backup or quarantine directory",
+    defaultPath: agentScopeRoot,
     properties: ["openDirectory"] as Array<"openDirectory">
   };
   const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
   if (result.canceled || !result.filePaths[0]) return { canceled: true };
-  if (!(await isAllowedAgentScopeOperationPath(result.filePaths[0]))) {
+  if (await isAllowedAgentScopeQuarantinePath(result.filePaths[0])) {
+    const core = await loadCore();
+    return core.restoreQuarantinedSession(result.filePaths[0]);
+  }
+  if (!(await isAllowedAgentScopeBackupPath(result.filePaths[0]))) {
     throw new Error("Import is limited to AgentScope backup directories.");
   }
   const core = await loadCore();
@@ -408,12 +436,20 @@ function normalizeFsPath(candidate: string | undefined): string | undefined {
   }
 }
 
-async function isAllowedAgentScopeOperationPath(targetPath: string): Promise<boolean> {
+async function isAllowedAgentScopeBackupPath(targetPath: string): Promise<boolean> {
+  return isAllowedAgentScopeOperationPath(targetPath, "backups");
+}
+
+async function isAllowedAgentScopeQuarantinePath(targetPath: string): Promise<boolean> {
+  return isAllowedAgentScopeOperationPath(targetPath, "quarantine");
+}
+
+async function isAllowedAgentScopeOperationPath(targetPath: string, child: "backups" | "quarantine"): Promise<boolean> {
   const normalizedTarget = normalizeFsPath(targetPath);
   if (!normalizedTarget) return false;
   const operationRoots = [
-    normalizeFsPath(path.join(os.homedir(), ".agentscope", "backups")),
-    normalizeFsPath(path.join(app.getPath("userData"), "backups"))
+    normalizeFsPath(path.join(os.homedir(), ".agentscope", child)),
+    normalizeFsPath(path.join(app.getPath("userData"), child))
   ].filter((item): item is string => !!item);
   return operationRoots.some((root) => normalizedTarget === root || normalizedTarget.startsWith(`${root}${path.sep}`));
 }

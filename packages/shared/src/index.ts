@@ -163,7 +163,7 @@ export interface ScopeSnapshot {
   diagnostics?: Diagnostic[];
 }
 
-export type SessionOperation = "backup" | "delete" | "import";
+export type SessionOperation = "backup" | "delete" | "import" | "restore";
 
 export type SessionOperationMode = "dry-run" | "execute";
 
@@ -220,6 +220,7 @@ export interface SessionOperationPlanResult {
   backupDir?: string | undefined;
   quarantineDir?: string | undefined;
   journalPath?: string | undefined;
+  restoreJournalPath?: string | undefined;
 }
 
 export interface SessionDeleteResult {
@@ -235,6 +236,39 @@ export interface SessionDeleteResult {
 export interface SessionImportResult {
   plan: SessionOperationPlan;
   backupDir: string;
+  importedFiles: SessionOperationFile[];
+  databaseChanges?: SessionOperationDatabaseChange[] | undefined;
+}
+
+export interface QuarantinedSession {
+  schemaVersion: 1;
+  agent: AgentKind;
+  sessionId: string;
+  deletedAt: string;
+  updatedAt?: string | undefined;
+  backupDir: string;
+  quarantineDir: string;
+  journalPath: string;
+  restoreJournalPath: string;
+  title?: string | undefined;
+  cwd?: string | undefined;
+  transcriptPath?: string | undefined;
+  parentSessionId?: string | undefined;
+  restoreStatus: "restorable" | "restored" | "blocked" | "missing_backup" | "invalid";
+  restorePossible: boolean;
+  movedFiles: number;
+  databaseDeletes: number;
+  warnings: string[];
+  blockers: string[];
+  evidence: Evidence[];
+}
+
+export interface SessionRestoreResult {
+  plan: SessionOperationPlan;
+  backupDir: string;
+  quarantineDir: string;
+  journalPath: string;
+  restoreJournalPath: string;
   importedFiles: SessionOperationFile[];
   databaseChanges?: SessionOperationDatabaseChange[] | undefined;
 }

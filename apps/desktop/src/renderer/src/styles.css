@@ -482,6 +482,12 @@ input {
     transform 160ms ease;
 }
 
+.iconButton.tiny {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
 .iconButton:hover,
 .navButton:hover,
 .refreshButton:hover,
@@ -562,6 +568,13 @@ input {
   align-items: center;
 }
 
+.paneHeaderActions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .paneHeader h2 {
   font-size: 15px;
   font-weight: 650;
@@ -591,6 +604,141 @@ input {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, transparent), transparent),
     color-mix(in srgb, var(--panel) 88%, transparent);
+}
+
+.recyclePanel {
+  flex: none;
+  display: grid;
+  gap: 7px;
+  border-bottom: 1px solid var(--border-soft);
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+}
+
+.recycleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recycleHeader > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.recycleHeader strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.recycleHeader span,
+.recycleEmpty {
+  color: var(--muted2);
+  font-size: 11px;
+}
+
+.recycleRows {
+  display: grid;
+  gap: 5px;
+}
+
+.recycleRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) minmax(118px, auto);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 7px 8px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+
+.recycleRow.blocked {
+  opacity: 0.78;
+}
+
+.recycleMain {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.recycleTop,
+.recycleMeta,
+.recycleActions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.recycleTop strong,
+.recyclePath,
+.recycleBlocker {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recycleTop strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.recycleMeta {
+  color: var(--muted2);
+  font-size: 11px;
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.recyclePath {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.recycleBlocker {
+  color: color-mix(in srgb, var(--warn) 86%, var(--text));
+  font-size: 11px;
+}
+
+.recycleActions {
+  flex: none;
+  justify-content: flex-end;
+}
+
+.statusPill {
+  flex: none;
+  height: 19px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 7px;
+  color: var(--muted);
+  background: var(--surface2);
+  font-size: 10px;
+  font-weight: 740;
+}
+
+.statusPill.ok {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  color: color-mix(in srgb, var(--ok) 84%, var(--text));
+}
+
+.statusPill.warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+  color: color-mix(in srgb, var(--warn) 84%, var(--text));
+}
+
+.statusPill.info {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  color: color-mix(in srgb, var(--accent) 84%, var(--text));
 }
 
 .toolbarControl {
@@ -864,6 +1012,20 @@ input {
   font-size: 11px;
   font-weight: 650;
   text-transform: capitalize;
+}
+
+.agentTile.compact {
+  width: 40px;
+  height: 40px;
+  grid-template-rows: 22px 11px;
+  gap: 1px;
+  border-radius: 7px;
+  font-size: 9px;
+}
+
+.agentTile.compact .agentBrandIcon {
+  width: 19px;
+  height: 19px;
 }
 
 .agentGlyph {
@@ -2173,6 +2335,27 @@ input {
   filter: grayscale(0.4);
 }
 
+.compactAction {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface2);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.compactAction:hover {
+  background: var(--hover);
+}
+
+.compactAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
 .paletteOverlay {
   position: fixed;
   inset: 0;
@@ -2510,18 +2693,14 @@ input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 28px;
   align-items: start;
-  gap: 12px;
+  gap: 10px;
   transform: translateX(-50%);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px 10px 14px;
+  border-radius: 8px;
+  padding: 10px 12px;
   color: var(--text);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface2) 70%, transparent), transparent),
-    color-mix(in srgb, var(--panel) 96%, #000000);
-  box-shadow:
-    0 18px 58px rgba(0, 0, 0, 0.44),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--panel) 96%, #000000);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.36);
   animation: toastIn 180ms ease both;
   overflow-wrap: anywhere;
 }
@@ -2545,21 +2724,22 @@ input {
 .notificationItems {
   min-width: 0;
   display: grid;
-  gap: 5px;
+  gap: 3px;
 }
 
 .notificationItem {
   min-width: 0;
   width: 100%;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(82px, auto) minmax(0, 1fr);
   align-items: baseline;
-  gap: 7px;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  gap: 9px;
+  border: 0;
+  border-left: 2px solid var(--border);
+  border-radius: 4px;
   color: var(--text);
-  background: color-mix(in srgb, var(--surface2) 58%, transparent);
-  padding: 5px 7px;
+  background: transparent;
+  padding: 3px 7px;
   text-align: left;
 }
 
@@ -2572,8 +2752,8 @@ input {
 }
 
 .notificationItem:not(:disabled):hover {
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
-  background: color-mix(in srgb, var(--accent) 13%, var(--surface2));
+  border-left-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .notificationItem span {
@@ -2587,7 +2767,7 @@ input {
 .notificationItem em {
   min-width: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 11.5px;
   font-style: normal;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2603,8 +2783,16 @@ input {
   color: color-mix(in srgb, var(--ok) 82%, var(--text));
 }
 
+.notificationItem.ok {
+  border-left-color: color-mix(in srgb, var(--ok) 56%, var(--border));
+}
+
 .notificationItem.warn em {
   color: color-mix(in srgb, var(--warn) 84%, var(--text));
+}
+
+.notificationItem.warn {
+  border-left-color: color-mix(in srgb, var(--warn) 56%, var(--border));
 }
 
 .notificationMore {
@@ -2625,6 +2813,7 @@ input {
   align-items: center;
   gap: 7px;
   padding-top: 2px;
+  flex-wrap: wrap;
 }
 
 .notificationActions button,

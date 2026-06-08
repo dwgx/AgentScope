@@ -201,6 +201,22 @@ export const zhCN = {
       rootNoParent: "Root / no parent",
       parentGroup: "父级：{{title}}",
       noCwd: "没有 cwd",
+      recycle: {
+        title: "回收站",
+        subtitle: "{{count}} 个隔离项，{{restorable}} 个可恢复",
+        empty: "没有隔离会话。",
+        restore: "恢复",
+        restoreBlocked: "这个隔离项当前不可恢复。",
+        parent: "父级 {{id}}",
+        evidence: "{{files}} 个文件 / {{db}} 个 DB 步骤",
+        status: {
+          restorable: "可恢复",
+          restored: "已恢复",
+          blocked: "已阻止",
+          missing_backup: "缺少备份",
+          invalid: "无效"
+        }
+      },
       group: {
         cwd: "cwd",
         parent: "父级",
@@ -543,6 +559,7 @@ export const zhCN = {
     sessionsDeleted: "已将 {{count}}/{{total}} 个会话移入隔离区",
     noSessionsDeleted: "没有会话被删除",
     sessionImported: "会话已从备份导入",
+    sessionRestored: "会话已从隔离区恢复",
     sessionLaunchStarted: "{{agent}} {{action}} 已启动",
     sessionLaunchUnsupported: "此会话不能通过 Codex/Claude 控制启动",
     deletePlanWritten: "删除计划已写入：{{path}}",

@@ -202,6 +202,22 @@ export const jaJP = {
       rootNoParent: "Root / no parent",
       parentGroup: "Parent: {{title}}",
       noCwd: "No cwd",
+      recycle: {
+        title: "ごみ箱",
+        subtitle: "{{count}} 件隔離、{{restorable}} 件復元可能",
+        empty: "隔離されたセッションはありません。",
+        restore: "復元",
+        restoreBlocked: "この隔離項目は復元できません。",
+        parent: "親 {{id}}",
+        evidence: "{{files}} files / {{db}} DB steps",
+        status: {
+          restorable: "復元可能",
+          restored: "復元済み",
+          blocked: "ブロック",
+          missing_backup: "バックアップなし",
+          invalid: "無効"
+        }
+      },
       group: {
         cwd: "cwd",
         parent: "親",
@@ -552,6 +568,7 @@ export const jaJP = {
     sessionsDeleted: "{{count}}/{{total}} セッションを隔離へ移動しました",
     noSessionsDeleted: "削除されたセッションはありません",
     sessionImported: "バックアップからセッションをインポートしました",
+    sessionRestored: "隔離からセッションを復元しました",
     sessionLaunchStarted: "{{agent}} {{action}} を開始しました",
     sessionLaunchUnsupported: "このセッションは Codex/Claude コントロールで起動できません",
     deletePlanWritten: "削除計画を書き出しました: {{path}}",

@@ -201,6 +201,22 @@ export const koKR = {
       rootNoParent: "Root / no parent",
       parentGroup: "Parent: {{title}}",
       noCwd: "No cwd",
+      recycle: {
+        title: "휴지통",
+        subtitle: "{{count}}개 격리, {{restorable}}개 복원 가능",
+        empty: "격리된 세션이 없습니다.",
+        restore: "복원",
+        restoreBlocked: "이 격리 항목은 복원할 수 없습니다.",
+        parent: "부모 {{id}}",
+        evidence: "{{files}} files / {{db}} DB steps",
+        status: {
+          restorable: "복원 가능",
+          restored: "복원됨",
+          blocked: "차단됨",
+          missing_backup: "백업 없음",
+          invalid: "무효"
+        }
+      },
       group: {
         cwd: "cwd",
         parent: "부모",
@@ -549,6 +565,7 @@ export const koKR = {
     sessionsDeleted: "{{count}}/{{total}}개 세션이 격리 폴더로 이동됨",
     noSessionsDeleted: "삭제된 세션 없음",
     sessionImported: "백업에서 세션을 가져왔습니다",
+    sessionRestored: "격리에서 세션을 복원했습니다",
     sessionLaunchStarted: "{{agent}} {{action}} 시작됨",
     sessionLaunchUnsupported: "이 세션은 Codex/Claude 컨트롤로 시작할 수 없습니다",
     deletePlanWritten: "삭제 계획 작성됨: {{path}}",

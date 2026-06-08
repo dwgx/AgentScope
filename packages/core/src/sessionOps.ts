@@ -7,13 +7,15 @@ import type {
   AgentKind,
   AgentSession,
   Evidence,
+  QuarantinedSession,
   SessionBackupResult,
   SessionDeleteResult,
   SessionImportResult,
   SessionOperationDatabaseChange,
   SessionOperationFile,
   SessionOperationPlan,
-  SessionOperationPlanResult
+  SessionOperationPlanResult,
+  SessionRestoreResult
 } from "@agentscope/shared";
 import { tableColumns } from "./codex.js";
 import { buildSnapshot, findSession } from "./scope.js";
@@ -51,7 +53,7 @@ interface DeleteJournalStep {
   evidence?: Evidence[] | undefined;
 }
 
-interface DeleteJournal {
+interface DeleteJournal extends Record<string, unknown> {
   schemaVersion: 1;
   kind: "AgentScope Session Delete Journal";
   createdAt: string;
@@ -62,6 +64,23 @@ interface DeleteJournal {
   quarantineDir: string;
   journalPath: string;
   steps: DeleteJournalStep[];
+}
+
+interface RestoreJournal {
+  schemaVersion: 1;
+  kind: "AgentScope Session Restore Journal";
+  createdAt: string;
+  updatedAt: string;
+  agent: AgentKind;
+  sessionId: string;
+  backupDir: string;
+  quarantineDir: string;
+  journalPath: string;
+  restoreJournalPath: string;
+  status: "succeeded" | "failed";
+  importedFiles: SessionOperationFile[];
+  databaseChanges: SessionOperationDatabaseChange[];
+  error?: string | undefined;
 }
 
 interface CodexDatabaseBundleManifest {
@@ -88,6 +107,7 @@ interface BackupManifest extends Record<string, unknown> {
 
 const backupKind = "AgentScope Session Backup";
 const deleteJournalKind = "AgentScope Session Delete Journal";
+const restoreJournalKind = "AgentScope Session Restore Journal";
 
 export async function planSessionDelete(
   sessionId: string,
@@ -323,6 +343,150 @@ export async function importSessionBackup(
   }
   const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home) : [];
   return { plan, backupDir, importedFiles, databaseChanges };
+}
+
+export async function listQuarantinedSessions(
+  options: SessionOperationOptions = {}
+): Promise<QuarantinedSession[]> {
+  const quarantineRoot = path.join(operationRoot(options), "quarantine");
+  const entries = await fs.promises.readdir(quarantineRoot, { withFileTypes: true }).catch(() => []);
+  const items: QuarantinedSession[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const quarantineDir = path.join(quarantineRoot, entry.name);
+    const journalPath = path.join(quarantineDir, "journal.json");
+    const journal = await readDeleteJournal(journalPath).catch(() => undefined);
+    if (!journal) continue;
+    items.push(await quarantinedSessionFromJournal(journal, options));
+  }
+  return items.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+}
+
+export async function planSessionRestore(
+  quarantineDirOrJournalPath: string,
+  options: SessionOperationOptions = {}
+): Promise<SessionOperationPlanResult> {
+  const journal = await readQuarantineJournalPath(quarantineDirOrJournalPath, options);
+  const restoreJournalPath = restoreJournalPathFor(journal.quarantineDir);
+  const importPlanResult = await planSessionImport(journal.backupDir, options);
+  const plan: SessionOperationPlan = {
+    ...importPlanResult.plan,
+    operation: "restore",
+    notes: [
+      "This restore plan is a preview. Executing restoreQuarantinedSession restores only from a validated AgentScope backup manifest referenced by quarantine/journal.json.",
+      "The original quarantine directory is kept for evidence; logs_2.sqlite log bodies are not restored."
+    ],
+    evidence: [
+      ...importPlanResult.plan.evidence,
+      {
+        source: "agentscope.quarantine.journal",
+        detail: "Delete journal links the quarantine entry to the AgentScope backup used for restore.",
+        path: journal.journalPath,
+        field: "backupDir,quarantineDir,journalPath"
+      }
+    ],
+    blockers: [...importPlanResult.plan.blockers],
+    warnings: [...importPlanResult.plan.warnings]
+  };
+  if (!pathInside(path.join(operationRoot(options), "backups"), journal.backupDir)) {
+    plan.blockers.push("Quarantine journal backupDir is outside the AgentScope backups directory.");
+  }
+  const manifest = await readBackupManifest(journal.backupDir).catch((error) => {
+    plan.blockers.push(`Cannot validate restore backup manifest: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  });
+  if (manifest && (manifest.agent !== journal.agent || manifest.sessionId !== journal.sessionId)) {
+    plan.blockers.push("Quarantine journal and backup manifest refer to different sessions.");
+  }
+  if (plan.target) {
+    plan.blockers.push("A session with this id already exists locally; restore would conflict.");
+  }
+  if (manifest) {
+    for (const file of manifestCopiedFiles(manifest)) {
+      const originalPath = typeof file.path === "string" ? file.path : undefined;
+      if (originalPath && await pathExists(originalPath)) plan.blockers.push(`Restore target already exists: ${originalPath}`);
+    }
+  }
+  if (await successfulRestoreJournalExists(restoreJournalPath)) {
+    plan.blockers.push("This quarantined session already has a successful restore journal.");
+  }
+  plan.risk = plan.blockers.length ? "blocked" : plan.warnings.length ? "caution" : "safe";
+  const outputDir = path.join(operationRoot(options), "plans");
+  await fs.promises.mkdir(outputDir, { recursive: true });
+  const outputPath = path.join(outputDir, `${safeStamp(plan.createdAt)}-${plan.agent}-${safeName(plan.sessionId)}-restore-plan.json`);
+  await writeJson(outputPath, plan);
+  return {
+    plan,
+    path: outputPath,
+    backupDir: journal.backupDir,
+    quarantineDir: journal.quarantineDir,
+    journalPath: journal.journalPath,
+    restoreJournalPath
+  };
+}
+
+export async function restoreQuarantinedSession(
+  quarantineDirOrJournalPath: string,
+  options: SessionOperationOptions = {}
+): Promise<SessionRestoreResult> {
+  let journal: DeleteJournal | undefined;
+  let restoreJournalPath: string | undefined;
+  try {
+    journal = await readQuarantineJournalPath(quarantineDirOrJournalPath, options);
+    restoreJournalPath = restoreJournalPathFor(journal.quarantineDir);
+    const planResult = await planSessionRestore(journal.journalPath, options);
+    if (planResult.plan.blockers.length) throw new Error(planResult.plan.blockers.join(" "));
+    const imported = await importSessionBackup(journal.backupDir, options);
+    const databaseChanges = imported.databaseChanges ?? [];
+    const restoreJournal: RestoreJournal = {
+      schemaVersion: 1,
+      kind: restoreJournalKind,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      agent: journal.agent,
+      sessionId: journal.sessionId,
+      backupDir: journal.backupDir,
+      quarantineDir: journal.quarantineDir,
+      journalPath: journal.journalPath,
+      restoreJournalPath,
+      status: "succeeded",
+      importedFiles: imported.importedFiles,
+      databaseChanges
+    };
+    await writeJson(restoreJournalPath, restoreJournal);
+    return {
+      plan: { ...planResult.plan, mode: "execute" },
+      backupDir: journal.backupDir,
+      quarantineDir: journal.quarantineDir,
+      journalPath: journal.journalPath,
+      restoreJournalPath,
+      importedFiles: imported.importedFiles,
+      databaseChanges
+    };
+  } catch (error) {
+    if (journal) {
+      restoreJournalPath ??= restoreJournalPathFor(journal.quarantineDir);
+      const failedJournal: RestoreJournal = {
+        schemaVersion: 1,
+        kind: restoreJournalKind,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        agent: journal.agent,
+        sessionId: journal.sessionId,
+        backupDir: journal.backupDir,
+        quarantineDir: journal.quarantineDir,
+        journalPath: journal.journalPath,
+        restoreJournalPath,
+        status: "failed",
+        importedFiles: [],
+        databaseChanges: [],
+        error: error instanceof Error ? error.message : String(error)
+      };
+      await writeJson(restoreJournalPath, failedJournal).catch(() => undefined);
+      throw withRestoreOperationPaths(error, journal.backupDir, journal.quarantineDir, journal.journalPath, restoreJournalPath);
+    }
+    throw error;
+  }
 }
 
 export async function planSessionImport(
@@ -1086,6 +1250,173 @@ function withOperationPaths(
   const wrapped = new Error(`${message} backupDir=${backupDir} quarantineDir=${quarantineDir} journalPath=${journalPath}`);
   if (error instanceof Error && error.stack) wrapped.stack = error.stack;
   return wrapped;
+}
+
+function withRestoreOperationPaths(
+  error: unknown,
+  backupDir: string,
+  quarantineDir: string,
+  journalPath: string,
+  restoreJournalPath: string
+): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const wrapped = new Error(
+    `${message} backupDir=${backupDir} quarantineDir=${quarantineDir} journalPath=${journalPath} restoreJournalPath=${restoreJournalPath}`
+  );
+  if (error instanceof Error && error.stack) wrapped.stack = error.stack;
+  return wrapped;
+}
+
+async function readQuarantineJournalPath(
+  quarantineDirOrJournalPath: string,
+  options: SessionOperationOptions
+): Promise<DeleteJournal> {
+  const root = path.join(operationRoot(options), "quarantine");
+  const stat = await fs.promises.stat(quarantineDirOrJournalPath).catch(() => undefined);
+  const journalPath = stat?.isDirectory()
+    ? path.join(quarantineDirOrJournalPath, "journal.json")
+    : quarantineDirOrJournalPath;
+  if (!pathInside(root, journalPath)) throw new Error("Restore is limited to AgentScope quarantine journals.");
+  const journal = await readDeleteJournal(journalPath);
+  if (!pathInside(root, journal.quarantineDir)) throw new Error("Delete journal quarantineDir is outside the AgentScope quarantine directory.");
+  if (!samePath(journal.journalPath, journalPath)) throw new Error("Delete journal path does not match the selected quarantine journal.");
+  return journal;
+}
+
+async function readDeleteJournal(journalPath: string): Promise<DeleteJournal> {
+  const parsed = JSON.parse(await fs.promises.readFile(journalPath, "utf8")) as Record<string, unknown>;
+  validateDeleteJournal(parsed, journalPath);
+  return parsed;
+}
+
+function validateDeleteJournal(journal: Record<string, unknown>, journalPath: string): asserts journal is DeleteJournal {
+  if (journal.schemaVersion !== 1) throw new Error("Delete journal has an unsupported schema version.");
+  if (journal.kind !== deleteJournalKind) throw new Error("Journal is not an AgentScope delete journal.");
+  const agent = asAgent(journal.agent);
+  if (!agent) throw new Error("Delete journal does not contain a supported agent.");
+  if (typeof journal.sessionId !== "string" || !journal.sessionId.trim()) throw new Error("Delete journal is missing a session id.");
+  if (typeof journal.backupDir !== "string" || !journal.backupDir.trim()) throw new Error("Delete journal is missing backupDir.");
+  if (typeof journal.quarantineDir !== "string" || !journal.quarantineDir.trim()) throw new Error("Delete journal is missing quarantineDir.");
+  if (typeof journal.journalPath !== "string" || !journal.journalPath.trim()) journal.journalPath = journalPath;
+  if (!Array.isArray(journal.steps)) throw new Error("Delete journal steps must be an array.");
+}
+
+async function quarantinedSessionFromJournal(
+  journal: DeleteJournal,
+  options: SessionOperationOptions
+): Promise<QuarantinedSession> {
+  const warnings: string[] = [];
+  const blockers: string[] = [];
+  let manifest: BackupManifest | undefined;
+  const backupRoot = path.join(operationRoot(options), "backups");
+  if (!pathInside(backupRoot, journal.backupDir)) {
+    blockers.push("Quarantine journal backupDir is outside the AgentScope backups directory.");
+  }
+  try {
+    manifest = await readBackupManifest(journal.backupDir);
+    if (manifest.agent !== journal.agent || manifest.sessionId !== journal.sessionId) {
+      blockers.push("Quarantine journal and backup manifest refer to different sessions.");
+    }
+  } catch (error) {
+    blockers.push(`Cannot read restore backup manifest: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const restoreJournalPath = restoreJournalPathFor(journal.quarantineDir);
+  const restored = await successfulRestoreJournalExists(restoreJournalPath);
+  if (restored) blockers.push("This quarantined session already has a successful restore journal.");
+  const target = await resolveSession(journal.sessionId, journal.agent, options.home).catch(() => undefined);
+  if (target) blockers.push("A session with this id already exists locally; restore would conflict.");
+  const copiedFiles = manifest ? manifestCopiedFiles(manifest) : [];
+  for (const file of copiedFiles) {
+    const originalPath = typeof file.path === "string" ? file.path : undefined;
+    if (originalPath && await pathExists(originalPath)) blockers.push(`Restore target already exists: ${originalPath}`);
+  }
+  const summary = manifest ? backupManifestSessionSummary(manifest) : {};
+  const movedFiles = journal.steps.filter((step) => step.phase === "file" && step.action === "move" && step.status === "succeeded").length;
+  const databaseDeletes = journal.steps.filter((step) => step.phase === "sqlite_delete" && step.status === "succeeded").length;
+  const restoreStatus: QuarantinedSession["restoreStatus"] = restored
+    ? "restored"
+    : !manifest
+      ? "missing_backup"
+      : blockers.length
+        ? "blocked"
+        : "restorable";
+  return {
+    schemaVersion: 1,
+    agent: journal.agent,
+    sessionId: journal.sessionId,
+    deletedAt: journal.createdAt,
+    updatedAt: journal.updatedAt,
+    backupDir: journal.backupDir,
+    quarantineDir: journal.quarantineDir,
+    journalPath: journal.journalPath,
+    restoreJournalPath,
+    title: summary.title,
+    cwd: summary.cwd,
+    transcriptPath: summary.transcriptPath,
+    parentSessionId: summary.parentSessionId,
+    restoreStatus,
+    restorePossible: restoreStatus === "restorable",
+    movedFiles,
+    databaseDeletes,
+    warnings,
+    blockers,
+    evidence: [
+      {
+        source: "agentscope.quarantine.journal",
+        detail: "Quarantine entry loaded from AgentScope delete journal.",
+        path: journal.journalPath,
+        field: "kind,sessionId,backupDir,steps"
+      },
+      ...(manifest
+        ? [
+            {
+              source: "agentscope.backup.manifest",
+              detail: "Restore will use the backup manifest referenced by the delete journal.",
+              path: path.join(journal.backupDir, "manifest.json"),
+              field: "kind,sessionId,copiedFiles,databaseBundles"
+            }
+          ]
+        : [])
+    ]
+  };
+}
+
+function backupManifestSessionSummary(manifest: BackupManifest): {
+  title?: string | undefined;
+  cwd?: string | undefined;
+  transcriptPath?: string | undefined;
+  parentSessionId?: string | undefined;
+} {
+  const plan = objectValue(manifest.plan);
+  const target = objectValue(plan?.target);
+  const title = typeof target?.title === "string" ? target.title : undefined;
+  const cwd = typeof target?.cwd === "string" ? target.cwd : undefined;
+  const transcriptPath = typeof target?.transcriptPath === "string" ? target.transcriptPath : undefined;
+  const parentSessionId = typeof target?.parentSessionId === "string" ? target.parentSessionId : undefined;
+  return { title, cwd, transcriptPath, parentSessionId };
+}
+
+async function successfulRestoreJournalExists(restoreJournalPath: string): Promise<boolean> {
+  const parsed = await fs.promises.readFile(restoreJournalPath, "utf8").then(
+    (content) => JSON.parse(content) as Record<string, unknown>,
+    () => undefined
+  );
+  return parsed?.kind === restoreJournalKind && parsed.status === "succeeded";
+}
+
+function restoreJournalPathFor(quarantineDir: string): string {
+  return path.join(quarantineDir, "restore-journal.json");
+}
+
+function pathInside(root: string, targetPath: string): boolean {
+  const normalizedRoot = path.resolve(root);
+  const normalizedTarget = path.resolve(targetPath);
+  const relative = path.relative(normalizedRoot, normalizedTarget);
+  return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function samePath(left: string, right: string): boolean {
+  return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
 }
 
 async function exportCodexDatabaseBundles(

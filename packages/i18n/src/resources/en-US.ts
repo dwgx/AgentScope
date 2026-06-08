@@ -215,6 +215,22 @@ export const enUS = {
       rootNoParent: "Root / no parent",
       parentGroup: "Parent: {{title}}",
       noCwd: "No cwd",
+      recycle: {
+        title: "Recycle bin",
+        subtitle: "{{count}} quarantined, {{restorable}} restorable",
+        empty: "No quarantined sessions.",
+        restore: "Restore",
+        restoreBlocked: "This quarantine entry is not restorable.",
+        parent: "Parent {{id}}",
+        evidence: "{{files}} files / {{db}} DB steps",
+        status: {
+          restorable: "restorable",
+          restored: "restored",
+          blocked: "blocked",
+          missing_backup: "missing backup",
+          invalid: "invalid"
+        }
+      },
       group: {
         cwd: "cwd",
         parent: "Parent",
@@ -574,6 +590,7 @@ export const enUS = {
     sessionsDeleted: "Moved {{count}}/{{total}} sessions to quarantine",
     noSessionsDeleted: "No sessions were deleted",
     sessionImported: "Session imported from backup",
+    sessionRestored: "Session restored from quarantine",
     sessionLaunchStarted: "{{agent}} {{action}} started",
     sessionLaunchUnsupported: "This session cannot be launched by Codex/Claude controls",
     deletePlanWritten: "Delete plan written: {{path}}",

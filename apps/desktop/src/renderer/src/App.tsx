@@ -35,9 +35,12 @@ import type {
   AgentSession,
   Diagnostic,
   Evidence,
+  QuarantinedSession,
   Relation,
   SessionActivity,
+  SessionImportResult,
   SessionOperationPlanResult,
+  SessionRestoreResult,
   ScopeSnapshot,
   SessionCandidate
 } from "@agentscope/shared";
@@ -248,6 +251,7 @@ function App() {
   const [confirmDialog, setConfirmDialog] = useState<ConfirmState | null>(null);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [installedFonts, setInstalledFonts] = useState<string[]>([]);
+  const [quarantinedSessions, setQuarantinedSessions] = useState<QuarantinedSession[]>([]);
 
   function updateSettings(patch: Partial<AppSettings>) {
     setSettings((current) => {
@@ -317,12 +321,14 @@ function App() {
   async function refresh() {
     setLoading(true);
     try {
-      const [nextSnapshot, nextDoctor] = await Promise.all([
+      const [nextSnapshot, nextDoctor, nextQuarantine] = await Promise.all([
         window.agentscope.getSnapshot(),
-        window.agentscope.getDoctor()
+        window.agentscope.getDoctor(),
+        window.agentscope.listQuarantinedSessions()
       ]);
       setSnapshot(nextSnapshot);
       setDoctor(nextDoctor);
+      setQuarantinedSessions(nextQuarantine);
       setSelectionKey((current) => current ?? firstSelectionKey(nextSnapshot));
     } finally {
       setLoading(false);
@@ -695,7 +701,6 @@ function App() {
           : undefined,
         ttlMs: targets.length > 1 || failures.length ? 30000 : undefined
       });
-      if (firstResult) await openPath(firstResult.quarantineDir);
       await refresh();
     } catch (error) {
       const journalPath = journalPathFromError(errorMessage(error));
@@ -725,17 +730,40 @@ function App() {
     try {
       const result = await window.agentscope.chooseImportSession();
       if ("backupDir" in result) {
-        showNotice({
-          message: t("toast.sessionImported"),
-          detail: result.backupDir,
-          actions: noticePathActions(result.backupDir)
-        });
+        showImportOrRestoreNotice(result);
         await refresh();
       } else {
         showNotice({ message: t("toast.importPlanCanceled") });
       }
     } catch (error) {
       showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+    }
+  }
+
+  async function restoreQuarantinedSession(item: QuarantinedSession) {
+    if (settings.controlMode === "readOnly") {
+      showNotice({ message: t("toast.operationFailed", { message: t("settings.controlMode.readOnlyBlocked") }) });
+      return;
+    }
+    if (!item.restorePossible) {
+      showNotice({
+        message: t("toast.operationFailed", { message: t("views.sessions.recycle.restoreBlocked") }),
+        items: recycleNoticeItems(item),
+        ttlMs: 30000
+      });
+      return;
+    }
+    try {
+      const result = await window.agentscope.restoreQuarantinedSession(item.quarantineDir);
+      showImportOrRestoreNotice(result);
+      await refresh();
+    } catch (error) {
+      showNotice({
+        message: t("toast.operationFailed", { message: errorMessage(error) }),
+        items: operationPathsFromError(errorMessage(error)).map((pathItem) => ({ ...pathItem, tone: "warn" as const })),
+        ttlMs: 30000
+      });
+      await refresh();
     }
   }
 
@@ -772,6 +800,53 @@ function App() {
     return [
       { label: t("common.action.reveal"), onClick: () => void revealPath(targetPath) },
       { label: t("common.action.open"), onClick: () => void openPath(targetPath) }
+    ];
+  }
+
+  function showImportOrRestoreNotice(result: SessionImportResult | SessionRestoreResult) {
+    const isRestore = "quarantineDir" in result;
+    const databaseItems = (result.databaseChanges ?? []).slice(0, 8).map((change) => ({
+      label: `${change.table} ${change.action}`,
+      value: `${change.database} ${change.where}`,
+      path: change.database,
+      tone: change.action === "skip" ? "warn" as const : "ok" as const
+    }));
+    showNotice({
+      message: isRestore ? t("toast.sessionRestored") : t("toast.sessionImported"),
+      items: [
+        { label: "Backup", value: result.backupDir, path: result.backupDir, tone: "ok" as const },
+        ...(isRestore
+          ? [
+              { label: "Quarantine", value: result.quarantineDir, path: result.quarantineDir, tone: "ok" as const },
+              { label: "Journal", value: result.journalPath, path: result.journalPath, onClick: () => void openPath(result.journalPath), tone: "ok" as const },
+              { label: "Restore journal", value: result.restoreJournalPath, path: result.restoreJournalPath, onClick: () => void openPath(result.restoreJournalPath), tone: "ok" as const }
+            ]
+          : []),
+        ...result.importedFiles.slice(0, 8).map((file) => ({
+          label: file.role,
+          value: file.path,
+          path: file.path,
+          tone: "ok" as const
+        })),
+        ...databaseItems
+      ],
+      actions: isRestore
+        ? [
+            { label: t("common.action.openJournal"), onClick: () => void openPath(result.restoreJournalPath) },
+            { label: t("common.action.revealJournal"), onClick: () => void revealPath(result.restoreJournalPath) },
+            ...noticePathActions(result.quarantineDir)
+          ]
+        : noticePathActions(result.backupDir),
+      ttlMs: 30000
+    });
+  }
+
+  function recycleNoticeItems(item: QuarantinedSession): NoticeItem[] {
+    return [
+      { label: "Backup", value: item.backupDir, path: item.backupDir },
+      { label: "Quarantine", value: item.quarantineDir, path: item.quarantineDir },
+      { label: "Journal", value: item.journalPath, path: item.journalPath, onClick: () => void openPath(item.journalPath) },
+      ...item.blockers.map((blocker) => ({ label: t("common.status.blocked"), value: blocker, tone: "warn" as const }))
     ];
   }
 
@@ -908,10 +983,14 @@ function App() {
             {view === "sessions" && (
               <SessionList
                 sessions={sessions}
+                quarantinedSessions={quarantinedSessions}
                 selectedKey={selected?.type === "session" ? sessionKey(selected.value) : undefined}
                 loading={initialLoading}
                 highlightTarget={highlightTarget}
                 onImportSession={() => void chooseImportSession()}
+                onRestoreQuarantinedSession={(item) => void restoreQuarantinedSession(item)}
+                onRevealPath={(targetPath) => void revealPath(targetPath)}
+                onOpenPath={(targetPath) => void openPath(targetPath)}
                 onSelect={(session) =>
                   setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId })
                 }
@@ -1745,10 +1824,14 @@ function ToolbarControl(props: { label: string; children: ReactNode }) {
 
 function SessionList(props: {
   sessions: AgentSession[];
+  quarantinedSessions: QuarantinedSession[];
   selectedKey?: string | undefined;
   loading: boolean;
   highlightTarget: SearchResultRecord | null;
   onImportSession: () => void;
+  onRestoreQuarantinedSession: (item: QuarantinedSession) => void;
+  onRevealPath: (targetPath: string) => void;
+  onOpenPath: (targetPath: string) => void;
   onSelect: (session: AgentSession) => void;
   onBackupSession: (session: AgentSession) => void;
   onBackupSessions: (sessions: AgentSession[]) => void;
@@ -1763,6 +1846,7 @@ function SessionList(props: {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [selectedSessionKeys, setSelectedSessionKeys] = useState<Set<string>>(() => new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
+  const [recycleOpen, setRecycleOpen] = useState(true);
   const [contextMenu, setContextMenu] = useState<{
     sessions: AgentSession[];
     x: number;
@@ -1841,8 +1925,21 @@ function SessionList(props: {
       <PaneHeader
         title={t("nav.sessions")}
         subtitle={t("views.sessions.subtitle", { count: props.sessions.length })}
-        action={<ActionButton label={t("inspector.actions.importSession")} onClick={props.onImportSession} />}
+        action={
+          <div className="paneHeaderActions">
+            <ActionButton label={t("views.sessions.recycle.title")} onClick={() => setRecycleOpen((current) => !current)} />
+            <ActionButton label={t("inspector.actions.importSession")} onClick={props.onImportSession} />
+          </div>
+        }
       />
+      {recycleOpen && (
+        <RecycleBinPanel
+          items={props.quarantinedSessions}
+          onRestore={props.onRestoreQuarantinedSession}
+          onRevealPath={props.onRevealPath}
+          onOpenPath={props.onOpenPath}
+        />
+      )}
       <div className="listToolbar">
         <MiniSegmentedControl
           value={groupMode}
@@ -1936,6 +2033,74 @@ function SessionList(props: {
       )}
     </>
   );
+}
+
+function RecycleBinPanel(props: {
+  items: QuarantinedSession[];
+  onRestore: (item: QuarantinedSession) => void;
+  onRevealPath: (targetPath: string) => void;
+  onOpenPath: (targetPath: string) => void;
+}) {
+  const { t } = useTranslation();
+  const visible = props.items.slice(0, 6);
+  const restorable = props.items.filter((item) => item.restorePossible).length;
+  return (
+    <section className="recyclePanel">
+      <div className="recycleHeader">
+        <div>
+          <strong>{t("views.sessions.recycle.title")}</strong>
+          <span>{t("views.sessions.recycle.subtitle", { count: props.items.length, restorable })}</span>
+        </div>
+      </div>
+      {visible.length ? (
+        <div className="recycleRows">
+          {visible.map((item) => (
+            <div className={`recycleRow ${item.restorePossible ? "" : "blocked"}`} key={`${item.agent}:${item.sessionId}:${item.deletedAt}`}>
+              <AgentTile agent={item.agent} compact />
+              <div className="recycleMain">
+                <div className="recycleTop">
+                  <strong>{item.title || short(item.sessionId)}</strong>
+                  <StatusPill status={item.restoreStatus} />
+                </div>
+                <div className="recycleMeta">
+                  <span className="mono">{short(item.sessionId)}</span>
+                  <span>{formatDate(item.deletedAt)}</span>
+                  {item.parentSessionId && <span>{t("views.sessions.recycle.parent", { id: short(item.parentSessionId) })}</span>}
+                  <span>{t("views.sessions.recycle.evidence", { files: item.movedFiles, db: item.databaseDeletes })}</span>
+                </div>
+                <div className="recyclePath mono">{item.cwd || item.transcriptPath || item.quarantineDir}</div>
+                {item.blockers[0] && <div className="recycleBlocker">{item.blockers[0]}</div>}
+              </div>
+              <div className="recycleActions">
+                <button className="iconButton tiny" type="button" title={t("common.action.openJournal")} onClick={() => props.onOpenPath(item.journalPath)}>
+                  <FileText size={15} />
+                </button>
+                <button className="iconButton tiny" type="button" title={t("common.action.reveal")} onClick={() => props.onRevealPath(item.quarantineDir)}>
+                  <FolderOpen size={15} />
+                </button>
+                <button
+                  className="compactAction"
+                  type="button"
+                  disabled={!item.restorePossible}
+                  onClick={() => props.onRestore(item)}
+                >
+                  {t("views.sessions.recycle.restore")}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="recycleEmpty">{t("views.sessions.recycle.empty")}</div>
+      )}
+    </section>
+  );
+}
+
+function StatusPill(props: { status: QuarantinedSession["restoreStatus"] }) {
+  const { t } = useTranslation();
+  const tone = props.status === "restorable" ? "ok" : props.status === "restored" ? "info" : "warn";
+  return <span className={`statusPill ${tone}`}>{t(`views.sessions.recycle.status.${props.status}`)}</span>;
 }
 
 function SessionRow(props: {
@@ -4018,10 +4183,10 @@ function LoadingState(props: { compact?: boolean }) {
   );
 }
 
-function AgentTile(props: { agent: AgentKind }) {
+function AgentTile(props: { agent: AgentKind; compact?: boolean | undefined }) {
   const { t } = useTranslation();
   return (
-    <div className={`agentTile ${props.agent}`}>
+    <div className={`agentTile ${props.agent} ${props.compact ? "compact" : ""}`}>
       <AgentIcon agent={props.agent} />
       <span>{t(`common.agent.${props.agent}`)}</span>
     </div>
@@ -4672,13 +4837,13 @@ function errorMessage(error: unknown): string {
 }
 
 function journalPathFromError(message: string): string | undefined {
-  const match = /\bjournalPath=([^\r\n]+?)(?=\s+(?:backupDir|quarantineDir|journalPath)=|$)/.exec(message);
+  const match = /\bjournalPath=([^\r\n]+?)(?=\s+(?:backupDir|quarantineDir|journalPath|restoreJournalPath)=|$)/.exec(message);
   return match?.[1]?.trim();
 }
 
 function operationPathsFromError(message: string): NoticeItem[] {
-  return ["backupDir", "quarantineDir", "journalPath"].flatMap((label) => {
-    const match = new RegExp(`\\b${label}=([^\\r\\n]+?)(?=\\s+(?:backupDir|quarantineDir|journalPath)=|$)`).exec(message);
+  return ["backupDir", "quarantineDir", "journalPath", "restoreJournalPath"].flatMap((label) => {
+    const match = new RegExp(`\\b${label}=([^\\r\\n]+?)(?=\\s+(?:backupDir|quarantineDir|journalPath|restoreJournalPath)=|$)`).exec(message);
     const value = match?.[1]?.trim();
     return value ? [{ label, value, path: value }] : [];
   });

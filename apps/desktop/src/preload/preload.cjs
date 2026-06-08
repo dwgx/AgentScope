@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld("agentscope", {
   deleteSession: (agent, sessionId, createdAt) => ipcRenderer.invoke("session:delete", agent, sessionId, createdAt),
   launchSession: (agent, sessionId, action, cwd) => ipcRenderer.invoke("session:launch", agent, sessionId, action, cwd),
   importSessionBackup: (backupDir) => ipcRenderer.invoke("session:import", backupDir),
+  listQuarantinedSessions: () => ipcRenderer.invoke("session:listQuarantine"),
+  restoreQuarantinedSession: (quarantineDirOrJournalPath) => ipcRenderer.invoke("session:restore", quarantineDirOrJournalPath),
   chooseImportSession: () => ipcRenderer.invoke("session:chooseImport"),
   writeDeletePlan: (agent, sessionId) => ipcRenderer.invoke("session:deletePlan", agent, sessionId),
   writeImportPlan: (backupDir) => ipcRenderer.invoke("session:importPlan", backupDir),

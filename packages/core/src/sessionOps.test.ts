@@ -9,8 +9,11 @@ import {
   backupSession,
   deleteSession,
   importSessionBackup,
+  listQuarantinedSessions,
   planSessionDelete,
   planSessionImport,
+  planSessionRestore,
+  restoreQuarantinedSession,
   writeSessionDeletePlan
 } from "./sessionOps.js";
 
@@ -209,6 +212,102 @@ describe("session operations", () => {
     expect(imported.importedFiles.some((file) => file.path === transcript)).toBe(true);
   });
 
+  it("lists restorable quarantined sessions from AgentScope delete journals only", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-quarantine-list-"));
+    const sessionId = "abababab-abab-4aba-8aba-abababababab";
+    const encoded = "D--Project-AgentScope";
+    const transcript = path.join(home, ".claude", "projects", encoded, `${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    fs.writeFileSync(transcript, "{}\n");
+    await deleteSession(sessionId, "claude", {
+      home,
+      outputRoot,
+      now: new Date("2026-06-07T08:00:00Z")
+    });
+    const invalidDir = path.join(outputRoot, "quarantine", "invalid");
+    fs.mkdirSync(invalidDir, { recursive: true });
+    fs.writeFileSync(path.join(invalidDir, "journal.json"), JSON.stringify({ kind: "Other Journal", schemaVersion: 1 }));
+
+    const items = await listQuarantinedSessions({ home, outputRoot });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.sessionId).toBe(sessionId);
+    expect(items[0]?.restoreStatus).toBe("restorable");
+    expect(items[0]?.restorePossible).toBe(true);
+    expect(items[0]?.movedFiles).toBe(1);
+  });
+
+  it("restores a quarantined Claude session through the referenced backup manifest", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-restore-claude-"));
+    const sessionId = "babababa-baba-4bab-8bab-babababababa";
+    const encoded = "D--Project-AgentScope";
+    const transcript = path.join(home, ".claude", "projects", encoded, `${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    fs.writeFileSync(transcript, "{\"type\":\"user\"}\n");
+    const deleted = await deleteSession(sessionId, "claude", {
+      home,
+      outputRoot,
+      now: new Date("2026-06-07T08:10:00Z")
+    });
+
+    const restored = await restoreQuarantinedSession(deleted.quarantineDir, { home, outputRoot });
+
+    expect(fs.existsSync(transcript)).toBe(true);
+    expect(restored.importedFiles.some((file) => file.path === transcript)).toBe(true);
+    expect(restored.restoreJournalPath).toBe(path.join(deleted.quarantineDir, "restore-journal.json"));
+    const restoreJournal = JSON.parse(fs.readFileSync(restored.restoreJournalPath, "utf8")) as Record<string, unknown>;
+    expect(restoreJournal.kind).toBe("AgentScope Session Restore Journal");
+    expect(restoreJournal.status).toBe("succeeded");
+  });
+
+  it("blocks quarantine restore when a target session already exists", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-restore-conflict-"));
+    const sessionId = "cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd";
+    const encoded = "D--Project-AgentScope";
+    const transcript = path.join(home, ".claude", "projects", encoded, `${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    fs.writeFileSync(transcript, "{}\n");
+    const deleted = await deleteSession(sessionId, "claude", {
+      home,
+      outputRoot,
+      now: new Date("2026-06-07T08:20:00Z")
+    });
+    fs.writeFileSync(transcript, "existing\n");
+
+    const plan = await planSessionRestore(deleted.quarantineDir, { home, outputRoot });
+
+    expect(plan.plan.risk).toBe("blocked");
+    expect(plan.plan.blockers.join(" ")).toContain("already exists");
+    await expect(restoreQuarantinedSession(deleted.quarantineDir, { home, outputRoot })).rejects.toThrow(/restoreJournalPath=/);
+    const failedJournal = JSON.parse(fs.readFileSync(path.join(deleted.quarantineDir, "restore-journal.json"), "utf8")) as Record<string, unknown>;
+    expect(failedJournal.status).toBe("failed");
+  });
+
+  it("rejects non-AgentScope quarantine journals", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-restore-invalid-"));
+    const badDir = path.join(outputRoot, "quarantine", "bad");
+    fs.mkdirSync(badDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(badDir, "journal.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "Other Journal",
+        agent: "claude",
+        sessionId: "efefefef-efef-4efe-8efe-efefefefefef",
+        backupDir: path.join(outputRoot, "backups", "bad"),
+        quarantineDir: badDir,
+        journalPath: path.join(badDir, "journal.json"),
+        steps: []
+      })
+    );
+
+    await expect(planSessionRestore(badDir, { home, outputRoot })).rejects.toThrow(/not an AgentScope delete journal/);
+  });
+
   it("rejects import path traversal in backup manifest", async () => {
     const home = tempHome();
     const backupDir = makeBackupFixture(home, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
@@ -278,6 +377,36 @@ describe("session operations", () => {
     expect(Number((logs.prepare("SELECT COUNT(*) AS count FROM logs WHERE thread_id = ?").get(sessionId) as { count: number }).count)).toBe(0);
     logs.close();
     expect(imported.databaseChanges?.some((change) => change.table === "threads" && change.action === "insert")).toBe(true);
+  });
+
+  it("restores quarantined Codex file and row bundles without logs bodies", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-restore-"));
+    const sessionId = "fefefefe-fefe-4fef-8fef-fefefefefefe";
+    const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout);
+
+    const deleted = await deleteSession(sessionId, "codex", {
+      home,
+      outputRoot,
+      includeProcesses: false,
+      now: new Date("2026-06-07T08:30:00Z")
+    });
+    expect(fs.existsSync(rollout)).toBe(false);
+
+    const restored = await restoreQuarantinedSession(deleted.quarantineDir, { home, outputRoot });
+
+    expect(fs.existsSync(rollout)).toBe(true);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    expect(Number((state.prepare("SELECT COUNT(*) AS count FROM threads WHERE id = ?").get(sessionId) as { count: number }).count)).toBe(1);
+    expect(Number((state.prepare("SELECT COUNT(*) AS count FROM thread_spawn_edges WHERE child_thread_id = ?").get(sessionId) as { count: number }).count)).toBe(1);
+    state.close();
+    const logs = new Database(path.join(home, ".codex", "logs_2.sqlite"), { readonly: true });
+    expect(Number((logs.prepare("SELECT COUNT(*) AS count FROM logs WHERE thread_id = ?").get(sessionId) as { count: number }).count)).toBe(1);
+    logs.close();
+    expect(restored.databaseChanges?.some((change) => change.table === "logs" && change.action === "skip")).toBe(true);
   });
 
   it("plans Codex delete as row-level sqlite operations", async () => {
