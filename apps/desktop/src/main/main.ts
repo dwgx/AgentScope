@@ -145,7 +145,18 @@ ipcMain.handle("inspect:session", async (_event, sessionId: string) => {
     indexRecords: snapshot.indexRecords.filter((record) => record.sessionId.toLowerCase() === sessionId.toLowerCase())
   };
 });
-ipcMain.handle("diagnostic:repair", async (_event, name: string) => repairDiagnostic(name));
+ipcMain.handle("diagnostic:repair", async (_event, name: string) => {
+  if (isNativeSqliteDiagnostic(name) && !(await confirmNativeSqliteRepair(name))) {
+    return {
+      ok: false,
+      name,
+      message: "Diagnostic repair was canceled before running npm run package.",
+      directories: [],
+      files: []
+    };
+  }
+  return repairDiagnostic(name);
+});
 ipcMain.handle("session:backup", async (_event, agent: string, sessionId: string) => {
   const core = await loadCore();
   return core.backupSession(sessionId, asAgent(agent));
@@ -560,6 +571,27 @@ async function repairDiagnostic(name: string): Promise<{
       files: []
     };
   }
+}
+
+async function confirmNativeSqliteRepair(name: string): Promise<boolean> {
+  const root = findWorkspaceRoot();
+  const options = {
+    type: "warning" as const,
+    buttons: ["Cancel", "Run repair"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: "Confirm AgentScope diagnostic repair",
+    message: "Run native SQLite repair?",
+    detail: [
+      `Diagnostic: ${name}`,
+      "Command: npm run package",
+      `Workspace: ${root ?? "not found yet"}`,
+      "This rebuilds the unpacked desktop app and native better-sqlite3 module. It will not read session transcripts, credentials, or hidden reasoning."
+    ].join("\n")
+  };
+  const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+  return result.response === 1;
 }
 
 async function launchSessionCommand(
