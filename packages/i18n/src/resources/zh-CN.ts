@@ -417,6 +417,9 @@ export const zhCN = {
         mcp: "MCP",
         browser: "浏览器",
         computer_use: "电脑操控",
+        database: "数据库",
+        runtime: "运行态",
+        cache: "缓存",
         memory: "记忆",
         archive: "已归档"
       }

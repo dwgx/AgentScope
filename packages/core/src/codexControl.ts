@@ -76,6 +76,7 @@ export async function listCodexControlSurfaces(home = userHome()): Promise<Codex
     configSummarySurface(root, configInventory),
     await archiveSurface(root),
     await memorySurface(root),
+    ...(await codexDatabaseSurfaces(root)),
     await directorySurface({
       id: "browser.state",
       kind: "browser",
@@ -85,12 +86,60 @@ export async function listCodexControlSurfaces(home = userHome()): Promise<Codex
       evidenceSource: "codex.control.browser"
     }),
     await directorySurface({
+      id: "browser.output",
+      kind: "browser",
+      label: "Browser automation output",
+      dirPath: path.join(root, "browser-profiles", "playwright-output"),
+      detail: "Playwright console/page artifacts counted by extension only; AgentScope does not read page snapshots or console bodies.",
+      evidenceSource: "codex.control.browser_output"
+    }),
+    await directorySurface({
       id: "computer-use.state",
       kind: "computer_use",
       label: "Computer Use integration",
       dirPath: path.join(root, "computer-use"),
       detail: "Computer Use local state presence only. AgentScope does not launch desktop control.",
       evidenceSource: "codex.control.computer_use"
+    }),
+    await directorySurface({
+      id: "mcp-node.runtime",
+      kind: "runtime",
+      label: "MCP node runtime",
+      dirPath: path.join(root, "mcp-node"),
+      detail: "Installed MCP Node runtime metadata. AgentScope does not execute package scripts or inspect package source bodies.",
+      evidenceSource: "codex.control.mcp_node"
+    }),
+    await directorySurface({
+      id: "node-repl.runtime",
+      kind: "runtime",
+      label: "Node REPL runtime",
+      dirPath: path.join(root, "node_repl"),
+      detail: "Node REPL runtime presence and entry count only; active exec bodies stay unread.",
+      evidenceSource: "codex.control.node_repl"
+    }),
+    await directorySurface({
+      id: "tmp.arg0",
+      kind: "cache",
+      label: "Codex arg temp files",
+      dirPath: path.join(root, "tmp", "arg0"),
+      detail: "Temporary command argument folders counted only. AgentScope does not open generated command files here.",
+      evidenceSource: "codex.control.tmp_arg0"
+    }),
+    await directorySurface({
+      id: "vendor-imports.cache",
+      kind: "cache",
+      label: "Vendor imports cache",
+      dirPath: path.join(root, "vendor_imports"),
+      detail: "Vendor import cache presence only; cached marketplace bodies stay unread.",
+      evidenceSource: "codex.control.vendor_imports"
+    }),
+    await directorySurface({
+      id: "pets.state",
+      kind: "runtime",
+      label: "Pets state",
+      dirPath: path.join(root, "pets"),
+      detail: "Codex Desktop local state presence only.",
+      evidenceSource: "codex.control.pets"
     })
   ];
   surfaces.push(...(await ruleSurfaces(root)));
@@ -528,6 +577,68 @@ async function memorySurface(root: string): Promise<CodexControlSurface> {
   };
 }
 
+async function codexDatabaseSurfaces(root: string): Promise<CodexControlSurface[]> {
+  const inputs = [
+    {
+      id: "database.state",
+      label: "state_5.sqlite",
+      filePath: path.join(root, "state_5.sqlite"),
+      detail: "Codex state database schema and row-count summary only. Transcript bodies are not read here."
+    },
+    {
+      id: "database.goals",
+      label: "goals_1.sqlite",
+      filePath: path.join(root, "goals_1.sqlite"),
+      detail: "Codex goals database schema and row-count summary only."
+    },
+    {
+      id: "database.memories",
+      label: "memories_1.sqlite",
+      filePath: path.join(root, "memories_1.sqlite"),
+      detail: "Codex memories database schema and row-count summary only; memory content is not read."
+    },
+    {
+      id: "database.logs",
+      label: "logs_2.sqlite",
+      filePath: path.join(root, "logs_2.sqlite"),
+      detail: "Codex logs database schema and row-count summary only. Log body text is not restored or displayed."
+    },
+    {
+      id: "database.dev",
+      label: "sqlite/codex-dev.db",
+      filePath: path.join(root, "sqlite", "codex-dev.db"),
+      detail: "Codex Desktop automation database schema and row-count summary only."
+    }
+  ];
+  return Promise.all(
+    inputs.map(async (input) => {
+      const stat = await statFile(input.filePath);
+      const summary = summarizeSqlite(input.filePath);
+      return {
+        id: input.id,
+        kind: "database" as const,
+        label: input.label,
+        path: input.filePath,
+        exists: stat.exists,
+        editable: false,
+        status: stat.exists ? "ok" : "warn",
+        detail: input.detail,
+        bytes: stat.bytes,
+        updatedAt: stat.updatedAt,
+        summary,
+        warnings: stat.exists && !summary ? ["Could not open this SQLite database read-only for metadata."] : [],
+        evidence: [
+          {
+            source: "codex.control.sqlite_metadata",
+            detail: "AgentScope opened the database read-only and counted tables/rows without selecting body columns.",
+            path: input.filePath
+          }
+        ]
+      };
+    })
+  );
+}
+
 async function directorySurface(input: {
   id: string;
   kind: CodexControlSurfaceKind;
@@ -537,7 +648,7 @@ async function directorySurface(input: {
   evidenceSource: string;
 }): Promise<CodexControlSurface> {
   const stat = await statFile(input.dirPath);
-  const entries = await countDirectories(input.dirPath);
+  const summary = await summarizeDirectory(input.dirPath);
   return {
     id: input.id,
     kind: input.kind,
@@ -549,7 +660,7 @@ async function directorySurface(input: {
     detail: input.detail,
     bytes: stat.bytes,
     updatedAt: stat.updatedAt,
-    summary: { entries },
+    summary,
     warnings: [],
     evidence: [
       {
@@ -1006,6 +1117,50 @@ async function safeReaddir(dirPath: string): Promise<fs.Dirent[]> {
 
 async function countDirectories(dirPath: string): Promise<number> {
   return (await safeReaddir(dirPath)).length;
+}
+
+async function summarizeDirectory(dirPath: string): Promise<Record<string, string | number | boolean>> {
+  const entries = await safeReaddir(dirPath);
+  const summary: Record<string, string | number | boolean> = {
+    entries: entries.length,
+    files: entries.filter((entry) => entry.isFile()).length,
+    directories: entries.filter((entry) => entry.isDirectory()).length
+  };
+  const extensionCounts = new Map<string, number>();
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const extension = path.extname(entry.name).toLowerCase().replace(/^\./, "") || "no_ext";
+    extensionCounts.set(extension, (extensionCounts.get(extension) ?? 0) + 1);
+  }
+  for (const [extension, count] of [...extensionCounts.entries()].sort((left, right) => right[1] - left[1]).slice(0, 4)) {
+    summary[`ext_${extension}`] = count;
+  }
+  return summary;
+}
+
+function summarizeSqlite(dbPath: string): Record<string, string | number | boolean> | undefined {
+  if (!fs.existsSync(dbPath)) return undefined;
+  const opened = openCodexDb(dbPath);
+  if (!opened) return undefined;
+  try {
+    const rows = opened.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{
+      name?: string;
+    }>;
+    const summary: Record<string, string | number | boolean> = {
+      tables: rows.length
+    };
+    for (const row of rows.slice(0, 6)) {
+      const table = row.name;
+      if (!table || !/^[A-Za-z0-9_]+$/.test(table)) continue;
+      const count = opened.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count?: number } | undefined;
+      summary[`rows_${table.slice(0, 28)}`] = Number(count?.count ?? 0);
+    }
+    return summary;
+  } catch {
+    return undefined;
+  } finally {
+    opened.db.close();
+  }
 }
 
 function countArchivedThreads(dbPath: string): number | undefined {

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   listCodexControlSurfaces,
@@ -46,6 +47,14 @@ describe("Codex control surfaces", () => {
     await writeFile(path.join(home, ".codex", "rules", "default.rules"), "# rules\n");
     await writeFile(path.join(home, ".codex", "skills", "review-helper", "SKILL.md"), "---\nname: review-helper\n---\n");
     await writeFile(path.join(home, ".codex", "skills", ".system", "skill-creator", "SKILL.md"), "system\n");
+    await mkdir(path.join(home, ".codex", "browser-profiles", "playwright-output"), { recursive: true });
+    await writeFile(path.join(home, ".codex", "browser-profiles", "playwright-output", "console-1.log"), "body omitted\n");
+    await mkdir(path.join(home, ".codex", "mcp-node", "node_modules"), { recursive: true });
+    await mkdir(path.join(home, ".codex", "node_repl", "active_execs"), { recursive: true });
+    await mkdir(path.join(home, ".codex", "tmp", "arg0", "codex-arg-test"), { recursive: true });
+    await mkdir(path.join(home, ".codex", "vendor_imports"), { recursive: true });
+    await writeFile(path.join(home, ".codex", "vendor_imports", "skills-curated-cache.json"), "{}\n");
+    await mkdir(path.join(home, ".codex", "pets"), { recursive: true });
 
     const snapshot = await listCodexControlSurfaces(home);
 
@@ -56,6 +65,32 @@ describe("Codex control surfaces", () => {
     expect(snapshot.surfaces.find((surface) => surface.id === "skill:review-helper")?.editable).toBe(true);
     expect(snapshot.surfaces.find((surface) => surface.id.startsWith("skill-readonly:.system"))?.editable).toBe(false);
     expect(snapshot.surfaces.find((surface) => surface.id === "plugins.summary")?.editable).toBe(false);
+    expect(snapshot.surfaces.find((surface) => surface.id === "browser.output")?.summary?.ext_log).toBe(1);
+    expect(snapshot.surfaces.find((surface) => surface.id === "mcp-node.runtime")?.editable).toBe(false);
+    expect(snapshot.surfaces.find((surface) => surface.id === "node-repl.runtime")?.editable).toBe(false);
+    expect(snapshot.surfaces.find((surface) => surface.id === "tmp.arg0")?.editable).toBe(false);
+    expect(snapshot.surfaces.find((surface) => surface.id === "vendor-imports.cache")?.summary?.ext_json).toBe(1);
+    expect(snapshot.surfaces.find((surface) => surface.id === "pets.state")?.kind).toBe("runtime");
+  });
+
+  it("summarizes Codex sqlite stores without reading body columns", async () => {
+    const home = await tempHome();
+    const dbPath = path.join(home, ".codex", "state_5.sqlite");
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, archived INTEGER);
+      INSERT INTO threads (id, title, archived) VALUES ('thread-1', 'hidden body should not be exposed', 0);
+    `);
+    db.close();
+
+    const snapshot = await listCodexControlSurfaces(home);
+    const state = snapshot.surfaces.find((surface) => surface.id === "database.state");
+
+    expect(state?.editable).toBe(false);
+    expect(state?.kind).toBe("database");
+    expect(state?.summary?.tables).toBeGreaterThanOrEqual(1);
+    expect(state?.summary?.rows_threads).toBe(1);
+    expect(JSON.stringify(state)).not.toContain("hidden body");
   });
 
   it("backs up and atomically saves allowlisted documents", async () => {

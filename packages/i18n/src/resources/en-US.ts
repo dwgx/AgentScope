@@ -565,6 +565,9 @@ export const enUS = {
         mcp: "MCP",
         browser: "Browser",
         computer_use: "Computer Use",
+        database: "Database",
+        runtime: "Runtime",
+        cache: "Cache",
         memory: "Memory",
         archive: "Archives"
       }

@@ -287,6 +287,9 @@ export type CodexControlSurfaceKind =
   | "mcp"
   | "browser"
   | "computer_use"
+  | "database"
+  | "runtime"
+  | "cache"
   | "memory"
   | "archive";
 
