@@ -261,6 +261,7 @@ const lineHeightValues: AppSettings["uiLineHeight"][] = ["compact", "normal", "s
 const accentValues = ["#b8c2cc", "#4aa3ff", "#8b5cf6", "#f59e0b", "#f43f5e", "#e5e7eb"] as const;
 const fallbackCodexModels = ["gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark"];
 const fallbackReasoningEfforts = ["minimal", "low", "medium", "high", "xhigh"];
+const fallbackPlanReasoningEfforts = ["none", ...fallbackReasoningEfforts];
 
 function App() {
   const { t } = useTranslation();
@@ -2679,7 +2680,7 @@ function SettingsPanel(props: {
     setCodexModeStatus(undefined);
     window.agentscope
       .saveCodexModeConfig(
-        codexModePatchFromDraft(codexModeDraft),
+        codexModePatchFromDraft(codexModeDraft, codexModes),
         codexModes.sha256
       )
       .then((result) => {
@@ -3414,6 +3415,9 @@ function CodexModeConfigPanel(props: {
   const reasoningOptions = props.snapshot?.reasoningEffortValues.length
     ? props.snapshot.reasoningEffortValues
     : fallbackReasoningEfforts;
+  const planReasoningOptions = props.snapshot?.planReasoningEffortValues.length
+    ? props.snapshot.planReasoningEffortValues
+    : fallbackPlanReasoningEfforts;
   const dirty = props.snapshot ? !codexModeDraftEqualsSnapshot(props.draft, props.snapshot) : false;
   const disabled = props.loading || !props.snapshot;
   const mode = (id: CodexModeId) => props.snapshot?.modes[id];
@@ -3480,7 +3484,7 @@ function CodexModeConfigPanel(props: {
           <CodexReasoningField
             label={t("settings.codexControl.reasoning")}
             value={props.draft.planReasoningEffort}
-            options={reasoningOptions}
+            options={planReasoningOptions}
             disabled={disabled}
             allowUnset
             unsetLabel={t("settings.codexControl.inheritDefault")}
@@ -5884,13 +5888,20 @@ function codexModeDraftFromSnapshot(snapshot: CodexModeConfigSnapshot): CodexMod
   };
 }
 
-function codexModePatchFromDraft(draft: CodexModeDraft): CodexModeConfigPatch {
-  return {
-    defaultModel: draft.defaultModel.trim() || null,
-    defaultReasoningEffort: draft.defaultReasoningEffort.trim() || null,
-    planReasoningEffort: draft.planReasoningEffort.trim() || null,
-    reviewModel: draft.reviewModel.trim() || null
-  };
+function codexModePatchFromDraft(draft: CodexModeDraft, snapshot: CodexModeConfigSnapshot): CodexModeConfigPatch {
+  const current = codexModeDraftFromSnapshot(snapshot);
+  const patch: CodexModeConfigPatch = {};
+  const defaultModel = draft.defaultModel.trim();
+  const defaultReasoningEffort = draft.defaultReasoningEffort.trim();
+  const planReasoningEffort = draft.planReasoningEffort.trim();
+  const reviewModel = draft.reviewModel.trim();
+  if (defaultModel !== current.defaultModel) patch.defaultModel = defaultModel || null;
+  if (defaultReasoningEffort !== current.defaultReasoningEffort) {
+    patch.defaultReasoningEffort = defaultReasoningEffort || null;
+  }
+  if (planReasoningEffort !== current.planReasoningEffort) patch.planReasoningEffort = planReasoningEffort || null;
+  if (reviewModel !== current.reviewModel) patch.reviewModel = reviewModel || null;
+  return patch;
 }
 
 function codexModeDraftEqualsSnapshot(draft: CodexModeDraft, snapshot: CodexModeConfigSnapshot): boolean {

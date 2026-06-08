@@ -364,6 +364,7 @@ export interface CodexModeConfigSnapshot {
   modes: Record<CodexModeId, CodexModeValue>;
   recommendedModels: string[];
   reasoningEffortValues: string[];
+  planReasoningEffortValues: string[];
   warnings: string[];
   evidence: Evidence[];
 }

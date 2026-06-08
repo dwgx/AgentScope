@@ -182,6 +182,22 @@ describe("Codex control surfaces", () => {
     expect(result.modes.plan.reasoningEffort).toBe("medium");
   });
 
+  it("allows plan mode reasoning none but not default reasoning none", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(configPath, 'model = "gpt-5.5"\n');
+    const snapshot = await readCodexModeConfig(home);
+
+    const result = await saveCodexModeConfig({ planReasoningEffort: "none" }, snapshot.sha256, home);
+    const saved = await readFile(configPath, "utf8");
+
+    expect(saved).toContain('plan_mode_reasoning_effort = "none"');
+    expect(result.modes.plan.reasoningEffort).toBe("none");
+    await expect(
+      saveCodexModeConfig({ defaultReasoningEffort: "none" }, result.sha256, home)
+    ).rejects.toThrow(/Invalid Codex reasoning/);
+  });
+
   it("can clear explicit Codex mode overrides back to inheritance", async () => {
     const home = await tempHome();
     const configPath = path.join(home, ".codex", "config.toml");

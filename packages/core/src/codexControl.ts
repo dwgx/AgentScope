@@ -22,6 +22,7 @@ const maxEditableBytes = 256 * 1024;
 const textEncoding: BufferEncoding = "utf8";
 const recommendedModels = ["gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark"];
 const reasoningEffortValues = ["minimal", "low", "medium", "high", "xhigh"];
+const planReasoningEffortValues = ["none", ...reasoningEffortValues];
 const sensitivePathPartRe = /^(auth|credentials?|secrets?|tokens?|keyrings?|keychains?)$/i;
 const safeSkillNameRe = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const safeRuleNameRe = /^[a-z0-9][a-z0-9._-]{0,79}\.rules$/i;
@@ -703,6 +704,7 @@ function modeConfigSnapshot(
     modes,
     recommendedModels,
     reasoningEffortValues,
+    planReasoningEffortValues,
     warnings: sensitiveLines.length
       ? ["Sensitive key names were detected; mode defaults are read-only until config.toml is edited externally."]
       : [],
@@ -807,15 +809,19 @@ function validateModePatch(patch: CodexModeConfigPatch): void {
       throw new Error(`Invalid Codex model value for ${key}.`);
     }
   }
-  const reasoningEntries = [
-    ["defaultReasoningEffort", patch.defaultReasoningEffort],
-    ["planReasoningEffort", patch.planReasoningEffort]
-  ];
-  for (const [key, value] of reasoningEntries) {
-    if (value === null) continue;
-    if (value !== undefined && !reasoningEffortValues.includes(value)) {
-      throw new Error(`Invalid Codex reasoning effort for ${key}.`);
-    }
+  if (
+    patch.defaultReasoningEffort !== null &&
+    patch.defaultReasoningEffort !== undefined &&
+    !reasoningEffortValues.includes(patch.defaultReasoningEffort)
+  ) {
+    throw new Error("Invalid Codex reasoning effort for defaultReasoningEffort.");
+  }
+  if (
+    patch.planReasoningEffort !== null &&
+    patch.planReasoningEffort !== undefined &&
+    !planReasoningEffortValues.includes(patch.planReasoningEffort)
+  ) {
+    throw new Error("Invalid Codex reasoning effort for planReasoningEffort.");
   }
 }
 
