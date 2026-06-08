@@ -190,6 +190,35 @@ describe("scope confidence", () => {
     expect(sessionCandidatesForProcess(snapshot, process, 5)).toHaveLength(0);
   });
 
+  it("classifies Codex tool kernels and suppresses their cwd-only session candidates", () => {
+    const [process] = annotateProcessTree([
+      {
+        pid: 5010,
+        ppid: 100,
+        processName: "node.exe",
+        commandLine: String.raw`"C:\Program Files\nodejs\node.exe" "D:\tools\kernel.js" --session-id rt-123 --working-dir "D:\Project\AgentScope"`,
+        agent: "codex",
+        evidence: []
+      }
+    ]);
+    const session = baseSession("codex-thread", "indexed");
+    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.startedAt = "2026-06-08T08:00:00.000Z";
+    const snapshot: ScopeSnapshot = {
+      processes: [process!],
+      sessions: [session],
+      transcripts: [],
+      indexRecords: [],
+      relations: []
+    };
+
+    expect(process?.processRole).toBe("codex_tool_kernel");
+    expect(process?.runtimeSessionId).toBe("rt-123");
+    expect(process?.runtimeWorkingDir).toBe(String.raw`D:\Project\AgentScope`);
+    expect(process?.evidence.map((item) => item.source)).toContain("process.runtime");
+    expect(sessionCandidatesForProcess(snapshot, process!, 5)).toHaveLength(0);
+  });
+
   it("treats Claude PID matches as exact API-style runtime mapping", () => {
     const session = baseSession("claude-session", "indexed");
     session.agent = "claude";

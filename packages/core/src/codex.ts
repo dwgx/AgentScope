@@ -11,6 +11,15 @@ const rolloutNameRe = /^rollout-(.+)\.jsonl$/i;
 const rolloutStartRe = /^rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-/i;
 const uuidTailRe = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
+interface CodexThreadSourceMetadata {
+  parentThreadId?: string;
+  depth?: number;
+  agentPath?: string;
+  agentNickname?: string;
+  agentRole?: string;
+  kind?: "subagent";
+}
+
 export function loadCodexIndex(home?: string): {
   sessions: AgentSession[];
   records: IndexRecord[];
@@ -69,8 +78,13 @@ export function loadCodexIndex(home?: string): {
         }
       ];
       const metadata = safeCodexThreadMetadata(row);
-      const mergedMetadata = compactMetadata({ ...metadata, ...(logMetadata.get(sessionId) ?? {}) });
-      const kindEvidence = codexSessionKindEvidence(metadata);
+      const sourceMetadata = parseCodexThreadSource(row.source);
+      const mergedMetadata = compactMetadata({
+        ...metadata,
+        ...codexThreadSourceMetadata(sourceMetadata),
+        ...(logMetadata.get(sessionId) ?? {})
+      });
+      const kindEvidence = codexSessionKindEvidence(mergedMetadata, sourceMetadata);
       sessions.push({
         agent: "codex",
         sessionId,
@@ -99,13 +113,20 @@ export function loadCodexIndex(home?: string): {
         metadata: mergedMetadata,
         evidence
       });
-      const sourceParentId = parentThreadFromValue(row.source);
+      const sourceParentId = sourceMetadata?.parentThreadId;
       if (sourceParentId && sourceParentId !== sessionId) {
         sourceRelations.push({
           kind: "parent_child",
           sourceId: sourceParentId,
           targetId: sessionId,
           confidence: "indexed",
+          metadata: compactMetadata({
+            sourceKind: "codex_thread_source",
+            subagentDepth: sourceMetadata.depth,
+            agentNickname: sourceMetadata.agentNickname,
+            agentRole: sourceMetadata.agentRole,
+            agentPath: sourceMetadata.agentPath
+          }),
           evidence: [
             {
               source: "codex.sqlite.threads.source",
@@ -379,27 +400,40 @@ function loadSpawnEdges(db: Database.Database, dbPath: string): Relation[] {
   const existing = tableColumns(db, "thread_spawn_edges");
   const parentCol = firstExisting(existing, ["parent_thread_id", "parent_id", "source_thread_id", "source_id", "parent"]);
   const childCol = firstExisting(existing, ["child_thread_id", "child_id", "target_thread_id", "target_id", "child"]);
+  const statusCol = firstExisting(existing, ["status", "state"]);
   if (!parentCol || !childCol) return [];
   try {
+    const selectColumns = [
+      `${quoteIdentifier(parentCol)} parent_id`,
+      `${quoteIdentifier(childCol)} child_id`,
+      statusCol ? `${quoteIdentifier(statusCol)} status` : undefined
+    ].filter(Boolean).join(", ");
     const rows = db
-      .prepare(`SELECT ${quoteIdentifier(parentCol)} parent_id, ${quoteIdentifier(childCol)} child_id FROM ${quoteIdentifier("thread_spawn_edges")}`)
-      .all() as Array<{ parent_id?: unknown; child_id?: unknown }>;
+      .prepare(`SELECT ${selectColumns} FROM ${quoteIdentifier("thread_spawn_edges")}`)
+      .all() as Array<{ parent_id?: unknown; child_id?: unknown; status?: unknown }>;
     return rows.flatMap((row) => {
       const parentId = stringValue(row.parent_id);
       const childId = stringValue(row.child_id);
       if (!parentId || !childId) return [];
+      const status = stringValue(row.status);
       return [
         {
           kind: "parent_child" as const,
           sourceId: parentId,
           targetId: childId,
           confidence: "indexed" as const,
+          metadata: compactMetadata({
+            sourceKind: "codex_thread_spawn_edges",
+            spawnStatus: status
+          }),
           evidence: [
             {
               source: "codex.sqlite.thread_spawn_edges",
-              detail: "Parent/child thread relation from thread_spawn_edges table.",
+              detail: status
+                ? `Parent/child thread relation from thread_spawn_edges table; Codex spawn status is ${status}.`
+                : "Parent/child thread relation from thread_spawn_edges table.",
               path: dbPath,
-              field: `${parentCol},${childCol}`
+              field: [parentCol, childCol, statusCol].filter(Boolean).join(",")
             }
           ]
         }
@@ -416,10 +450,11 @@ function mergeRelations(relations: Relation[]): Relation[] {
     const key = `${relation.kind}\0${relation.sourceId}\0${relation.targetId}`;
     const existing = merged.get(key);
     if (!existing) {
-      merged.set(key, { ...relation, evidence: [...relation.evidence] });
+      merged.set(key, { ...relation, metadata: relation.metadata ? { ...relation.metadata } : undefined, evidence: [...relation.evidence] });
       continue;
     }
     existing.confidence = bestConfidence(existing.confidence, relation.confidence);
+    existing.metadata = mergeRelationMetadata(existing.metadata, relation.metadata);
     existing.evidence = appendEvidenceUnique(existing.evidence, relation.evidence);
   }
   return [...merged.values()];
@@ -434,8 +469,30 @@ function classifyRelationsWithSessions(relations: Relation[], sessions: AgentSes
     return {
       ...relation,
       kind: "subagent" as const,
+      metadata: mergeRelationMetadata(relation.metadata, relationMetadataFromSession(target)),
       evidence: appendEvidenceUnique(relation.evidence, target.sessionKindEvidence ?? [])
     };
+  });
+}
+
+function mergeRelationMetadata(
+  left?: Record<string, unknown>,
+  right?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!left) return right ? { ...right } : undefined;
+  if (!right) return { ...left };
+  return compactMetadata({ ...left, ...right });
+}
+
+function relationMetadataFromSession(session: AgentSession): Record<string, unknown> | undefined {
+  const metadata = session.indexMetadata ?? {};
+  return compactMetadata({
+    sourceKind: metadata.sourceKind,
+    subagentDepth: metadata.subagent_depth ?? metadata.subagentDepth,
+    agentNickname: metadata.agent_nickname ?? metadata.agentNickname,
+    agentRole: metadata.agent_role ?? metadata.agentRole,
+    agentPath: metadata.agent_path ?? metadata.agentPath,
+    spawnStatus: metadata.spawn_status ?? metadata.spawnStatus
   });
 }
 
@@ -449,15 +506,15 @@ function bestConfidence(left: Relation["confidence"], right: Relation["confidenc
   return rank[left] >= rank[right] ? left : right;
 }
 
-function parentThreadFromValue(value: unknown): string | undefined {
+function parseCodexThreadSource(value: unknown): CodexThreadSourceMetadata | undefined {
   const direct = objectValue(value);
-  if (direct) return parentThreadFromObject(direct);
+  if (direct) return codexThreadSourceFromObject(direct);
   const text = stringValue(value);
   if (!text) return undefined;
   try {
     const parsed = JSON.parse(text) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parentThreadFromObject(parsed as Record<string, unknown>);
+      return codexThreadSourceFromObject(parsed as Record<string, unknown>);
     }
   } catch {
     return undefined;
@@ -465,20 +522,36 @@ function parentThreadFromValue(value: unknown): string | undefined {
   return undefined;
 }
 
-function parentThreadFromObject(value: Record<string, unknown>, depth = 0): string | undefined {
-  if (depth > 3) return undefined;
+function codexThreadSourceFromObject(value: Record<string, unknown>): CodexThreadSourceMetadata | undefined {
+  const subagent = objectValue(value.subagent) ?? objectValue(value.subAgent);
+  const spawn = subagent ? objectValue(subagent.thread_spawn) ?? objectValue(subagent.threadSpawn) : undefined;
+  if (!subagent || !spawn) return undefined;
   const direct =
-    stringValue(value.parent_thread_id) ??
-    stringValue(value.parentThreadId) ??
-    stringValue(value.parent_id) ??
-    stringValue(value.parentId);
-  if (direct) return direct;
-  for (const nested of Object.values(value)) {
-    if (!nested || typeof nested !== "object" || Array.isArray(nested)) continue;
-    const found = parentThreadFromObject(nested as Record<string, unknown>, depth + 1);
-    if (found) return found;
-  }
-  return undefined;
+    stringValue(spawn.parent_thread_id) ??
+    stringValue(spawn.parentThreadId) ??
+    stringValue(spawn.parent_id) ??
+    stringValue(spawn.parentId);
+  return compactMetadata({
+    parentThreadId: direct,
+    depth: numberValue(spawn.depth),
+    agentPath: stringValue(spawn.agent_path) ?? stringValue(spawn.agentPath),
+    agentNickname: stringValue(spawn.agent_nickname) ?? stringValue(spawn.agentNickname),
+    agentRole: stringValue(spawn.agent_role) ?? stringValue(spawn.agentRole),
+    kind: "subagent"
+  }) as CodexThreadSourceMetadata;
+}
+
+function codexThreadSourceMetadata(source?: CodexThreadSourceMetadata): Record<string, unknown> {
+  if (!source) return {};
+  return compactMetadata({
+    sourceKind: "codex_thread_source",
+    parent_thread_id: source.parentThreadId,
+    subagent_depth: source.depth,
+    agent_path: source.agentPath,
+    agent_nickname: source.agentNickname,
+    agent_role: source.agentRole,
+    thread_source: source.kind
+  });
 }
 
 function applyRelationsToSessions(sessions: AgentSession[], relations: Relation[]): void {
@@ -490,6 +563,16 @@ function applyRelationsToSessions(sessions: AgentSession[], relations: Relation[
     if (parent && !parent.childSessionIds.includes(relation.targetId)) parent.childSessionIds.push(relation.targetId);
     if (child) {
       child.parentSessionId = relation.sourceId;
+      child.indexMetadata = compactMetadata({
+        ...(child.indexMetadata ?? {}),
+        ...compactMetadata({
+          spawn_status: relation.metadata?.spawnStatus,
+          subagent_depth: relation.metadata?.subagentDepth,
+          agent_nickname: relation.metadata?.agentNickname,
+          agent_role: relation.metadata?.agentRole,
+          agent_path: relation.metadata?.agentPath
+        })
+      });
       child.evidence = appendEvidenceUnique(child.evidence, relation.evidence);
       const nextKind = relation.kind === "subagent" ? "subagent" : child.sessionKind === "subagent" ? "subagent" : "child";
       setSessionKind(child, nextKind, relation.evidence);
@@ -497,7 +580,7 @@ function applyRelationsToSessions(sessions: AgentSession[], relations: Relation[
   }
 }
 
-function codexSessionKindEvidence(metadata: Record<string, unknown>): {
+function codexSessionKindEvidence(metadata: Record<string, unknown>, sourceMetadata?: CodexThreadSourceMetadata): {
   kind: AgentSessionKind;
   evidence: Evidence[];
 } {
@@ -506,21 +589,22 @@ function codexSessionKindEvidence(metadata: Record<string, unknown>): {
   const agentRole = stringValue(metadata.agent_role);
   const agentPath = stringValue(metadata.agent_path);
   const threadSource = stringValue(metadata.thread_source) ?? stringValue(metadata.source);
+  if (sourceMetadata?.kind === "subagent" || threadSource === "subagent") {
+    evidence.push({
+      source: "codex.sqlite.threads.thread_source",
+      detail: "Codex thread source metadata identifies this as a subagent thread.",
+      field: "thread_source,source"
+    });
+  }
   if (agentNickname || agentRole || agentPath) {
     evidence.push({
       source: "codex.sqlite.threads.agent_metadata",
       detail: "Codex thread has agent_nickname, agent_role, or agent_path metadata; AgentScope classifies it as a subagent.",
       field: "agent_nickname,agent_role,agent_path"
     });
-    return { kind: "subagent", evidence };
   }
-  if (threadSource && /subagent|agent|spawn|child/i.test(threadSource)) {
-    evidence.push({
-      source: "codex.sqlite.threads.thread_source",
-      detail: "Codex thread source metadata suggests this is a spawned child or subagent thread.",
-      field: "thread_source,source"
-    });
-    return { kind: "subagent_candidate", evidence };
+  if (evidence.length) {
+    return { kind: "subagent", evidence };
   }
   return { kind: "session", evidence };
 }

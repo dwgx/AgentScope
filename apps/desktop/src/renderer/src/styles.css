@@ -1465,6 +1465,19 @@ input {
   gap: 5px;
 }
 
+.relationMetaChips {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.relationMetaChips .badge {
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .relationFlow {
   min-width: 0;
   display: grid;

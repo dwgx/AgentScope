@@ -72,6 +72,7 @@ type SessionGroupMode = "agent" | "cwd" | "parent" | "none";
 type SessionKindFilter = "all" | "root" | "child" | "subagent";
 type RelationKindFilter = "all" | Relation["kind"];
 type RelationConfidenceFilter = "all" | Relation["confidence"];
+type RelationSpawnStatusFilter = "all" | "open" | "closed" | "unknown";
 type CodexModeDraft = {
   defaultModel: string;
   defaultReasoningEffort: string;
@@ -2356,10 +2357,12 @@ function RelationList(props: {
   const { t } = useTranslation();
   const [kindFilter, setKindFilter] = useState<RelationKindFilter>("all");
   const [confidenceFilter, setConfidenceFilter] = useState<RelationConfidenceFilter>("all");
+  const [spawnStatusFilter, setSpawnStatusFilter] = useState<RelationSpawnStatusFilter>("all");
   const [relationQuery, setRelationQuery] = useState("");
+  const hasSpawnStatus = useMemo(() => props.relations.some((relation) => relationSpawnStatus(relation)), [props.relations]);
   const filteredRelations = useMemo(
-    () => filterRelations(props.relations, props.sessions, kindFilter, confidenceFilter, relationQuery),
-    [confidenceFilter, kindFilter, props.relations, props.sessions, relationQuery]
+    () => filterRelations(props.relations, props.sessions, kindFilter, confidenceFilter, spawnStatusFilter, relationQuery),
+    [confidenceFilter, kindFilter, props.relations, props.sessions, relationQuery, spawnStatusFilter]
   );
   useEffect(() => {
     const keys = new Set(filteredRelations.map(relationKey));
@@ -2404,6 +2407,16 @@ function RelationList(props: {
             onChange={setConfidenceFilter}
           />
         </ToolbarControl>
+        {hasSpawnStatus && (
+          <ToolbarControl label={t("views.relations.filter.spawnStatus")}>
+            <MiniSegmentedControl
+              value={spawnStatusFilter}
+              values={["all", "open", "closed", "unknown"]}
+              label={(value) => (value === "all" ? t("views.relations.filter.all") : t(`views.relations.filter.${value}`))}
+              onChange={setSpawnStatusFilter}
+            />
+          </ToolbarControl>
+        )}
         <div className="relationSearch">
           <Search size={14} />
           <input
@@ -2445,6 +2458,7 @@ function RelationList(props: {
               <div className="relationKind relationItemKind">
                 <Badge text={t(`relations.kind.${relation.kind}`)} />
                 <ConfidenceBadge value={relation.confidence} />
+                <RelationMetadataChips relation={relation} />
               </div>
               <div className="relationFlow">
                 <RelationEndpoint
@@ -4268,6 +4282,7 @@ function RelationInspector(props: {
         <Field label={t("inspector.fields.source")} value={relation.sourceId} mono long />
         <Field label={t("inspector.fields.target")} value={relation.targetId} mono long />
       </FieldGroup>
+      <CodexSpawnRelationSummary relation={relation} />
       <FieldGroup title={t("inspector.endpoints")}>
         <RelationInspectorEndpoint
           label={t(`relations.endpoint.${relation.kind}.source`)}
@@ -4371,6 +4386,7 @@ function Inspector(props: {
           <Field label={t("inspector.fields.parentAgentPid")} value={process.parentAgentPid} />
           <Field label={t("inspector.fields.roleEvidence")} value={process.processRoleDetail} long />
         </FieldGroup>
+        <ProcessRuntimeSummary process={process} />
         <FieldGroup title={t("inspector.likelySessions")}>
           <CandidateList
             candidates={process.sessionCandidates ?? []}
@@ -4443,6 +4459,7 @@ function Inspector(props: {
         />
       </FieldGroup>
       <ModelRuntimeSummary session={session} />
+      <CodexSpawnSessionSummary session={session} />
       <ControlSummary
         session={session}
         onOpenPath={props.onOpenPath}
@@ -4580,6 +4597,62 @@ function ModelRuntimeSummary(props: { session: AgentSession }) {
   );
 }
 
+function CodexSpawnSessionSummary(props: { session: AgentSession }) {
+  const { t } = useTranslation();
+  const metadata = props.session.indexMetadata ?? {};
+  const spawnStatus = metadataValue(metadata, "spawn_status", "spawnStatus");
+  const depth = metadataValue(metadata, "subagent_depth", "subagentDepth");
+  const agentNickname = metadataValue(metadata, "agent_nickname", "agentNickname");
+  const agentRole = metadataValue(metadata, "agent_role", "agentRole");
+  const agentPath = metadataValue(metadata, "agent_path", "agentPath");
+  const sourceKind = metadataValue(metadata, "sourceKind");
+  if (!spawnStatus && depth === undefined && !agentNickname && !agentRole && !agentPath && !sourceKind) return null;
+  return (
+    <FieldGroup title={t("inspector.codexSpawn")}>
+      <Field label={t("inspector.fields.spawnStatus")} value={spawnStatus} />
+      <Field label={t("inspector.fields.depth")} value={depth} />
+      <Field label={t("inspector.fields.agentNickname")} value={agentNickname} />
+      <Field label={t("inspector.fields.agentRole")} value={agentRole} />
+      <Field label={t("inspector.fields.agentPath")} value={agentPath} mono long />
+      <Field label={t("inspector.fields.sourceKind")} value={sourceKind} />
+    </FieldGroup>
+  );
+}
+
+function CodexSpawnRelationSummary(props: { relation: Relation }) {
+  const { t } = useTranslation();
+  const metadata = props.relation.metadata ?? {};
+  const spawnStatus = metadataValue(metadata, "spawnStatus", "spawn_status");
+  const depth = metadataValue(metadata, "subagentDepth", "subagent_depth");
+  const agentNickname = metadataValue(metadata, "agentNickname", "agent_nickname");
+  const agentRole = metadataValue(metadata, "agentRole", "agent_role");
+  const agentPath = metadataValue(metadata, "agentPath", "agent_path");
+  const sourceKind = metadataValue(metadata, "sourceKind");
+  if (!spawnStatus && depth === undefined && !agentNickname && !agentRole && !agentPath && !sourceKind) return null;
+  return (
+    <FieldGroup title={t("inspector.codexSpawn")}>
+      <Field label={t("inspector.fields.spawnStatus")} value={spawnStatus} />
+      <Field label={t("inspector.fields.depth")} value={depth} />
+      <Field label={t("inspector.fields.agentNickname")} value={agentNickname} />
+      <Field label={t("inspector.fields.agentRole")} value={agentRole} />
+      <Field label={t("inspector.fields.agentPath")} value={agentPath} mono long />
+      <Field label={t("inspector.fields.sourceKind")} value={sourceKind} />
+    </FieldGroup>
+  );
+}
+
+function ProcessRuntimeSummary(props: { process: AgentProcess }) {
+  const { t } = useTranslation();
+  const process = props.process;
+  if (!process.runtimeSessionId && !process.runtimeWorkingDir) return null;
+  return (
+    <FieldGroup title={t("inspector.processRuntime")}>
+      <Field label={t("inspector.fields.runtimeSessionId")} value={process.runtimeSessionId} mono long />
+      <Field label={t("inspector.fields.runtimeWorkingDir")} value={process.runtimeWorkingDir} mono long />
+    </FieldGroup>
+  );
+}
+
 function ControlSummary(props: {
   session: AgentSession;
   onOpenPath: (targetPath?: string) => void;
@@ -4677,6 +4750,11 @@ const metadataDisplayAllowlist = new Set([
   "entrypoint",
   "agent_nickname",
   "agent_role",
+  "agent_path",
+  "spawn_status",
+  "subagent_depth",
+  "parent_thread_id",
+  "sourceKind",
   "daemon_worker",
   "storedPid",
   "metadata_scan_lines",
@@ -5145,6 +5223,30 @@ function Badge(props: { text: string; tone?: "ok" | "warn" | "heuristic" | undef
   return <span className={`badge ${props.tone ?? ""}`}>{props.text}</span>;
 }
 
+function RelationMetadataChips(props: { relation: Relation }) {
+  const { t } = useTranslation();
+  const metadata = props.relation.metadata ?? {};
+  const chips = [
+    ["spawnStatus", metadataValue(metadata, "spawnStatus", "spawn_status")],
+    ["depth", metadataValue(metadata, "subagentDepth", "subagent_depth")],
+    ["agentNickname", metadataValue(metadata, "agentNickname", "agent_nickname")],
+    ["agentRole", metadataValue(metadata, "agentRole", "agent_role")]
+  ] as const;
+  const visible = chips.filter(([, value]) => value !== undefined);
+  if (!visible.length) return null;
+  return (
+    <span className="relationMetaChips">
+      {visible.map(([key, value]) => (
+        <Badge
+          key={key}
+          text={`${t(`inspector.fields.${key}`)} ${String(value)}`}
+          tone={key === "spawnStatus" && String(value).toLowerCase() === "open" ? "ok" : undefined}
+        />
+      ))}
+    </span>
+  );
+}
+
 function SwitchControl(props: { checked: boolean; onChange: (checked: boolean) => void }) {
   return (
     <button
@@ -5185,6 +5287,7 @@ function isHelperProcess(process: AgentProcess): boolean {
     "codex_node_repl",
     "codex_app_server",
     "codex_mcp_tool",
+    "codex_tool_kernel",
     "agent_helper"
   ].includes(process.processRole ?? "");
 }
@@ -5530,30 +5633,56 @@ function filterRelations(
   sessions: AgentSession[],
   kindFilter: RelationKindFilter,
   confidenceFilter: RelationConfidenceFilter,
+  spawnStatusFilter: RelationSpawnStatusFilter,
   query: string
 ): Relation[] {
   const normalizedQuery = query.trim().toLowerCase();
   return relations.filter((relation) => {
     if (kindFilter !== "all" && relation.kind !== kindFilter) return false;
     if (confidenceFilter !== "all" && relation.confidence !== confidenceFilter) return false;
+    if (spawnStatusFilter !== "all" && (relationSpawnStatus(relation) ?? "unknown") !== spawnStatusFilter) return false;
     if (!normalizedQuery) return true;
     const sourceSession = sessions.find((session) => session.sessionId === relation.sourceId);
     const targetSession = sessions.find((session) => session.sessionId === relation.targetId);
     const haystack = [
       relation.kind,
       relation.confidence,
+      relationSpawnStatus(relation) ?? "",
       relation.sourceId,
       relation.targetId,
       sourceSession ? displayTitle(sourceSession) : "",
       sourceSession?.cwd ?? "",
       targetSession ? displayTitle(targetSession) : "",
       targetSession?.cwd ?? "",
+      ...relationMetadataSearchValues(relation),
       ...relation.evidence.flatMap((item) => [item.source, item.detail, item.path ?? "", item.field ?? ""])
     ]
       .join("\n")
       .toLowerCase();
     return haystack.includes(normalizedQuery);
   });
+}
+
+function relationSpawnStatus(relation: Relation): RelationSpawnStatusFilter | undefined {
+  const value = metadataValue(relation.metadata ?? {}, "spawnStatus", "spawn_status");
+  if (!value) return undefined;
+  const normalized = String(value).toLowerCase();
+  if (normalized === "open" || normalized === "closed") return normalized;
+  return "unknown";
+}
+
+function relationMetadataSearchValues(relation: Relation): string[] {
+  const metadata = relation.metadata ?? {};
+  return [
+    metadataValue(metadata, "sourceKind"),
+    metadataValue(metadata, "spawnStatus", "spawn_status"),
+    metadataValue(metadata, "subagentDepth", "subagent_depth"),
+    metadataValue(metadata, "agentNickname", "agent_nickname"),
+    metadataValue(metadata, "agentRole", "agent_role"),
+    metadataValue(metadata, "agentPath", "agent_path")
+  ]
+    .filter((value) => value !== undefined)
+    .map(String);
 }
 
 function searchResultTitle(result: Record<string, unknown>): string {

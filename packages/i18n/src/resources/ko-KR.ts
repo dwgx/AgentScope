@@ -179,6 +179,7 @@ export const koKR = {
         codex_node_repl: "Subagent runtime",
         codex_app_server: "Codex app-server",
         codex_mcp_tool: "MCP tool",
+        codex_tool_kernel: "Tool kernel",
         claude_cli: "Claude CLI",
         claude_daemon: "Claude daemon",
         agent_helper: "Agent helper",
@@ -257,7 +258,11 @@ export const koKR = {
       filter: {
         kind: "종류",
         confidence: "신뢰도",
+        spawnStatus: "spawn",
         all: "전체",
+        open: "open",
+        closed: "closed",
+        unknown: "알 수 없음",
         search: "세션, 경로, 증거 필터"
       }
     },
@@ -498,6 +503,8 @@ export const koKR = {
     identity: "식별",
     transcript: "Transcript",
     modelRuntime: "모델 및 실행 설정",
+    codexSpawn: "Codex spawn",
+    processRuntime: "프로세스 런타임",
     control: "안전 제어",
     indexMetadata: "색인 메타데이터",
     relations: "관계",
@@ -581,6 +588,14 @@ export const koKR = {
       approvalMode: "승인",
       sandboxPolicy: "샌드박스",
       entrypoint: "진입점",
+      spawnStatus: "spawn",
+      depth: "깊이",
+      agentNickname: "Agent",
+      agentRole: "역할",
+      agentPath: "Agent path",
+      sourceKind: "소스 종류",
+      runtimeSessionId: "Runtime ID",
+      runtimeWorkingDir: "Runtime cwd",
       resumeCommand: "재개 명령",
       safeControl: "경계"
     }

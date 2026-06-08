@@ -102,6 +102,16 @@ export function isRelatedProcess(process: AgentProcess): boolean {
 function processFromRow(row: Win32ProcessRow): AgentProcess {
   const executablePath = normalizeWindowsPath(row.ExecutablePath);
   const commandLine = row.CommandLine ?? undefined;
+  const runtimeArgs = parseRuntimeArgs(commandLine);
+  const runtimeEvidence = runtimeArgs.sessionId || runtimeArgs.workingDir
+    ? [
+        {
+          source: "process.runtime",
+          detail: "Runtime helper arguments parsed from command line. This id identifies a Codex tool kernel, not a Codex thread/session id.",
+          field: "--session-id,--working-dir"
+        }
+      ]
+    : [];
   return {
     pid: Number(row.ProcessId ?? 0),
     ppid: row.ParentProcessId === undefined ? undefined : Number(row.ParentProcessId),
@@ -115,12 +125,15 @@ function processFromRow(row: Win32ProcessRow): AgentProcess {
     privateMemoryBytes: numberValue(row.PrivateMemorySize64),
     cpuSeconds: numberValue(row.CPU),
     agent: classifyProcess(row.Name, commandLine, executablePath),
+    runtimeSessionId: runtimeArgs.sessionId,
+    runtimeWorkingDir: runtimeArgs.workingDir,
     evidence: [
       {
         source: "Win32_Process",
         detail: "Process metadata from Get-CimInstance Win32_Process plus Get-Process runtime title/start time.",
         field: "ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,CreationDate,StartTime,MainWindowTitle"
-      }
+      },
+      ...runtimeEvidence
     ]
   };
 }
@@ -128,6 +141,16 @@ function processFromRow(row: Win32ProcessRow): AgentProcess {
 export function annotateProcessTree(processes: AgentProcess[]): AgentProcess[] {
   const byPid = new Map(processes.map((process) => [process.pid, process]));
   for (const process of processes) {
+    const runtimeArgs = parseRuntimeArgs(process.commandLine);
+    process.runtimeSessionId ??= runtimeArgs.sessionId;
+    process.runtimeWorkingDir ??= runtimeArgs.workingDir;
+    if ((process.runtimeSessionId || process.runtimeWorkingDir) && !process.evidence.some((item) => item.source === "process.runtime")) {
+      process.evidence.push({
+        source: "process.runtime",
+        detail: "Runtime helper arguments parsed from command line. This id identifies a Codex tool kernel, not a Codex thread/session id.",
+        field: "--session-id,--working-dir"
+      });
+    }
     const role = classifyProcessRole(process, byPid);
     process.processRole = role.role;
     process.processRoleDetail = role.detail;
@@ -173,6 +196,10 @@ function classifyProcessRole(
     return { role: "codex_app_server", detail: "Codex app-server helper; it belongs to a Codex process tree and should not be treated as a root task." };
   }
 
+  if (isCodexToolKernel(name, commandLine)) {
+    return { role: "codex_tool_kernel", detail: "Codex runtime tool kernel identified by --session-id and --working-dir helper arguments; it is not a standalone Codex thread." };
+  }
+
   if (isCodexMcpTool(haystack)) {
     return { role: "codex_mcp_tool", detail: "Codex-launched MCP/tool helper identified from command line markers." };
   }
@@ -204,6 +231,58 @@ function isCodexMcpTool(haystack: string): boolean {
     "mcp-server",
     "modelcontextprotocol"
   ].some((marker) => haystack.includes(marker));
+}
+
+function isCodexToolKernel(name: string, commandLine: string): boolean {
+  if (name !== "node.exe" && name !== "node") return false;
+  return commandLine.includes("--session-id") && commandLine.includes("--working-dir");
+}
+
+function parseRuntimeArgs(commandLine?: string): { sessionId?: string; workingDir?: string } {
+  const args = tokenizeCommandLine(commandLine);
+  const sessionId = commandArgValue(args, "--session-id");
+  const workingDir = normalizeWindowsPath(commandArgValue(args, "--working-dir"));
+  return compactRuntimeArgs({ sessionId, workingDir });
+}
+
+function compactRuntimeArgs(values: { sessionId?: string | undefined; workingDir?: string | undefined }): { sessionId?: string; workingDir?: string } {
+  const out: { sessionId?: string; workingDir?: string } = {};
+  if (values.sessionId) out.sessionId = values.sessionId;
+  if (values.workingDir) out.workingDir = values.workingDir;
+  return out;
+}
+
+function commandArgValue(args: string[], name: string): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === name) return args[index + 1] || undefined;
+    if (arg?.startsWith(`${name}=`)) return arg.slice(name.length + 1) || undefined;
+  }
+  return undefined;
+}
+
+function tokenizeCommandLine(commandLine?: string): string[] {
+  if (!commandLine) return [];
+  const args: string[] = [];
+  let current = "";
+  let quote: string | undefined;
+  for (let index = 0; index < commandLine.length; index += 1) {
+    const char = commandLine[index]!;
+    if ((char === `"` || char === "'") && (!quote || quote === char)) {
+      quote = quote ? undefined : char;
+      continue;
+    }
+    if (!quote && /\s/.test(char)) {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (current) args.push(current);
+  return args;
 }
 
 function processRootPid(process: AgentProcess, byPid: Map<number, AgentProcess>): number | undefined {

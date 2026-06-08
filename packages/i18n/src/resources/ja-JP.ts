@@ -180,6 +180,7 @@ export const jaJP = {
         codex_node_repl: "Subagent runtime",
         codex_app_server: "Codex app-server",
         codex_mcp_tool: "MCP tool",
+        codex_tool_kernel: "Tool kernel",
         claude_cli: "Claude CLI",
         claude_daemon: "Claude daemon",
         agent_helper: "Agent helper",
@@ -258,7 +259,11 @@ export const jaJP = {
       filter: {
         kind: "種類",
         confidence: "信頼度",
+        spawnStatus: "spawn",
         all: "すべて",
+        open: "open",
+        closed: "closed",
+        unknown: "不明",
         search: "セッション、パス、証拠を絞り込み"
       }
     },
@@ -501,6 +506,8 @@ export const jaJP = {
     identity: "識別",
     transcript: "転写",
     modelRuntime: "モデルと実行設定",
+    codexSpawn: "Codex spawn",
+    processRuntime: "プロセス実行時",
     control: "安全な制御",
     indexMetadata: "索引メタデータ",
     relations: "関係",
@@ -584,6 +591,14 @@ export const jaJP = {
       approvalMode: "承認",
       sandboxPolicy: "サンドボックス",
       entrypoint: "入口",
+      spawnStatus: "spawn",
+      depth: "深さ",
+      agentNickname: "Agent",
+      agentRole: "役割",
+      agentPath: "Agent path",
+      sourceKind: "ソース種別",
+      runtimeSessionId: "Runtime ID",
+      runtimeWorkingDir: "Runtime cwd",
       resumeCommand: "再開コマンド",
       safeControl: "境界"
     }

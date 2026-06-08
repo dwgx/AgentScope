@@ -460,6 +460,7 @@ function isHelperProcess(process: AgentProcess): boolean {
     "codex_node_repl",
     "codex_app_server",
     "codex_mcp_tool",
+    "codex_tool_kernel",
     "agent_helper"
   ].includes(process.processRole ?? "");
 }

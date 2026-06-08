@@ -193,6 +193,7 @@ export const enUS = {
         codex_node_repl: "Subagent runtime",
         codex_app_server: "Codex app-server",
         codex_mcp_tool: "MCP tool",
+        codex_tool_kernel: "Tool kernel",
         claude_cli: "Claude CLI",
         claude_daemon: "Claude daemon",
         agent_helper: "Agent helper",
@@ -271,7 +272,11 @@ export const enUS = {
       filter: {
         kind: "Kind",
         confidence: "Confidence",
+        spawnStatus: "Spawn",
         all: "All",
+        open: "open",
+        closed: "closed",
+        unknown: "unknown",
         search: "Filter sessions, paths, evidence"
       }
     },
@@ -582,6 +587,8 @@ export const enUS = {
     identity: "Identity",
     transcript: "Transcript",
     modelRuntime: "Model + Runtime",
+    codexSpawn: "Codex Spawn",
+    processRuntime: "Process Runtime",
     control: "Safe Control",
     indexMetadata: "Index Metadata",
     relations: "Relations",
@@ -665,6 +672,14 @@ export const enUS = {
       approvalMode: "Approval",
       sandboxPolicy: "Sandbox",
       entrypoint: "Entrypoint",
+      spawnStatus: "Spawn",
+      depth: "Depth",
+      agentNickname: "Agent",
+      agentRole: "Role",
+      agentPath: "Agent path",
+      sourceKind: "Source kind",
+      runtimeSessionId: "Runtime id",
+      runtimeWorkingDir: "Runtime cwd",
       resumeCommand: "Resume",
       safeControl: "Boundary"
     }

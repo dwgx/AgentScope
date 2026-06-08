@@ -179,6 +179,7 @@ export const zhCN = {
         codex_node_repl: "子代理运行时",
         codex_app_server: "Codex app-server",
         codex_mcp_tool: "MCP 工具",
+        codex_tool_kernel: "工具内核",
         claude_cli: "Claude CLI",
         claude_daemon: "Claude daemon",
         agent_helper: "Agent helper",
@@ -257,7 +258,11 @@ export const zhCN = {
       filter: {
         kind: "类型",
         confidence: "置信度",
+        spawnStatus: "派生",
         all: "全部",
+        open: "open",
+        closed: "closed",
+        unknown: "未知",
         search: "筛选会话、路径、证据"
       }
     },
@@ -552,6 +557,8 @@ export const zhCN = {
     identity: "身份",
     transcript: "转录",
     modelRuntime: "模型与运行参数",
+    codexSpawn: "Codex 派生",
+    processRuntime: "进程运行时",
     control: "安全控制",
     indexMetadata: "索引元数据",
     relations: "关系",
@@ -634,6 +641,14 @@ export const zhCN = {
       approvalMode: "审批",
       sandboxPolicy: "沙箱",
       entrypoint: "入口",
+      spawnStatus: "派生",
+      depth: "深度",
+      agentNickname: "Agent",
+      agentRole: "角色",
+      agentPath: "Agent 路径",
+      sourceKind: "来源类型",
+      runtimeSessionId: "运行时 ID",
+      runtimeWorkingDir: "运行时 cwd",
       resumeCommand: "恢复命令",
       safeControl: "边界"
     }

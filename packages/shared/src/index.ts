@@ -10,6 +10,7 @@ export type AgentProcessRole =
   | "codex_node_repl"
   | "codex_app_server"
   | "codex_mcp_tool"
+  | "codex_tool_kernel"
   | "claude_cli"
   | "claude_daemon"
   | "agent_helper"
@@ -42,6 +43,8 @@ export interface AgentProcess {
   processRoleDetail?: string | undefined;
   rootPid?: number | undefined;
   parentAgentPid?: number | undefined;
+  runtimeSessionId?: string | undefined;
+  runtimeWorkingDir?: string | undefined;
   sessionCandidates?: SessionCandidate[] | undefined;
   evidence: Evidence[];
 }
@@ -106,6 +109,7 @@ export interface Relation {
   sourceId: string;
   targetId: string;
   confidence: Confidence;
+  metadata?: Record<string, unknown> | undefined;
   evidence: Evidence[];
 }
 

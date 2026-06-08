@@ -80,4 +80,101 @@ describe("Codex helpers", () => {
     expect(child?.parentSessionId).toBe("parent-thread");
     expect(child?.sessionKind).toBe("child");
   });
+
+  it("classifies official Codex thread source metadata as indexed subagent evidence", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-source-"));
+    tempRoots.push(home);
+    const codexRoot = join(home, ".codex");
+    mkdirSync(codexRoot, { recursive: true });
+    const db = new Database(join(codexRoot, "state_5.sqlite"));
+    db.exec(`
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        cwd TEXT,
+        source TEXT
+      );
+      CREATE TABLE thread_spawn_edges (parent_thread_id TEXT, child_thread_id TEXT, status TEXT);
+    `);
+    db.prepare("INSERT INTO threads (id, title, cwd, source) VALUES (?, ?, ?, ?)").run(
+      "parent-thread",
+      "Parent",
+      String.raw`D:\work`,
+      "cli"
+    );
+    db.prepare("INSERT INTO threads (id, title, cwd, source) VALUES (?, ?, ?, ?)").run(
+      "child-thread",
+      "Worker",
+      String.raw`D:\work`,
+      JSON.stringify({
+        subagent: {
+          thread_spawn: {
+            parent_thread_id: "parent-thread",
+            depth: 2,
+            agent_nickname: "Goodall",
+            agent_role: "researcher",
+            agent_path: String.raw`D:\work\.codex\agents\goodall.md`
+          }
+        }
+      })
+    );
+    db.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id, status) VALUES (?, ?, ?)").run(
+      "parent-thread",
+      "child-thread",
+      "open"
+    );
+    db.close();
+
+    const snapshot = loadCodexIndex(home);
+    const child = snapshot.sessions.find((session) => session.sessionId === "child-thread");
+    const relation = snapshot.relations.find((item) => item.kind === "subagent" && item.targetId === "child-thread");
+    expect(child?.sessionKind).toBe("subagent");
+    expect(child?.parentSessionId).toBe("parent-thread");
+    expect(child?.indexMetadata).toMatchObject({
+      parent_thread_id: "parent-thread",
+      subagent_depth: 2,
+      agent_nickname: "Goodall",
+      agent_role: "researcher",
+      spawn_status: "open"
+    });
+    expect(relation?.metadata).toMatchObject({
+      sourceKind: "codex_thread_source",
+      subagentDepth: 2,
+      agentNickname: "Goodall",
+      agentRole: "researcher",
+      spawnStatus: "open"
+    });
+    expect(relation?.evidence.map((item) => item.source)).toContain("codex.sqlite.threads.thread_source");
+    expect(relation?.evidence.map((item) => item.source)).toContain("codex.sqlite.threads.agent_metadata");
+    expect(relation?.evidence.map((item) => item.source)).toContain("codex.sqlite.thread_spawn_edges");
+  });
+
+  it("does not treat ambiguous source strings as subagent candidates", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-plain-source-"));
+    tempRoots.push(home);
+    const codexRoot = join(home, ".codex");
+    mkdirSync(codexRoot, { recursive: true });
+    const db = new Database(join(codexRoot, "state_5.sqlite"));
+    db.exec(`
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        cwd TEXT,
+        source TEXT,
+        thread_source TEXT
+      );
+    `);
+    db.prepare("INSERT INTO threads (id, title, cwd, source, thread_source) VALUES (?, ?, ?, ?, ?)").run(
+      "plain-thread",
+      "Plain",
+      String.raw`D:\work`,
+      "user agent discussion with child process notes",
+      "cli"
+    );
+    db.close();
+
+    const plain = loadCodexIndex(home).sessions.find((session) => session.sessionId === "plain-thread");
+    expect(plain?.sessionKind).toBe("session");
+    expect(plain?.sessionKindEvidence ?? []).toHaveLength(0);
+  });
 });
