@@ -72,7 +72,7 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 - `Ctrl+F` opens search everywhere. `Esc` closes search first, then steps back view history.
 - Search runs as-you-type. Clearing search must cancel stale async results.
 - Notifications appear bottom-center, do not close on body click, and expose explicit actions such as reveal/open path.
-- Session row right-click menu is intentionally small: backup session, delete session, locate transcript file.
+- Session row right-click menu supports focused controls: backup, delete, locate transcript, resume/fork for a single session, and multi-select backup/delete. Keep it compact and row-anchored.
 - The Sessions page owns import backup. Inspector safe control should stay focused on the selected session.
 - Keep icons visually centered in `AgentTile`, buttons, segmented controls, and menus.
 - After UI changes, smoke-test packed or dev desktop if feasible and inspect screenshots if layout/alignment changed.

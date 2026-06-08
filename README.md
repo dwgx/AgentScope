@@ -90,7 +90,8 @@ Current behavior:
 - Deletes only after backup and quarantine under
   `%USERPROFILE%\.agentscope\quarantine`.
 - Writes `journal.json` for every delete under the quarantine directory,
-  recording backup, file move, patch, SQLite backup, and SQLite delete steps.
+  recording backup, file move, patch/inspect, SQLite backup, and SQLite delete
+  steps.
 - Blocks destructive operations against sessions that still have an active PID
   mapping, high-confidence Codex heuristic process candidate, or indexed child
   sessions in the current snapshot.
@@ -110,9 +111,9 @@ Known limits:
 
 Planned later controls:
 
-- `resume`: generate or run `codex resume` / `claude resume`
+- richer restore journaling for file plus multi-DB rollback evidence
 - `kill`: terminate only with explicit `--force`
-- richer export/import bundles with row-level SQLite restore
+- explicit child-session delete modes: block, include children, or detach
 - `watch`
 - web/TUI dashboard on the same core library
 

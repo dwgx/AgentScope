@@ -37,12 +37,13 @@ The user strongly dislikes:
 Current latest commit at handoff time:
 
 ```text
-553cd42 Confirm diagnostic repair before package rebuild
+085a8de Update handoff for next AgentScope agent
 ```
 
 Recent important commits:
 
 ```text
+085a8de Update handoff for next AgentScope agent
 553cd42 Confirm diagnostic repair before package rebuild
 b454097 Tighten import path validation audit fixes
 39db692 Harden session control safety layer
@@ -53,7 +54,7 @@ c14d4f8 Fix launcher resolution and UI control states
 a4b47c1 Polish UI positioning and path feedback
 ```
 
-The workspace was clean after `553cd42`.
+The workspace was clean after `085a8de`.
 
 ## Commands To Run
 
