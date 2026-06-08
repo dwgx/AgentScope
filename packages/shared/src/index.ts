@@ -4,6 +4,17 @@ export type Confidence = "exact" | "indexed" | "heuristic" | "unknown";
 
 export type RelationKind = "parent_child" | "process_parent" | "transcript" | "subagent";
 
+export type AgentProcessRole =
+  | "codex_cli"
+  | "codex_engine"
+  | "codex_node_repl"
+  | "codex_app_server"
+  | "codex_mcp_tool"
+  | "claude_cli"
+  | "claude_daemon"
+  | "agent_helper"
+  | "unknown";
+
 export interface Evidence {
   source: string;
   detail: string;
@@ -25,6 +36,10 @@ export interface AgentProcess {
   cpuSeconds?: number | undefined;
   cwdHint?: string | undefined;
   agent: AgentKind;
+  processRole?: AgentProcessRole | undefined;
+  processRoleDetail?: string | undefined;
+  rootPid?: number | undefined;
+  parentAgentPid?: number | undefined;
   sessionCandidates?: SessionCandidate[] | undefined;
   evidence: Evidence[];
 }

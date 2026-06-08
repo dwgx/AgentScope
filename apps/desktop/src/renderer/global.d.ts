@@ -1,5 +1,6 @@
 import type {
   Diagnostic,
+  AgentKind,
   ScopeSnapshot,
   SessionBackupResult,
   SessionDeleteResult,
@@ -44,6 +45,12 @@ export interface AgentScopeApi {
   }>;
   backupSession(agent: string, sessionId: string): Promise<SessionBackupResult>;
   deleteSession(agent: string, sessionId: string, createdAt?: string): Promise<SessionDeleteResult>;
+  launchSession(
+    agent: AgentKind,
+    sessionId: string,
+    action: "resume" | "fork",
+    cwd?: string
+  ): Promise<{ ok: boolean; command: string; cwd?: string }>;
   importSessionBackup(backupDir: string): Promise<SessionImportResult>;
   chooseImportSession(): Promise<SessionImportResult | { canceled: true }>;
   writeDeletePlan(agent: string, sessionId: string): Promise<SessionOperationPlanResult>;

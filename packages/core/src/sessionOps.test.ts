@@ -20,7 +20,7 @@ describe("session operations", () => {
     const sessionId = "77777777-7777-4777-8777-777777777777";
     const cwd = process.cwd();
     const child = process.platform === "win32"
-      ? spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)", "codex", sessionId], { cwd, stdio: "ignore", windowsHide: true })
+      ? spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)", String.raw`C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`, "resume", sessionId, "--cwd", cwd], { cwd, stdio: "ignore", windowsHide: true })
       : undefined;
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });

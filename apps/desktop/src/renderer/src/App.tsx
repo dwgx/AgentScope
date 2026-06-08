@@ -55,8 +55,9 @@ type FontMode = "language" | "unified" | "custom";
 type FontPreset = "windows" | "language" | "claude" | "japaneseTextbook" | "dense" | "custom";
 type ControlMode = "safe" | "readOnly";
 type StrongConfidence = "exact" | "indexed" | "heuristic";
+type SessionLaunchAction = "resume" | "fork";
 type ProcessSortMode = "time" | "memory" | "runtime" | "score" | "tree";
-type ProcessGroupMode = "agent" | "parent" | "cwd" | "none";
+type ProcessGroupMode = "task" | "role" | "agent" | "parent" | "cwd" | "none";
 type SessionGroupMode = "agent" | "cwd" | "parent" | "none";
 type RelationKindFilter = "all" | Relation["kind"];
 type RelationConfidenceFilter = "all" | Relation["confidence"];
@@ -731,6 +732,34 @@ function App() {
     }
   }
 
+  async function launchSelectedSession(session: AgentSession, action: SessionLaunchAction) {
+    if (settings.controlMode === "readOnly") {
+      showNotice({ message: t("toast.operationFailed", { message: t("settings.controlMode.readOnlyBlocked") }) });
+      return;
+    }
+    if (!canLaunchSession(session)) {
+      showNotice({ message: t("toast.operationFailed", { message: t("toast.sessionLaunchUnsupported") }) });
+      return;
+    }
+    try {
+      const result = await window.agentscope.launchSession(session.agent, session.sessionId, action, session.cwd);
+      showNotice({
+        message: t("toast.sessionLaunchStarted", {
+          agent: session.agent,
+          action: t(`inspector.launchAction.${action}`)
+        }),
+        items: [
+          { label: t("inspector.fields.command"), value: result.command, tone: "ok" },
+          ...(result.cwd ? [{ label: "cwd", value: result.cwd, path: result.cwd, tone: "ok" as const }] : [])
+        ],
+        actions: result.cwd ? noticePathActions(result.cwd) : undefined,
+        ttlMs: 30000
+      });
+    } catch (error) {
+      showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+    }
+  }
+
   function noticePathActions(targetPath?: string): NoticeAction[] {
     if (!targetPath) return [];
     return [
@@ -883,6 +912,7 @@ function App() {
                 onBackupSessions={(targetSessions) => void backupSelectedSessions(targetSessions)}
                 onDeleteSession={(session) => void deleteSelectedSession(session)}
                 onDeleteSessions={(targetSessions) => void deleteSelectedSessions(targetSessions)}
+                onLaunchSession={(session, action) => void launchSelectedSession(session, action)}
                 onRevealTranscript={(session) => void revealPath(session.transcriptPath)}
               />
             )}
@@ -936,6 +966,7 @@ function App() {
               onRevealPath={(targetPath) => void revealPath(targetPath)}
               onBackupSession={(session) => void backupSelectedSession(session)}
               onDeleteSession={(session) => void deleteSelectedSession(session)}
+              onLaunchSession={(session, action) => void launchSelectedSession(session, action)}
             />
           )}
         </div>
@@ -1417,7 +1448,7 @@ function ProcessList(props: {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
   const [sortMode, setSortMode] = useState<ProcessSortMode>("time");
-  const [groupMode, setGroupMode] = useState<ProcessGroupMode>("none");
+  const [groupMode, setGroupMode] = useState<ProcessGroupMode>("task");
   const [, startProcessListTransition] = useTransition();
   const [isReordering, setIsReordering] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
@@ -1481,7 +1512,7 @@ function ProcessList(props: {
         <ToolbarControl label={t("views.processes.group.label")}>
           <MiniSegmentedControl
             value={groupMode}
-            values={["agent", "parent", "cwd", "none"]}
+            values={["task", "role", "agent", "parent", "cwd", "none"]}
             label={(value) => t(`views.processes.group.${value}`)}
             onChange={(value) =>
               reorder(() => setGroupMode(value as ProcessGroupMode))
@@ -1562,10 +1593,12 @@ function ProcessRow(props: {
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { t } = useTranslation();
+  const tr = (key: string) => t(key);
   const process = props.process;
   const strong = strongCandidates(process);
   const top = strong[0] ?? process.sessionCandidates?.[0];
   const weakOnly = !strong.length && !!top;
+  const helper = isHelperProcess(process);
   return (
     <button
       className={`processRow ${props.selected ? "selected" : ""}`}
@@ -1578,11 +1611,15 @@ function ProcessRow(props: {
       <AgentTile agent={process.agent} />
       <div className="rowMain">
         <div className="rowTop">
-          <span className="rowTitle">{process.windowTitle || process.processName}</span>
+          <span className="rowTitle">{processDisplayTitle(process, tr)}</span>
           <span className="rowPid mono">PID {process.pid}</span>
+          {process.rootPid !== undefined && process.rootPid !== process.pid && (
+            <span className="rootPid mono">root {process.rootPid}</span>
+          )}
         </div>
         <div className="rowMeta">
           <span>{process.processName}</span>
+          <span>{processRoleLabel(process, tr)}</span>
           {process.ppid !== undefined && <span>PPID {process.ppid}</span>}
           {process.startTime && (
             <span>{t("common.date.started", { date: formatDate(process.startTime, props.locale) })}</span>
@@ -1600,6 +1637,8 @@ function ProcessRow(props: {
               <span className="scoreBadge">{t("views.processes.score", { score: top.score })}</span>
               <span>{weakOnly ? t("views.processes.weakEvidence") : explainTopCandidate(top)}</span>
             </>
+          ) : helper ? (
+            <span className="muted">{t("views.processes.helperNoCandidate")}</span>
           ) : (
             <span className="muted">{t("views.processes.noCandidate")}</span>
           )}
@@ -1622,8 +1661,9 @@ function ProcessContextMenu(props: {
   onSelectSession: (candidate: SessionCandidate) => void;
 }) {
   const { t } = useTranslation();
+  const tr = (key: string) => t(key);
   const menuRef = useRef<HTMLDivElement>(null);
-  const candidates = (props.process.sessionCandidates ?? []).slice(0, 5);
+  const candidates = (props.process.sessionCandidates ?? []).filter(hasDirectCandidateEvidence).slice(0, 5);
   const position = useMeasuredMenuPosition(menuRef, props.x, props.y, 326, 280);
   useEffect(() => {
     const close = () => props.onClose();
@@ -1644,12 +1684,16 @@ function ProcessContextMenu(props: {
       style={{ left: position.left, top: position.top } as CSSProperties}
       onPointerDown={(event) => event.stopPropagation()}
     >
+      <span>{processDisplayTitle(props.process, tr)}</span>
+      <p>
+        {processRoleDetail(props.process, tr)}
+      </p>
       <button onClick={props.onInspect}>{t("views.processes.context.inspect")}</button>
       <div className="menuDivider" />
-      <span>{t("views.processes.context.jumpSession")}</span>
+      <span>{t("views.processes.context.directSessionEvidence")}</span>
       {candidates.length ? (
         candidates.map((candidate) => (
-          <button key={`${candidate.agent}:${candidate.sessionId}`} onClick={() => props.onSelectSession(candidate)}>
+          <button className="candidateMenuItem" key={`${candidate.agent}:${candidate.sessionId}`} onClick={() => props.onSelectSession(candidate)}>
             <AgentPill agent={candidate.agent} />
             <strong>{candidateTitle(candidate)}</strong>
             <em>{candidateExplanation(candidate)}</em>
@@ -1703,6 +1747,7 @@ function SessionList(props: {
   onBackupSessions: (sessions: AgentSession[]) => void;
   onDeleteSession: (session: AgentSession) => void;
   onDeleteSessions: (sessions: AgentSession[]) => void;
+  onLaunchSession: (session: AgentSession, action: SessionLaunchAction) => void;
   onRevealTranscript: (session: AgentSession) => void;
 }) {
   const { t, i18n: activeI18n } = useTranslation();
@@ -1871,6 +1916,10 @@ function SessionList(props: {
             else props.onDeleteSessions(contextMenu.sessions);
             setContextMenu(null);
           }}
+          onLaunch={(action) => {
+            props.onLaunchSession(contextMenu.sessions[0]!, action);
+            setContextMenu(null);
+          }}
           onRevealTranscript={() => {
             props.onRevealTranscript(contextMenu.sessions[0]!);
             setContextMenu(null);
@@ -1946,13 +1995,14 @@ function SessionContextMenu(props: {
   onClose: () => void;
   onBackup: () => void;
   onDelete: () => void;
+  onLaunch: (action: SessionLaunchAction) => void;
   onRevealTranscript: () => void;
 }) {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const primary = props.sessions[0]!;
   const multi = props.sessions.length > 1;
-  const position = useMeasuredMenuPosition(menuRef, props.x, props.y, 320, 230);
+  const position = useMeasuredMenuPosition(menuRef, props.x, props.y, 320, 300);
   useEffect(() => {
     const close = () => props.onClose();
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1984,6 +2034,17 @@ function SessionContextMenu(props: {
       <button disabled={multi || !primary.transcriptPath} onClick={props.onRevealTranscript}>
         <FolderOpen size={15} />
         <strong>{t("inspector.actions.revealTranscript")}</strong>
+      </button>
+      <div className="menuDivider" />
+      <button disabled={multi || !canLaunchSession(primary)} onClick={() => props.onLaunch("resume")}>
+        <CircleDot size={15} />
+        <strong>{t("inspector.actions.resumeInAgent", { agent: agentDisplayName(primary.agent, t) })}</strong>
+        <em>{suggestedLaunchCommand(primary, "resume")}</em>
+      </button>
+      <button disabled={multi || !canLaunchSession(primary)} onClick={() => props.onLaunch("fork")}>
+        <Workflow size={15} />
+        <strong>{t("inspector.actions.forkInAgent", { agent: agentDisplayName(primary.agent, t) })}</strong>
+        <em>{suggestedLaunchCommand(primary, "fork")}</em>
       </button>
       <div className="menuDivider" />
       <button className="dangerItem" onClick={props.onDelete}>
@@ -2065,23 +2126,25 @@ function RelationList(props: {
               className="relationItem"
                 key={`${relation.kind}:${relation.sourceId}:${relation.targetId}:${index}`}
             >
-              <div className="relationKind">
+              <div className="relationKind relationItemKind">
                 <Badge text={t(`relations.kind.${relation.kind}`)} />
+                <ConfidenceBadge value={relation.confidence} />
               </div>
-              <RelationEndpoint
-                label={sourceLabel}
-                endpoint={source}
-                onSelectSession={props.onSelectSession}
-                onRevealPath={props.onRevealPath}
-              />
-              <span className="arrow">{"->"}</span>
-              <RelationEndpoint
-                label={targetLabel}
-                endpoint={target}
-                onSelectSession={props.onSelectSession}
-                onRevealPath={props.onRevealPath}
-              />
-              <ConfidenceBadge value={relation.confidence} />
+              <div className="relationFlow">
+                <RelationEndpoint
+                  label={sourceLabel}
+                  endpoint={source}
+                  onSelectSession={props.onSelectSession}
+                  onRevealPath={props.onRevealPath}
+                />
+                <span className="arrow">{"->"}</span>
+                <RelationEndpoint
+                  label={targetLabel}
+                  endpoint={target}
+                  onSelectSession={props.onSelectSession}
+                  onRevealPath={props.onRevealPath}
+                />
+              </div>
               <div className="relationEvidence">
                 {relation.evidence.slice(0, 3).map((item, evidenceIndex) => (
                   <span key={`${item.source}:${item.path}:${evidenceIndex}`}>
@@ -3242,8 +3305,10 @@ function Inspector(props: {
   onRevealPath: (targetPath?: string) => void;
   onBackupSession: (session: AgentSession) => void;
   onDeleteSession: (session: AgentSession) => void;
+  onLaunchSession: (session: AgentSession, action: SessionLaunchAction) => void;
 }) {
   const { t, i18n: activeI18n } = useTranslation();
+  const tr = (key: string) => t(key);
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
   if (props.loading) {
     return (
@@ -3269,10 +3334,16 @@ function Inspector(props: {
     return (
       <aside className="inspector">
         <InspectorHeader
-          title={process.windowTitle || process.processName}
+          title={processDisplayTitle(process, tr)}
           subtitle={`PID ${process.pid}`}
           agent={process.agent}
         />
+        <FieldGroup title={t("inspector.processRole")}>
+          <Field label={t("inspector.fields.role")} value={processRoleLabel(process, tr)} />
+          <Field label={t("inspector.fields.rootPid")} value={process.rootPid} />
+          <Field label={t("inspector.fields.parentAgentPid")} value={process.parentAgentPid} />
+          <Field label={t("inspector.fields.roleEvidence")} value={process.processRoleDetail} long />
+        </FieldGroup>
         <FieldGroup title={t("inspector.likelySessions")}>
           <CandidateList
             candidates={process.sessionCandidates ?? []}
@@ -3351,6 +3422,7 @@ function Inspector(props: {
         onRevealPath={props.onRevealPath}
         onBackupSession={props.onBackupSession}
         onDeleteSession={props.onDeleteSession}
+        onLaunchSession={props.onLaunchSession}
       />
       {props.transcriptPreviewEnabled && (
         <TranscriptHitContext
@@ -3487,9 +3559,10 @@ function ControlSummary(props: {
   onRevealPath: (targetPath?: string) => void;
   onBackupSession: (session: AgentSession) => void;
   onDeleteSession: (session: AgentSession) => void;
+  onLaunchSession: (session: AgentSession, action: SessionLaunchAction) => void;
 }) {
   const { t } = useTranslation();
-  const resumeCommand = suggestedResumeCommand(props.session);
+  const resumeCommand = suggestedLaunchCommand(props.session, "resume");
   return (
     <FieldGroup title={t("inspector.control")}>
       <div className="actionGrid">
@@ -3505,6 +3578,16 @@ function ControlSummary(props: {
           label={t("inspector.actions.revealTranscript")}
           disabled={!props.session.transcriptPath}
           onClick={() => props.onRevealPath(props.session.transcriptPath)}
+        />
+        <ActionButton
+          label={t("inspector.actions.resumeInAgent", { agent: agentDisplayName(props.session.agent, t) })}
+          disabled={!canLaunchSession(props.session)}
+          onClick={() => props.onLaunchSession(props.session, "resume")}
+        />
+        <ActionButton
+          label={t("inspector.actions.forkInAgent", { agent: agentDisplayName(props.session.agent, t) })}
+          disabled={!canLaunchSession(props.session)}
+          onClick={() => props.onLaunchSession(props.session, "fork")}
         />
       </div>
       <Field label={t("inspector.fields.resumeCommand")} value={resumeCommand} mono long />
@@ -3571,10 +3654,17 @@ function firstCounterKey(values: Record<string, number> | undefined): string | u
   return Object.entries(values).sort((a, b) => b[1] - a[1])[0]?.[0];
 }
 
-function suggestedResumeCommand(session: AgentSession): string | undefined {
+function canLaunchSession(session: AgentSession): boolean {
+  return (session.agent === "codex" || session.agent === "claude") && /^[A-Za-z0-9._:-]{3,160}$/.test(session.sessionId);
+}
+
+function suggestedLaunchCommand(session: AgentSession, action: SessionLaunchAction): string | undefined {
   if (!session.sessionId) return undefined;
-  if (session.agent === "codex") return `codex resume ${quoteCommandArg(session.sessionId)}`;
-  if (session.agent === "claude") return `claude --resume ${quoteCommandArg(session.sessionId)}`;
+  if (session.agent === "codex") return `codex ${action} ${quoteCommandArg(session.sessionId)}`;
+  if (session.agent === "claude") {
+    const resume = `claude --resume ${quoteCommandArg(session.sessionId)}`;
+    return action === "fork" ? `${resume} --fork-session` : resume;
+  }
   return undefined;
 }
 
@@ -3994,7 +4084,12 @@ function AgentPill(props: { agent: string }) {
   return <span className={`agentPill ${props.agent}`}>{t(key)}</span>;
 }
 
-function Badge(props: { text: string; tone?: "ok" | "warn" | undefined }) {
+function agentDisplayName(agent: string, t: (key: string) => string): string {
+  if (agent === "codex" || agent === "claude") return t(`common.agent.${agent}`);
+  return t("common.agent.unknown");
+}
+
+function Badge(props: { text: string; tone?: "ok" | "warn" | "heuristic" | undefined }) {
   return <span className={`badge ${props.tone ?? ""}`}>{props.text}</span>;
 }
 
@@ -4012,7 +4107,7 @@ function SwitchControl(props: { checked: boolean; onChange: (checked: boolean) =
 
 function ConfidenceBadge(props: { value: string }) {
   const { t } = useTranslation();
-  const tone = props.value === "exact" ? "ok" : props.value === "heuristic" ? "warn" : undefined;
+  const tone = props.value === "exact" ? "ok" : props.value === "heuristic" ? "heuristic" : undefined;
   const key =
     props.value === "exact" ||
     props.value === "indexed" ||
@@ -4031,6 +4126,39 @@ function strongCandidates(process: AgentProcess) {
   return (process.sessionCandidates ?? []).filter((candidate) =>
     isStrongConfidence(candidate.confidence)
   );
+}
+
+function isHelperProcess(process: AgentProcess): boolean {
+  return [
+    "codex_node_repl",
+    "codex_app_server",
+    "codex_mcp_tool",
+    "agent_helper"
+  ].includes(process.processRole ?? "");
+}
+
+function hasDirectCandidateEvidence(candidate: SessionCandidate): boolean {
+  return (candidate.scoreParts ?? candidate.reasons).some((reason) =>
+    ["process.match.pid", "process.match.session_id", "process.match.transcript"].includes(reason.source)
+  );
+}
+
+function processDisplayTitle(process: AgentProcess, t: (key: string) => string): string {
+  const role = processRoleLabel(process, t);
+  if (process.windowTitle && !isHelperProcess(process)) return process.windowTitle;
+  return role === t("views.processes.roles.unknown") ? process.processName : role;
+}
+
+function processRoleLabel(process: AgentProcess, t: (key: string) => string): string {
+  const role = process.processRole ?? "unknown";
+  const key = `views.processes.roles.${role}`;
+  return t(key);
+}
+
+function processRoleDetail(process: AgentProcess, t: (key: string) => string): string {
+  const root = process.rootPid && process.rootPid !== process.pid ? ` - root PID ${process.rootPid}` : "";
+  const parent = process.parentAgentPid ? ` - parent PID ${process.parentAgentPid}` : "";
+  return `${process.processRoleDetail ?? t("views.processes.roles.unknown")}${parent}${root}`;
 }
 
 function EvidenceSummary(props: { evidence: Evidence[] }) {
@@ -4115,6 +4243,11 @@ function groupProcesses(
     if (!groups.has(key)) groups.set(key, { key, label, items: [] });
     groups.get(key)!.items.push(process);
   }
+  if (groupMode === "task") {
+    for (const group of groups.values()) {
+      group.items.sort(compareProcessTreeOrder);
+    }
+  }
   return [...groups.values()];
 }
 
@@ -4128,9 +4261,10 @@ function groupSessions(
       displayTitle(left).localeCompare(displayTitle(right))
   );
   const groups = new Map<string, { key: string; label: string; items: AgentSession[] }>();
+  const byId = new Map(sessions.map((session) => [`${session.agent}:${session.sessionId}`, session]));
   for (const session of sorted) {
     const key = sessionGroupKey(session, groupMode);
-    const label = sessionGroupLabel(session, groupMode);
+    const label = sessionGroupLabel(session, groupMode, byId);
     if (!groups.has(key)) groups.set(key, { key, label, items: [] });
     groups.get(key)!.items.push(session);
   }
@@ -4144,11 +4278,21 @@ function sessionGroupKey(session: AgentSession, groupMode: SessionGroupMode): st
   return `cwd:${session.cwd ?? "unknown"}`;
 }
 
-function sessionGroupLabel(session: AgentSession, groupMode: SessionGroupMode): string {
-  if (groupMode === "none") return "All sessions";
-  if (groupMode === "parent") return session.parentSessionId ? `Parent ${short(session.parentSessionId)}` : "Root / no parent";
+function sessionGroupLabel(
+  session: AgentSession,
+  groupMode: SessionGroupMode,
+  byId?: Map<string, AgentSession>
+): string {
+  if (groupMode === "none") return i18n.t("views.sessions.allSessions");
+  if (groupMode === "parent") {
+    if (!session.parentSessionId) return i18n.t("views.sessions.rootNoParent");
+    const parent = byId?.get(`${session.agent}:${session.parentSessionId}`);
+    return parent
+      ? i18n.t("views.sessions.parentGroup", { title: displayTitle(parent) })
+      : i18n.t("views.sessions.parentGroup", { title: short(session.parentSessionId) });
+  }
   if (groupMode === "agent") return session.agent;
-  return session.cwd ?? "No cwd";
+  return session.cwd ?? i18n.t("views.sessions.noCwd");
 }
 
 function compareProcesses(left: AgentProcess, right: AgentProcess, sortMode: ProcessSortMode): number {
@@ -4167,18 +4311,45 @@ function compareProcesses(left: AgentProcess, right: AgentProcess, sortMode: Pro
   return parseDate(right.startTime ?? right.creationDate) - parseDate(left.startTime ?? left.creationDate);
 }
 
+function compareProcessTreeOrder(left: AgentProcess, right: AgentProcess): number {
+  return (
+    processRoleOrder(left) - processRoleOrder(right) ||
+    (left.parentAgentPid ?? left.ppid ?? 0) - (right.parentAgentPid ?? right.ppid ?? 0) ||
+    left.pid - right.pid
+  );
+}
+
+function processRoleOrder(process: AgentProcess): number {
+  const order: Record<string, number> = {
+    codex_cli: 0,
+    claude_cli: 0,
+    codex_engine: 1,
+    claude_daemon: 1,
+    codex_node_repl: 2,
+    codex_app_server: 3,
+    codex_mcp_tool: 4,
+    agent_helper: 5,
+    unknown: 6
+  };
+  return order[process.processRole ?? "unknown"] ?? 6;
+}
+
 function processGroupKey(process: AgentProcess, groupMode: ProcessGroupMode): string {
   if (groupMode === "none") return "all";
+  if (groupMode === "task") return `root:${process.rootPid ?? process.pid}`;
+  if (groupMode === "role") return `role:${process.processRole ?? "unknown"}`;
   if (groupMode === "parent") return `ppid:${process.ppid ?? "root"}`;
   if (groupMode === "cwd") return `cwd:${topProcessCwd(process) ?? "unknown"}`;
   return `agent:${process.agent}`;
 }
 
 function processGroupLabel(process: AgentProcess, groupMode: ProcessGroupMode): string {
-  if (groupMode === "none") return "All processes";
-  if (groupMode === "parent") return process.ppid === undefined ? "No parent PID" : `Parent PID ${process.ppid}`;
-  if (groupMode === "cwd") return topProcessCwd(process) ?? "No cwd candidate";
-  return process.agent === "unknown" ? "Unknown" : process.agent;
+  if (groupMode === "none") return i18n.t("views.processes.allProcesses");
+  if (groupMode === "task") return i18n.t("views.processes.taskRoot", { pid: process.rootPid ?? process.pid });
+  if (groupMode === "role") return processRoleLabel(process, (key) => i18n.t(key));
+  if (groupMode === "parent") return process.ppid === undefined ? i18n.t("views.processes.noParentPid") : `PID ${process.ppid}`;
+  if (groupMode === "cwd") return topProcessCwd(process) ?? i18n.t("views.processes.noCwdCandidate");
+  return process.agent === "unknown" ? i18n.t("common.agent.unknown") : process.agent;
 }
 
 function topProcessCwd(process: AgentProcess): string | undefined {

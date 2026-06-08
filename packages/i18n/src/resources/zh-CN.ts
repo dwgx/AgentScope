@@ -141,9 +141,14 @@ export const zhCN = {
       subtitle_one: "{{count}} 个相关 Win32 进程",
       subtitle_other: "{{count}} 个相关 Win32 进程",
       noCandidate: "还没有会话候选",
+      helperNoCandidate: "辅助进程：没有直接 session id 或转录证据。",
       weakEvidence: "弱证据",
       candidate: "候选",
       score: "证据 {{score}}",
+      allProcesses: "全部进程",
+      taskRoot: "任务根 PID {{pid}}",
+      noParentPid: "没有父 PID",
+      noCwdCandidate: "没有 cwd 候选",
       groupCount_one: "{{count}} 个进程",
       groupCount_other: "{{count}} 个进程",
       sort: {
@@ -156,6 +161,8 @@ export const zhCN = {
       },
       group: {
         label: "分组",
+        task: "任务",
+        role: "角色",
         agent: "Agent",
         parent: "父进程",
         cwd: "cwd",
@@ -163,7 +170,19 @@ export const zhCN = {
       },
       context: {
         inspect: "检查进程",
-        jumpSession: "跳转会话"
+        jumpSession: "跳转会话",
+        directSessionEvidence: "直接会话证据"
+      },
+      roles: {
+        codex_cli: "Codex CLI",
+        codex_engine: "Codex 引擎",
+        codex_node_repl: "子代理运行时",
+        codex_app_server: "Codex app-server",
+        codex_mcp_tool: "MCP 工具",
+        claude_cli: "Claude CLI",
+        claude_daemon: "Claude daemon",
+        agent_helper: "Agent helper",
+        unknown: "未知角色"
       }
     },
     sessions: {
@@ -178,6 +197,10 @@ export const zhCN = {
       context: {
         selectedCount: "已选择 {{count}} 个会话"
       },
+      allSessions: "全部会话",
+      rootNoParent: "Root / no parent",
+      parentGroup: "父级：{{title}}",
+      noCwd: "没有 cwd",
       group: {
         cwd: "cwd",
         parent: "父级",
@@ -410,6 +433,7 @@ export const zhCN = {
     nothingTitle: "未选择内容",
     nothingDetail: "选择一个进程或会话以检查证据。",
     likelySessions: "可能的会话",
+    processRole: "进程角色",
     runtime: "运行时",
     identity: "身份",
     transcript: "转录",
@@ -429,7 +453,11 @@ export const zhCN = {
     noCandidate: "没有候选会话。没有 PID、cwd、转录、标题或时间证据时，AgentScope 不会猜测。",
     noCwdEvidence: "没有 cwd 证据",
     safeControlDetail:
-      "只读模式：可以打开、定位、生成 resume 命令和导出；kill/archive 在显式 force 控制出现前保持禁用。",
+      "安全模式只会启动受限的 Codex/Claude resume 或 fork 命令；删除仍必须备份、隔离并写入 journal。只读模式会阻止启动、备份、删除、导入和修复。",
+    launchAction: {
+      resume: "resume",
+      fork: "fork"
+    },
     actions: {
       openTranscript: "打开转录",
       revealTranscript: "定位转录",
@@ -437,6 +465,10 @@ export const zhCN = {
       backupSessions: "备份 {{count}} 个会话",
       deleteSession: "删除会话",
       deleteSessions: "删除 {{count}} 个会话",
+      resumeSession: "在 Agent 中 resume",
+      forkSession: "在 Agent 中 fork",
+      resumeInAgent: "在 {{agent}} 中 resume",
+      forkInAgent: "在 {{agent}} 中 fork",
       importSession: "导入会话",
       writeDeletePlan: "生成删除计划",
       planImport: "生成导入计划"
@@ -448,6 +480,10 @@ export const zhCN = {
       started: "启动",
       executable: "可执行文件",
       command: "命令",
+      role: "角色",
+      rootPid: "根 PID",
+      parentAgentPid: "Agent 父级",
+      roleEvidence: "角色证据",
       session: "会话",
       confidence: "置信度",
       status: "状态",
@@ -498,6 +534,8 @@ export const zhCN = {
     sessionsDeleted: "已将 {{count}}/{{total}} 个会话移入隔离区",
     noSessionsDeleted: "没有会话被删除",
     sessionImported: "会话已从备份导入",
+    sessionLaunchStarted: "{{agent}} {{action}} 已启动",
+    sessionLaunchUnsupported: "此会话不能通过 Codex/Claude 控制启动",
     deletePlanWritten: "删除计划已写入：{{path}}",
     deletePlanUnavailable: "无法写入任何删除计划",
     deletePlanPartial: "已为 {{count}}/{{total}} 个会话写入删除计划",

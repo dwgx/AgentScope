@@ -155,9 +155,14 @@ export const enUS = {
       subtitle_one: "{{count}} live agent-related Win32 row",
       subtitle_other: "{{count}} live agent-related Win32 rows",
       noCandidate: "No session candidate yet",
+      helperNoCandidate: "Helper process; no direct session id or transcript evidence.",
       weakEvidence: "weak evidence",
       candidate: "candidate",
       score: "evidence {{score}}",
+      allProcesses: "All processes",
+      taskRoot: "Task root PID {{pid}}",
+      noParentPid: "No parent PID",
+      noCwdCandidate: "No cwd candidate",
       groupCount_one: "{{count}} process",
       groupCount_other: "{{count}} processes",
       sort: {
@@ -170,6 +175,8 @@ export const enUS = {
       },
       group: {
         label: "Group",
+        task: "Task",
+        role: "Role",
         agent: "Agent",
         parent: "Parent",
         cwd: "cwd",
@@ -177,7 +184,19 @@ export const enUS = {
       },
       context: {
         inspect: "Inspect process",
-        jumpSession: "Jump to session"
+        jumpSession: "Jump to session",
+        directSessionEvidence: "Direct session evidence"
+      },
+      roles: {
+        codex_cli: "Codex CLI",
+        codex_engine: "Codex engine",
+        codex_node_repl: "Subagent runtime",
+        codex_app_server: "Codex app-server",
+        codex_mcp_tool: "MCP tool",
+        claude_cli: "Claude CLI",
+        claude_daemon: "Claude daemon",
+        agent_helper: "Agent helper",
+        unknown: "Unknown role"
       }
     },
     sessions: {
@@ -192,6 +211,10 @@ export const enUS = {
       context: {
         selectedCount: "{{count}} sessions selected"
       },
+      allSessions: "All sessions",
+      rootNoParent: "Root / no parent",
+      parentGroup: "Parent: {{title}}",
+      noCwd: "No cwd",
       group: {
         cwd: "cwd",
         parent: "Parent",
@@ -439,6 +462,7 @@ export const enUS = {
     nothingTitle: "Nothing selected",
     nothingDetail: "Choose a process or session to inspect evidence.",
     likelySessions: "Likely Sessions",
+    processRole: "Process Role",
     runtime: "Runtime",
     identity: "Identity",
     transcript: "Transcript",
@@ -459,7 +483,11 @@ export const enUS = {
       "No candidate session. AgentScope will not guess without PID, cwd, transcript, title, or time evidence.",
     noCwdEvidence: "No cwd evidence",
     safeControlDetail:
-      "Read-only mode: open, reveal, resume command generation, and export are allowed; kill/archive stay disabled until explicit force controls exist.",
+      "Safe mode launches only bounded Codex/Claude resume or fork commands; delete still requires backup, quarantine, and journal. Read-only blocks launch, backup, delete, import, and repair.",
+    launchAction: {
+      resume: "resume",
+      fork: "fork"
+    },
     actions: {
       openTranscript: "Open transcript",
       revealTranscript: "Reveal transcript",
@@ -467,6 +495,10 @@ export const enUS = {
       backupSessions: "Back up {{count}} sessions",
       deleteSession: "Delete session",
       deleteSessions: "Delete {{count}} sessions",
+      resumeSession: "Resume in agent",
+      forkSession: "Fork in agent",
+      resumeInAgent: "Resume in {{agent}}",
+      forkInAgent: "Fork in {{agent}}",
       importSession: "Import session",
       writeDeletePlan: "Write delete plan",
       planImport: "Plan import"
@@ -478,6 +510,10 @@ export const enUS = {
       started: "Started",
       executable: "Executable",
       command: "Command",
+      role: "Role",
+      rootPid: "Root PID",
+      parentAgentPid: "Agent parent",
+      roleEvidence: "Role evidence",
       session: "Session",
       confidence: "Confidence",
       status: "Status",
@@ -528,6 +564,8 @@ export const enUS = {
     sessionsDeleted: "Moved {{count}}/{{total}} sessions to quarantine",
     noSessionsDeleted: "No sessions were deleted",
     sessionImported: "Session imported from backup",
+    sessionLaunchStarted: "{{agent}} {{action}} started",
+    sessionLaunchUnsupported: "This session cannot be launched by Codex/Claude controls",
     deletePlanWritten: "Delete plan written: {{path}}",
     deletePlanUnavailable: "No delete plan could be written",
     deletePlanPartial: "Delete plans written for {{count}}/{{total}} sessions",

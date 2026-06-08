@@ -12,7 +12,7 @@ import type {
 import { mergeActivity } from "./activity.js";
 import { loadClaudeIndexRecords, loadClaudeSessions, loadClaudeTranscripts } from "./claude.js";
 import { appendEvidenceUnique, loadCodexIndex, scanCodexRollouts } from "./codex.js";
-import { containsNormalizedPath } from "./paths.js";
+import { containsNormalizedPath, containsNormalizedPathToken } from "./paths.js";
 import { listProcesses } from "./processes.js";
 
 export async function buildSnapshot(home?: string, includeProcesses = true): Promise<ScopeSnapshot> {
@@ -223,17 +223,19 @@ function scoreSessionForProcess(process: AgentProcess, session: AgentSession): S
   }
 
   const agentMatches = process.agent !== "unknown" && session.agent === process.agent;
-  const haystack = `${process.commandLine ?? ""} ${process.executablePath ?? ""}`;
+  const commandLineHaystack = process.commandLine ?? "";
+  const cwdHaystack = `${process.commandLine ?? ""} ${process.cwdHint ?? ""}`;
+  const fullHaystack = `${process.commandLine ?? ""} ${process.executablePath ?? ""}`;
 
-  if (agentMatches && containsNormalizedPath(haystack, session.cwd)) {
+  if (agentMatches && !isHelperProcess(process) && containsNormalizedPathToken(cwdHaystack, session.cwd)) {
     add(115, {
       source: "process.match.cwd",
-      detail: "Process command line or executable path contains the indexed session cwd.",
-      field: "CommandLine,ExecutablePath,cwd"
+      detail: "Process command line or explicit cwd hint contains the indexed session cwd.",
+      field: "CommandLine,cwdHint,cwd"
     });
   }
 
-  if (agentMatches && containsNormalizedPath(haystack, session.transcriptPath)) {
+  if (agentMatches && containsNormalizedPath(fullHaystack, session.transcriptPath)) {
     add(105, {
       source: "process.match.transcript",
       detail: "Process command line or executable path contains the indexed transcript path.",
@@ -241,11 +243,11 @@ function scoreSessionForProcess(process: AgentProcess, session: AgentSession): S
     });
   }
 
-  if (agentMatches && containsInsensitive(haystack, session.sessionId)) {
+  if (agentMatches && containsInsensitive(commandLineHaystack, session.sessionId)) {
     add(90, {
       source: "process.match.session_id",
-      detail: "Process command line or executable path contains the session/thread id.",
-      field: "CommandLine,ExecutablePath,sessionId"
+      detail: "Process command line contains the session/thread id.",
+      field: "CommandLine,sessionId"
     });
   }
 
@@ -274,6 +276,12 @@ function scoreSessionForProcess(process: AgentProcess, session: AgentSession): S
       detail: "Process classification and session agent kind match.",
       field: "processName,CommandLine,agent"
     });
+  }
+
+  if (isHelperProcess(process) && !hasDirectSessionReason(reasons)) {
+    score = 0;
+    reasons.length = 0;
+    scoreParts.length = 0;
   }
 
   return {
@@ -333,6 +341,21 @@ function hasStrongReason(reasons: Evidence[]): boolean {
   return reasons.some((reason) =>
     ["process.match.cwd", "process.match.transcript", "process.match.session_id", "process.match.window_title"].includes(reason.source)
   );
+}
+
+function hasDirectSessionReason(reasons: Evidence[]): boolean {
+  return reasons.some((reason) =>
+    ["process.match.pid", "process.match.transcript", "process.match.session_id"].includes(reason.source)
+  );
+}
+
+function isHelperProcess(process: AgentProcess): boolean {
+  return [
+    "codex_node_repl",
+    "codex_app_server",
+    "codex_mcp_tool",
+    "agent_helper"
+  ].includes(process.processRole ?? "");
 }
 
 function bestConfidence(left: Confidence, right: Confidence): Confidence {

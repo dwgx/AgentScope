@@ -47,3 +47,21 @@ export function containsNormalizedPath(haystack?: string, needle?: string): bool
   if (!normalizedNeedle || !normalizedHaystack) return false;
   return normalizedHaystack.toLowerCase().includes(normalizedNeedle.toLowerCase());
 }
+
+export function containsNormalizedPathToken(haystack?: string, needle?: string): boolean {
+  const normalizedNeedle = normalizeWindowsPath(needle)?.toLowerCase();
+  const normalizedHaystack = (normalizeWindowsPath(haystack) ?? haystack)?.toLowerCase();
+  if (!normalizedNeedle || !normalizedHaystack) return false;
+  let index = normalizedHaystack.indexOf(normalizedNeedle);
+  while (index >= 0) {
+    const before = index > 0 ? normalizedHaystack[index - 1] ?? "" : "";
+    const after = normalizedHaystack[index + normalizedNeedle.length] ?? "";
+    if (isPathTokenBoundary(before) && isPathTokenBoundary(after)) return true;
+    index = normalizedHaystack.indexOf(normalizedNeedle, index + 1);
+  }
+  return false;
+}
+
+function isPathTokenBoundary(value: string): boolean {
+  return value === "" || /[\s"'`=,;()[\]{}<>|]/.test(value);
+}

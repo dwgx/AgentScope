@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentProcess, AgentSession, ScopeSnapshot } from "@agentscope/shared";
+import { annotateProcessTree, classifyProcess } from "./processes.js";
 import { readRolloutMetadata } from "./codex.js";
 import {
   heuristicSessionsForProcess,
@@ -64,6 +65,57 @@ describe("scope confidence", () => {
     expect(candidate?.sessionId).toBe("t1");
     expect(candidate?.confidence).toBe("heuristic");
     expect(candidate?.reasons.map((reason) => reason.source)).toContain("process.match.cwd");
+  });
+
+  it("does not treat executable paths under the user profile as cwd evidence", () => {
+    const session = baseSession("profile-thread", "indexed");
+    session.cwd = String.raw`C:\Users\dwgx1`;
+    session.startedAt = "2026-06-08T08:00:00.000Z";
+    const process: AgentProcess = {
+      pid: 40576,
+      ppid: 29828,
+      processName: "codex.exe",
+      executablePath: String.raw`C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe`,
+      commandLine: String.raw`"C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe" app-server --listen stdio://`,
+      startTime: "2026-06-08T08:02:00.000Z",
+      agent: "codex",
+      processRole: "codex_app_server",
+      evidence: []
+    };
+    const snapshot: ScopeSnapshot = {
+      processes: [process],
+      sessions: [session],
+      transcripts: [],
+      indexRecords: [],
+      relations: []
+    };
+    expect(sessionCandidatesForProcess(snapshot, process, 5)).toHaveLength(0);
+    expect(heuristicSessionsForProcess(snapshot, process, 5)).toHaveLength(0);
+  });
+
+  it("suppresses helper process candidates unless they carry direct session evidence", () => {
+    const session = baseSession("helper-thread", "indexed");
+    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.startedAt = "2026-06-08T08:00:00.000Z";
+    session.updatedAt = "2026-06-08T08:05:00.000Z";
+    const process: AgentProcess = {
+      pid: 4972,
+      ppid: 36756,
+      processName: "node_repl.exe",
+      commandLine: String.raw`node_repl.exe --stdio`,
+      startTime: "2026-06-08T08:04:00.000Z",
+      agent: "codex",
+      processRole: "codex_node_repl",
+      evidence: []
+    };
+    const snapshot: ScopeSnapshot = {
+      processes: [process],
+      sessions: [session],
+      transcripts: [],
+      indexRecords: [],
+      relations: []
+    };
+    expect(sessionCandidatesForProcess(snapshot, process, 5)).toHaveLength(0);
   });
 
   it("treats Claude PID matches as exact API-style runtime mapping", () => {
@@ -128,6 +180,65 @@ describe("scope confidence", () => {
     expect(candidate?.scoreParts?.map((part) => part.source)).toContain(
       "process.match.window_title"
     );
+  });
+});
+
+describe("process role classification", () => {
+  it("classifies a Codex CLI/helper tree without promoting node_repl as a root task", () => {
+    const processes = annotateProcessTree([
+      {
+        pid: 100,
+        ppid: 10,
+        processName: "node.exe",
+        commandLine: String.raw`"node" "C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"`,
+        agent: "codex",
+        evidence: []
+      },
+      {
+        pid: 110,
+        ppid: 100,
+        processName: "codex.exe",
+        executablePath: String.raw`C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe`,
+        commandLine: String.raw`codex.exe`,
+        agent: "codex",
+        evidence: []
+      },
+      {
+        pid: 120,
+        ppid: 110,
+        processName: "node_repl.exe",
+        commandLine: String.raw`node_repl.exe --stdio`,
+        agent: "codex",
+        evidence: []
+      },
+      {
+        pid: 130,
+        ppid: 120,
+        processName: "codex.exe",
+        commandLine: String.raw`codex.exe app-server --listen stdio://`,
+        agent: "codex",
+        evidence: []
+      }
+    ]);
+
+    expect(processes.map((process) => process.processRole)).toEqual([
+      "codex_cli",
+      "codex_engine",
+      "codex_node_repl",
+      "codex_app_server"
+    ]);
+    expect(processes.map((process) => process.rootPid)).toEqual([100, 100, 100, 100]);
+    expect(processes[2]?.parentAgentPid).toBe(110);
+  });
+
+  it("does not classify a Codex command prompt containing Claude text as Claude", () => {
+    expect(
+      classifyProcess(
+        "codex.exe",
+        "codex resume 019ea --note \"compare Claude behavior\"",
+        String.raw`C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe`
+      )
+    ).toBe("codex");
   });
 });
 

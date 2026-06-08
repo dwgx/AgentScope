@@ -142,9 +142,14 @@ export const jaJP = {
       subtitle_one: "{{count}} 件の関連 Win32 行",
       subtitle_other: "{{count}} 件の関連 Win32 行",
       noCandidate: "セッション候補はまだありません",
+      helperNoCandidate: "Helper process; no direct session id or transcript evidence.",
       weakEvidence: "弱い証拠",
       candidate: "候補",
       score: "証拠 {{score}}",
+      allProcesses: "All processes",
+      taskRoot: "Task root PID {{pid}}",
+      noParentPid: "No parent PID",
+      noCwdCandidate: "No cwd candidate",
       groupCount_one: "{{count}} 件のプロセス",
       groupCount_other: "{{count}} 件のプロセス",
       sort: {
@@ -157,6 +162,8 @@ export const jaJP = {
       },
       group: {
         label: "グループ",
+        task: "タスク",
+        role: "役割",
         agent: "Agent",
         parent: "親プロセス",
         cwd: "cwd",
@@ -164,7 +171,19 @@ export const jaJP = {
       },
       context: {
         inspect: "プロセスを調べる",
-        jumpSession: "セッションへ移動"
+        jumpSession: "セッションへ移動",
+        directSessionEvidence: "直接セッション証拠"
+      },
+      roles: {
+        codex_cli: "Codex CLI",
+        codex_engine: "Codex engine",
+        codex_node_repl: "Subagent runtime",
+        codex_app_server: "Codex app-server",
+        codex_mcp_tool: "MCP tool",
+        claude_cli: "Claude CLI",
+        claude_daemon: "Claude daemon",
+        agent_helper: "Agent helper",
+        unknown: "Unknown role"
       }
     },
     sessions: {
@@ -179,6 +198,10 @@ export const jaJP = {
       context: {
         selectedCount: "{{count}} セッションを選択中"
       },
+      allSessions: "All sessions",
+      rootNoParent: "Root / no parent",
+      parentGroup: "Parent: {{title}}",
+      noCwd: "No cwd",
       group: {
         cwd: "cwd",
         parent: "親",
@@ -417,6 +440,7 @@ export const jaJP = {
     nothingTitle: "選択されていません",
     nothingDetail: "証拠を調べるプロセスまたはセッションを選択してください。",
     likelySessions: "可能性の高いセッション",
+    processRole: "プロセス役割",
     runtime: "ランタイム",
     identity: "識別",
     transcript: "転写",
@@ -438,6 +462,10 @@ export const jaJP = {
     noCwdEvidence: "cwd 証拠なし",
     safeControlDetail:
       "読み取り専用モードです。開く、場所を表示、resume コマンド生成、書き出しのみを許可します。kill/archive は明示的な force 制御が入るまで無効です。",
+    launchAction: {
+      resume: "resume",
+      fork: "fork"
+    },
     actions: {
       openTranscript: "転写を開く",
       revealTranscript: "転写の場所を表示",
@@ -445,6 +473,10 @@ export const jaJP = {
       backupSessions: "{{count}} セッションをバックアップ",
       deleteSession: "セッションを削除",
       deleteSessions: "{{count}} セッションを削除",
+      resumeSession: "Agent で resume",
+      forkSession: "Agent で fork",
+      resumeInAgent: "{{agent}} で resume",
+      forkInAgent: "{{agent}} で fork",
       importSession: "セッションをインポート",
       writeDeletePlan: "削除計画を書き出す",
       planImport: "インポート計画"
@@ -456,6 +488,10 @@ export const jaJP = {
       started: "開始",
       executable: "実行ファイル",
       command: "コマンド",
+      role: "役割",
+      rootPid: "Root PID",
+      parentAgentPid: "Agent parent",
+      roleEvidence: "Role evidence",
       session: "セッション",
       confidence: "信頼度",
       status: "状態",
@@ -506,6 +542,8 @@ export const jaJP = {
     sessionsDeleted: "{{count}}/{{total}} セッションを隔離へ移動しました",
     noSessionsDeleted: "削除されたセッションはありません",
     sessionImported: "バックアップからセッションをインポートしました",
+    sessionLaunchStarted: "{{agent}} {{action}} を開始しました",
+    sessionLaunchUnsupported: "このセッションは Codex/Claude コントロールで起動できません",
     deletePlanWritten: "削除計画を書き出しました: {{path}}",
     deletePlanUnavailable: "削除計画を書き出せませんでした",
     deletePlanPartial: "{{count}}/{{total}} セッションの削除計画を書き出しました",

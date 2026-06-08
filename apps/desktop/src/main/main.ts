@@ -135,6 +135,9 @@ ipcMain.handle("session:delete", async (_event, agent: string, sessionId: string
   const core = await loadCore();
   return core.deleteSession(sessionId, asAgent(agent), createdAt ? { now: new Date(createdAt) } : undefined);
 });
+ipcMain.handle("session:launch", async (_event, agent: string, sessionId: string, action: string, cwd?: string) => {
+  return launchSessionCommand(agent, sessionId, action, cwd);
+});
 ipcMain.handle("session:import", async (_event, backupDir: string) => {
   if (!(await isAllowedAgentScopeOperationPath(backupDir))) {
     throw new Error("Import is limited to AgentScope backup directories.");
@@ -481,6 +484,65 @@ async function repairDiagnostic(name: string): Promise<{
       files: []
     };
   }
+}
+
+async function launchSessionCommand(
+  agentValue: string,
+  sessionId: string,
+  action: string,
+  cwd?: string
+): Promise<{ ok: boolean; command: string; cwd?: string }> {
+  const agent = asAgent(agentValue);
+  if (!agent) throw new Error("Unsupported agent for session launch.");
+  if (action !== "resume" && action !== "fork") throw new Error("Unsupported session launch action.");
+  if (!isSafeSessionId(sessionId)) throw new Error("Session id contains unsupported characters.");
+  const workingDirectory = cwd && await isAllowedLocalPath(cwd) && fs.existsSync(cwd) ? cwd : undefined;
+  const command = sessionLaunchCommand(agent, action, sessionId);
+  const args = sessionLaunchArgs(agent, action, sessionId);
+  const payload = JSON.stringify({
+    filePath: agent === "codex" ? "codex" : "claude",
+    args,
+    workingDirectory
+  });
+  const script = `
+$ErrorActionPreference = 'Stop'
+$payload = ConvertFrom-Json @'
+${payload}
+'@
+$argumentList = @()
+foreach ($item in $payload.args) { $argumentList += [string]$item }
+$parameters = @{
+  FilePath = [string]$payload.filePath
+  ArgumentList = $argumentList
+  WindowStyle = 'Normal'
+}
+if ($payload.workingDirectory) { $parameters.WorkingDirectory = [string]$payload.workingDirectory }
+Start-Process @parameters
+`;
+  await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { windowsHide: true, timeout: 10000, maxBuffer: 256 * 1024 }
+  );
+  return {
+    ok: true,
+    command,
+    ...(workingDirectory ? { cwd: workingDirectory } : {})
+  };
+}
+
+function sessionLaunchCommand(agent: "codex" | "claude", action: string, sessionId: string): string {
+  if (agent === "codex") return `codex ${action} ${sessionId}`;
+  return action === "fork" ? `claude --resume ${sessionId} --fork-session` : `claude --resume ${sessionId}`;
+}
+
+function sessionLaunchArgs(agent: "codex" | "claude", action: string, sessionId: string): string[] {
+  if (agent === "codex") return [action, sessionId];
+  return action === "fork" ? ["--resume", sessionId, "--fork-session"] : ["--resume", sessionId];
+}
+
+function isSafeSessionId(sessionId: string): boolean {
+  return /^[A-Za-z0-9._:-]{3,160}$/.test(sessionId);
 }
 
 function isNativeSqliteDiagnostic(name: string): boolean {

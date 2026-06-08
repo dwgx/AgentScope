@@ -141,9 +141,14 @@ export const koKR = {
       subtitle_one: "{{count}}개의 관련 Win32 행",
       subtitle_other: "{{count}}개의 관련 Win32 행",
       noCandidate: "아직 세션 후보가 없습니다",
+      helperNoCandidate: "Helper process; no direct session id or transcript evidence.",
       weakEvidence: "약한 증거",
       candidate: "후보",
       score: "증거 {{score}}",
+      allProcesses: "All processes",
+      taskRoot: "Task root PID {{pid}}",
+      noParentPid: "No parent PID",
+      noCwdCandidate: "No cwd candidate",
       groupCount_one: "{{count}}개 프로세스",
       groupCount_other: "{{count}}개 프로세스",
       sort: {
@@ -156,6 +161,8 @@ export const koKR = {
       },
       group: {
         label: "그룹",
+        task: "작업",
+        role: "역할",
         agent: "Agent",
         parent: "부모 프로세스",
         cwd: "cwd",
@@ -163,7 +170,19 @@ export const koKR = {
       },
       context: {
         inspect: "프로세스 검사",
-        jumpSession: "세션으로 이동"
+        jumpSession: "세션으로 이동",
+        directSessionEvidence: "직접 세션 증거"
+      },
+      roles: {
+        codex_cli: "Codex CLI",
+        codex_engine: "Codex engine",
+        codex_node_repl: "Subagent runtime",
+        codex_app_server: "Codex app-server",
+        codex_mcp_tool: "MCP tool",
+        claude_cli: "Claude CLI",
+        claude_daemon: "Claude daemon",
+        agent_helper: "Agent helper",
+        unknown: "Unknown role"
       }
     },
     sessions: {
@@ -178,6 +197,10 @@ export const koKR = {
       context: {
         selectedCount: "{{count}}개 세션 선택됨"
       },
+      allSessions: "All sessions",
+      rootNoParent: "Root / no parent",
+      parentGroup: "Parent: {{title}}",
+      noCwd: "No cwd",
       group: {
         cwd: "cwd",
         parent: "부모",
@@ -414,6 +437,7 @@ export const koKR = {
     nothingTitle: "선택된 항목 없음",
     nothingDetail: "증거를 검사할 프로세스 또는 세션을 선택하세요.",
     likelySessions: "가능성 높은 세션",
+    processRole: "프로세스 역할",
     runtime: "런타임",
     identity: "식별",
     transcript: "Transcript",
@@ -435,6 +459,10 @@ export const koKR = {
     noCwdEvidence: "cwd 증거 없음",
     safeControlDetail:
       "읽기 전용 모드입니다. 열기, 위치 표시, resume 명령 생성, 내보내기만 허용합니다. kill/archive는 명시적 force 제어가 생기기 전까지 비활성화됩니다.",
+    launchAction: {
+      resume: "resume",
+      fork: "fork"
+    },
     actions: {
       openTranscript: "Transcript 열기",
       revealTranscript: "Transcript 위치 표시",
@@ -442,6 +470,10 @@ export const koKR = {
       backupSessions: "{{count}}개 세션 백업",
       deleteSession: "세션 삭제",
       deleteSessions: "{{count}}개 세션 삭제",
+      resumeSession: "Agent에서 resume",
+      forkSession: "Agent에서 fork",
+      resumeInAgent: "{{agent}}에서 resume",
+      forkInAgent: "{{agent}}에서 fork",
       importSession: "세션 가져오기",
       writeDeletePlan: "삭제 계획 작성",
       planImport: "가져오기 계획"
@@ -453,6 +485,10 @@ export const koKR = {
       started: "시작",
       executable: "실행 파일",
       command: "명령",
+      role: "역할",
+      rootPid: "Root PID",
+      parentAgentPid: "Agent parent",
+      roleEvidence: "Role evidence",
       session: "세션",
       confidence: "신뢰도",
       status: "상태",
@@ -503,6 +539,8 @@ export const koKR = {
     sessionsDeleted: "{{count}}/{{total}}개 세션이 격리 폴더로 이동됨",
     noSessionsDeleted: "삭제된 세션 없음",
     sessionImported: "백업에서 세션을 가져왔습니다",
+    sessionLaunchStarted: "{{agent}} {{action}} 시작됨",
+    sessionLaunchUnsupported: "이 세션은 Codex/Claude 컨트롤로 시작할 수 없습니다",
     deletePlanWritten: "삭제 계획 작성됨: {{path}}",
     deletePlanUnavailable: "삭제 계획을 작성할 수 없습니다",
     deletePlanPartial: "{{count}}/{{total}}개 세션의 삭제 계획 작성됨",

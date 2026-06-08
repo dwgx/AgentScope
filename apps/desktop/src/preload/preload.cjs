@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("agentscope", {
   repairDiagnostic: (name) => ipcRenderer.invoke("diagnostic:repair", name),
   backupSession: (agent, sessionId) => ipcRenderer.invoke("session:backup", agent, sessionId),
   deleteSession: (agent, sessionId, createdAt) => ipcRenderer.invoke("session:delete", agent, sessionId, createdAt),
+  launchSession: (agent, sessionId, action, cwd) => ipcRenderer.invoke("session:launch", agent, sessionId, action, cwd),
   importSessionBackup: (backupDir) => ipcRenderer.invoke("session:import", backupDir),
   chooseImportSession: () => ipcRenderer.invoke("session:chooseImport"),
   writeDeletePlan: (agent, sessionId) => ipcRenderer.invoke("session:deletePlan", agent, sessionId),
