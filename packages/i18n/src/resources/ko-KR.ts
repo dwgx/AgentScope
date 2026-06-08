@@ -301,7 +301,11 @@ export const koKR = {
     },
     searchScope: {
       label: "검색 범위",
-      detail: "SQLite 제목/미리보기와 로컬 Codex 및 Claude JSONL transcript를 검색합니다."
+      detail: "SQLite 식별 필드와 로컬 Codex/Claude JSONL 안전 메타데이터를 검색합니다. transcript 본문이나 hidden/internal 필드는 검색하지 않습니다."
+    },
+    searchPreview: {
+      label: "SQLite preview 검색",
+      detail: "Codex SQLite preview 텍스트를 매칭에 포함합니다. 결과에는 preview 본문을 표시하지 않습니다."
     },
     searchLimit: { label: "검색 결과 제한", detail: "명령줄 검색이 반환하는 최대 결과 수입니다." },
     notifications: {
@@ -477,6 +481,7 @@ export const koKR = {
     endpoints: "엔드포인트",
     evidence: "증거",
     searchHit: "검색 hit",
+    safeSearchHitDetail: "안전 검색은 이벤트 메타데이터, 매칭 필드, 파일 위치만 표시하며 transcript 본문은 표시하지 않습니다.",
     activity: "활동",
     topEvents: "주요 이벤트",
     topTools: "주요 도구",

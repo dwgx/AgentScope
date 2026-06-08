@@ -93,6 +93,21 @@ interface CodexDatabaseBundleManifest {
   sha256?: string | undefined;
 }
 
+interface DirectoryManifestEntry {
+  relativePath: string;
+  kind: "file";
+  bytes: number;
+  sha256: string;
+}
+
+interface DirectoryManifest {
+  schemaVersion: 1;
+  kind: "AgentScope Directory Tree";
+  rootRole: string;
+  entries: DirectoryManifestEntry[];
+  treeHash: string;
+}
+
 interface BackupManifest extends Record<string, unknown> {
   schemaVersion: 1;
   kind: "AgentScope Session Backup";
@@ -147,21 +162,23 @@ export async function backupSession(
   await fs.promises.mkdir(filesRoot, { recursive: true });
 
   const copiedFiles: SessionOperationFile[] = [];
-  const copiedManifestFiles: Array<SessionOperationFile & { backupRelativePath: string }> = [];
+  const copiedManifestFiles: Array<SessionOperationFile & { backupRelativePath: string; directoryTree?: DirectoryManifest | undefined }> = [];
   for (const file of plan.files) {
     if (!file.exists || file.action !== "copy") continue;
     const relative = relativeBackupPath(file.path);
     const target = path.join(filesRoot, relative);
     await fs.promises.mkdir(path.dirname(target), { recursive: true });
     const stat = await fs.promises.stat(file.path);
+    let directoryTree: DirectoryManifest | undefined;
     if (stat.isDirectory()) {
+      directoryTree = await directoryManifest(file.path, file.role);
       await fs.promises.cp(file.path, target, { recursive: true, force: false, errorOnExist: true });
     } else {
       await fs.promises.copyFile(file.path, target);
     }
     const copied = { ...file, sha256: await hashPath(file.path) };
     copiedFiles.push(copied);
-    copiedManifestFiles.push({ ...copied, backupRelativePath: relative });
+    copiedManifestFiles.push({ ...copied, backupRelativePath: relative, ...(directoryTree ? { directoryTree } : {}) });
   }
 
   const databaseBundles = session.agent === "codex" ? await exportCodexDatabaseBundles(session.sessionId, options.home, backupDir) : [];
@@ -194,7 +211,7 @@ export async function deleteSession(
 ): Promise<SessionDeleteResult> {
   const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses ?? true);
   const plan = await buildSessionPlan("delete", session, options);
-  if (plan.blockers.length && !options.allowActive) {
+  if (plan.blockers.length && !canBypassDeleteBlockers(plan.blockers, options)) {
     throw new Error(plan.blockers.join(" "));
   }
   const { backupDir, quarantineDir, journalPath } = operationDirectories(plan, options);
@@ -303,46 +320,54 @@ export async function importSessionBackup(
   const manifest = await readBackupManifest(backupDir);
   const copiedFiles = manifestCopiedFiles(manifest);
   if (!copiedFiles.length) throw new Error("Backup manifest has no copied files to import.");
+  await preflightImportFiles(manifest, backupDir, options.home);
+  preflightCodexDatabaseBundles(manifest, backupDir, options.home);
   const importedFiles: SessionOperationFile[] = [];
   const filesRoot = path.join(backupDir, "files");
   await assertImportTargetsAbsent(copiedFiles);
   if (plan.target) throw new Error("A session with this id already exists locally; delete or archive it before importing.");
-  for (const file of copiedFiles) {
-    const originalPath = typeof file.path === "string" ? file.path : undefined;
-    const backupRelativePath = typeof file.backupRelativePath === "string" ? file.backupRelativePath : undefined;
-    if (!originalPath || !backupRelativePath) continue;
-    const source = resolveSafeRelative(filesRoot, backupRelativePath);
-    if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
-    const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
-    const actualSha = await hashPath(source);
-    if (expectedSha && actualSha && expectedSha !== actualSha) {
-      throw new Error(`Backup checksum mismatch: ${source}`);
+  try {
+    for (const file of copiedFiles) {
+      const originalPath = typeof file.path === "string" ? file.path : undefined;
+      const backupRelativePath = typeof file.backupRelativePath === "string" ? file.backupRelativePath : undefined;
+      if (!originalPath || !backupRelativePath) continue;
+      const source = resolveSafeRelative(filesRoot, backupRelativePath);
+      if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
+      const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
+      const actualSha = await hashPath(source);
+      if (expectedSha && actualSha && expectedSha !== actualSha) {
+        throw new Error(`Backup checksum mismatch: ${source}`);
+      }
+      validateBackupSourceTree(file, source);
+      await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
+      const stat = await fs.promises.stat(source);
+      if (stat.isDirectory()) {
+        await fs.promises.cp(source, originalPath, { recursive: true, force: false, errorOnExist: true });
+      } else {
+        await fs.promises.copyFile(source, originalPath);
+      }
+      importedFiles.push({
+        role: typeof file.role === "string" ? file.role : "backup_file",
+        path: originalPath,
+        exists: true,
+        bytes: stat.isDirectory() ? await directoryBytes(originalPath) : stat.size,
+        sha256: await hashPath(originalPath),
+        action: "copy",
+        evidence: [
+          {
+            source: "agentscope.backup.import",
+            detail: "File restored from AgentScope session backup manifest.",
+            path: source
+          }
+        ]
+      });
     }
-    await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
-    const stat = await fs.promises.stat(source);
-    if (stat.isDirectory()) {
-      await fs.promises.cp(source, originalPath, { recursive: true, force: false, errorOnExist: true });
-    } else {
-      await fs.promises.copyFile(source, originalPath);
-    }
-    importedFiles.push({
-      role: typeof file.role === "string" ? file.role : "backup_file",
-      path: originalPath,
-      exists: true,
-      bytes: stat.isDirectory() ? await directoryBytes(originalPath) : stat.size,
-      sha256: await hashPath(originalPath),
-      action: "copy",
-      evidence: [
-        {
-          source: "agentscope.backup.import",
-          detail: "File restored from AgentScope session backup manifest.",
-          path: source
-        }
-      ]
-    });
+    const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home) : [];
+    return { plan, backupDir, importedFiles, databaseChanges };
+  } catch (error) {
+    await removeImportedFiles(importedFiles).catch(() => undefined);
+    throw error;
   }
-  const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home) : [];
-  return { plan, backupDir, importedFiles, databaseChanges };
 }
 
 export async function listQuarantinedSessions(
@@ -625,11 +650,6 @@ async function resolveSession(
   const snapshot = await buildSnapshot(home, includeProcesses);
   const exact = findSession(snapshot, sessionId, agent);
   if (exact) return exact;
-  const lowered = sessionId.toLowerCase();
-  const loose = snapshot.sessions.find(
-    (session) => session.sessionId.toLowerCase().includes(lowered) && (!agent || session.agent === agent)
-  );
-  if (loose) return loose;
   throw new Error(`Session not found: ${agent ? `${agent}:` : ""}${sessionId}`);
 }
 
@@ -701,24 +721,24 @@ async function discoverSessionFiles(
     await add("claude.history_jsonl_patch", path.join(claudeRoot, "history.jsonl"), [
       {
         source: "claude.history",
-        detail: "Claude history may contain rows with this session id; delete/import edits must be line-filter patches.",
+        detail: "Claude history may contain rows with this session id; AgentScope inspects it but does not patch global history during reversible delete.",
         field: "sessionId"
       }
-    ], operation === "backup" ? "inspect" : "patch");
+    ], "inspect");
     await add("claude.global_state_patch", path.join(root, ".claude.json"), [
       {
         source: "claude.global-state",
-        detail: "Claude global project state may contain lastSessionId references.",
+        detail: "Claude global project state may contain lastSessionId references; AgentScope inspects it but does not patch global state during reversible delete.",
         field: "lastSessionId"
       }
-    ], operation === "backup" ? "inspect" : "patch");
+    ], "inspect");
     await add("claude.daemon_roster_patch", path.join(claudeRoot, "daemon", "roster.json"), [
       {
         source: "claude.daemon.roster",
-        detail: "Claude daemon roster may contain worker references for this session.",
+        detail: "Claude daemon roster may contain worker references for this session; AgentScope inspects it but does not patch daemon state during reversible delete.",
         field: "workers.*.sessionId"
       }
-    ], operation === "backup" ? "inspect" : "patch");
+    ], "inspect");
     for (const jobPath of await findClaudeJobStateFiles(claudeRoot, session.sessionId)) {
       await add("claude.job_state", jobPath, [
         {
@@ -784,8 +804,8 @@ function databasePlanForSession(
   }
   if (session.agent === "claude") {
     return [
-      dbChange(path.join(claudeHome(home), "history.jsonl"), "jsonl_lines", `sessionId = ${jsonQuote(session.sessionId)}`, operation === "delete" ? "update" : "inspect", "claude.history"),
-      dbChange(path.join(home ?? userHome(), ".claude.json"), "json_fields", `value = ${jsonQuote(session.sessionId)}`, operation === "delete" ? "update" : "inspect", "claude.global-state")
+      dbChange(path.join(claudeHome(home), "history.jsonl"), "jsonl_lines", `sessionId = ${jsonQuote(session.sessionId)}`, "inspect", "claude.history"),
+      dbChange(path.join(home ?? userHome(), ".claude.json"), "json_fields", `value = ${jsonQuote(session.sessionId)}`, "inspect", "claude.global-state")
     ];
   }
   return [];
@@ -898,7 +918,8 @@ function activeSessionBlockers(session: AgentSession): string[] {
   if (session.childSessionIds.length > 0) {
     blockers.push("Session has child sessions; destructive operations are blocked until an explicit include-children or detach workflow exists.");
   }
-  const hasHeuristicActiveProcess = session.agent === "codex" && session.evidence.some((item) => item.source === "process.heuristic");
+  const heuristicCandidate = session.runtimeCandidates?.find((candidate) => candidate.confidence === "heuristic" && candidate.score >= 100);
+  const hasHeuristicActiveProcess = session.agent === "codex" && (session.evidence.some((item) => item.source === "process.heuristic") || !!heuristicCandidate);
   const hasExactActivePid =
     session.pid !== undefined &&
     !hasHeuristicActiveProcess &&
@@ -909,9 +930,15 @@ function activeSessionBlockers(session: AgentSession): string[] {
   if (hasExactActivePid) {
     blockers.push(`Session has an exact active PID mapping (${session.pid}); destructive operations must wait until the process exits.`);
   } else if (hasHeuristicActiveProcess) {
-    blockers.push(`Session is attached to a high-confidence active Codex process candidate (${session.pid}); destructive operations are blocked because Codex PID-to-thread mapping is heuristic.`);
+    blockers.push(`Session is attached to a high-confidence active Codex process candidate (${session.pid ?? heuristicCandidate?.score}); destructive operations are blocked because Codex PID-to-thread mapping is heuristic.`);
   }
   return blockers;
+}
+
+function canBypassDeleteBlockers(blockers: string[], options: SessionOperationOptions): boolean {
+  if (!blockers.length) return true;
+  if (!options.allowActive) return false;
+  return blockers.every((blocker) => blocker.includes("active PID mapping") || blocker.includes("active Codex process candidate"));
 }
 
 function riskWarnings(session: AgentSession, operation: "backup" | "delete"): string[] {
@@ -921,7 +948,7 @@ function riskWarnings(session: AgentSession, operation: "backup" | "delete"): st
     if (operation === "delete") warnings.push("Codex SQLite writes use internal tables; delete backs up databases and journals each row-level step before quarantining files.");
   }
   if (session.agent === "claude" && operation === "delete") {
-    warnings.push("Claude history, daemon, job, and global-state sidecars may reference the session; delete patches only exact session-id references and journals the result.");
+    warnings.push("Claude global history, daemon roster, and .claude.json may reference the session; delete only inspects those global files until reversible patch restore is implemented.");
   }
   if (operation === "backup" && session.pid !== undefined) {
     warnings.push("The session appears active; backup is point-in-time and may not include writes that happen after copying starts.");
@@ -1042,6 +1069,20 @@ function applyCodexDatabaseDelete(
 ): SessionOperationDatabaseChange[] {
   const root = codexHome(home);
   const applied: SessionOperationDatabaseChange[] = [];
+  const recordApplied = (changes: SessionOperationDatabaseChange[]) => {
+    for (const change of changes.filter((item) => item.estimatedRows !== 0)) {
+      appendJournalStepSync(journal, {
+        phase: "sqlite_delete",
+        action: change.action,
+        status: change.action === "skip" ? "skipped" : "succeeded",
+        database: change.database,
+        table: change.table,
+        where: change.where,
+        estimatedRows: change.estimatedRows,
+        evidence: change.evidence
+      });
+    }
+  };
   const statePath = path.join(root, "state_5.sqlite");
   const stateDb = openWritableDb(statePath);
   if (stateDb) {
@@ -1049,20 +1090,23 @@ function applyCodexDatabaseDelete(
       const db = stateDb;
       db.pragma("busy_timeout = 5000");
       db.pragma("foreign_keys = ON");
+      const stateChanges: SessionOperationDatabaseChange[] = [];
       const transaction = db.transaction(() => {
         if (plannedDbAction(plan, statePath, "thread_spawn_edges") === "delete") {
-          applied.push(deleteRows(db, statePath, "thread_spawn_edges", "parent_thread_id = ? OR child_thread_id = ?", [plan.sessionId, plan.sessionId], "codex.sqlite.thread_spawn_edges"));
+          stateChanges.push(deleteRows(db, statePath, "thread_spawn_edges", "parent_thread_id = ? OR child_thread_id = ?", [plan.sessionId, plan.sessionId], "codex.sqlite.thread_spawn_edges"));
         }
         if (plannedDbAction(plan, statePath, "thread_dynamic_tools") === "delete") {
-          applied.push(deleteRows(db, statePath, "thread_dynamic_tools", "thread_id = ?", [plan.sessionId], "codex.sqlite.thread_dynamic_tools"));
+          stateChanges.push(deleteRows(db, statePath, "thread_dynamic_tools", "thread_id = ?", [plan.sessionId], "codex.sqlite.thread_dynamic_tools"));
         }
         if (plannedDbAction(plan, statePath, "threads") === "delete") {
-          applied.push(deleteRows(db, statePath, "threads", "id = ?", [plan.sessionId], "codex.sqlite.threads"));
+          stateChanges.push(deleteRows(db, statePath, "threads", "id = ?", [plan.sessionId], "codex.sqlite.threads"));
         }
       });
       appendJournalStepSync(journal, { phase: "sqlite_delete", action: "transaction", status: "started", database: statePath });
       transaction();
+      applied.push(...stateChanges);
       appendJournalStepSync(journal, { phase: "sqlite_delete", action: "transaction", status: "succeeded", database: statePath });
+      recordApplied(stateChanges);
     } catch (error) {
       appendJournalStepSync(journal, {
         phase: "sqlite_delete",
@@ -1087,11 +1131,14 @@ function applyCodexDatabaseDelete(
       db.pragma("busy_timeout = 5000");
       if (plannedDbAction(plan, dbPath, table) !== "delete") continue;
       appendJournalStepSync(journal, { phase: "sqlite_delete", action: "transaction", status: "started", database: dbPath, table });
+      const dbChanges: SessionOperationDatabaseChange[] = [];
       const transaction = db.transaction(() => {
-        applied.push(deleteRows(db, dbPath, table, where, [plan.sessionId], source));
+        dbChanges.push(deleteRows(db, dbPath, table, where, [plan.sessionId], source));
       });
       transaction();
+      applied.push(...dbChanges);
       appendJournalStepSync(journal, { phase: "sqlite_delete", action: "transaction", status: "succeeded", database: dbPath, table });
+      recordApplied(dbChanges);
     } catch (error) {
       appendJournalStepSync(journal, {
         phase: "sqlite_delete",
@@ -1106,20 +1153,7 @@ function applyCodexDatabaseDelete(
       db.close();
     }
   }
-  const result = applied.filter((change) => change.estimatedRows !== 0);
-  for (const change of result) {
-    appendJournalStepSync(journal, {
-      phase: "sqlite_delete",
-      action: change.action,
-      status: change.action === "skip" ? "skipped" : "succeeded",
-      database: change.database,
-      table: change.table,
-      where: change.where,
-      estimatedRows: change.estimatedRows,
-      evidence: change.evidence
-    });
-  }
-  return result;
+  return applied.filter((change) => change.estimatedRows !== 0);
 }
 
 async function backupCodexDatabases(home: string | undefined, quarantineDir: string, journal?: DeleteJournal | undefined): Promise<void> {
@@ -1471,6 +1505,7 @@ function importCodexDatabaseBundles(
   const changes: SessionOperationDatabaseChange[] = [];
   const grouped = new Map<string, CodexDatabaseBundleManifest[]>();
   for (const bundle of bundles) {
+    assertAllowedCodexBundleManifest(bundle, manifest.sessionId);
     if (bundle.action !== "restore") {
       changes.push(dbChange(path.join(codexRoot, bundle.databaseName), bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, "skip", "agentscope.import.codex.logs-summary"));
       continue;
@@ -1479,40 +1514,179 @@ function importCodexDatabaseBundles(
     existing.push(bundle);
     grouped.set(bundle.databaseName, existing);
   }
-  for (const [databaseName, databaseBundles] of grouped) {
-    const dbPath = path.join(codexRoot, databaseName);
-    const db = openWritableDb(dbPath);
-    if (!db) {
-      for (const bundle of databaseBundles) {
-        changes.push(dbChange(dbPath, bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, "skip", "agentscope.import.codex.missing-db"));
+  try {
+    for (const [databaseName, databaseBundles] of grouped) {
+      const dbPath = path.join(codexRoot, databaseName);
+      const db = openWritableDb(dbPath);
+      if (!db) {
+        for (const bundle of databaseBundles) {
+          changes.push(dbChange(dbPath, bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, "skip", "agentscope.import.codex.missing-db"));
+        }
+        continue;
       }
-      continue;
+      try {
+        db.pragma("busy_timeout = 5000");
+        db.pragma("foreign_keys = ON");
+        const transaction = db.transaction(() => {
+          for (const bundle of databaseBundles) {
+            const source = resolveSafeRelative(backupDir, bundle.relativePath);
+            const expectedSha = bundle.sha256;
+            const actualSha = fs.existsSync(source) ? hashPathSync(source) : undefined;
+            if (!fs.existsSync(source)) throw new Error(`Codex row bundle is missing: ${source}`);
+            if (expectedSha && actualSha && expectedSha !== actualSha) throw new Error(`Codex row bundle checksum mismatch: ${source}`);
+            const payload = JSON.parse(fs.readFileSync(source, "utf8")) as Record<string, unknown>;
+            validateCodexBundlePayload(payload, bundle, manifest.sessionId);
+            const rows = Array.isArray(payload.rows) ? payload.rows.filter(isObjectValue) : [];
+            validateCodexBundleRows(bundle.table, rows, manifest.sessionId, bundle.action);
+            const inserted = insertBundleRows(db, bundle.table, rows, manifest.sessionId);
+            changes.push({
+              ...dbChange(dbPath, bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, inserted ? "insert" : "skip", "agentscope.import.codex"),
+              estimatedRows: inserted
+            });
+          }
+        });
+        transaction();
+      } finally {
+        db.close();
+      }
     }
+  } catch (error) {
+    const rollbackError = rollbackCodexDatabaseImports(changes, manifest.sessionId);
+    if (rollbackError) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}; Codex SQLite import rollback failed: ${rollbackError.message}`);
+    }
+    throw error;
+  }
+  return changes.filter((change) => change.estimatedRows !== 0 || change.action === "skip");
+}
+
+function rollbackCodexDatabaseImports(
+  changes: SessionOperationDatabaseChange[],
+  sessionId: string
+): Error | undefined {
+  const seen = new Set<string>();
+  for (const change of [...changes].reverse()) {
+    if (change.action !== "insert" || !change.estimatedRows) continue;
+    const key = `${path.resolve(change.database).toLowerCase()}\0${change.table}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const where = codexRollbackWhere(change.table);
+    if (!where) continue;
+    const db = openWritableDb(change.database);
+    if (!db) continue;
     try {
       db.pragma("busy_timeout = 5000");
       db.pragma("foreign_keys = ON");
       const transaction = db.transaction(() => {
-        for (const bundle of databaseBundles) {
-          const source = resolveSafeRelative(backupDir, bundle.relativePath);
-          const expectedSha = bundle.sha256;
-          const actualSha = fs.existsSync(source) ? hashPathSync(source) : undefined;
-          if (!fs.existsSync(source)) throw new Error(`Codex row bundle is missing: ${source}`);
-          if (expectedSha && actualSha && expectedSha !== actualSha) throw new Error(`Codex row bundle checksum mismatch: ${source}`);
-          const payload = JSON.parse(fs.readFileSync(source, "utf8")) as Record<string, unknown>;
-          const rows = Array.isArray(payload.rows) ? payload.rows.filter(isObjectValue) : [];
-          const inserted = insertBundleRows(db, bundle.table, rows, manifest.sessionId);
-          changes.push({
-            ...dbChange(dbPath, bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, inserted ? "insert" : "skip", "agentscope.import.codex"),
-            estimatedRows: inserted
-          });
-        }
+        const columns = tableColumns(db, change.table);
+        if (!columns.size || !whereColumnsExist(columns, where)) return;
+        db.prepare(`DELETE FROM ${quoteIdentifier(change.table)} WHERE ${where}`).run(...rollbackWhereParams(where, sessionId));
       });
       transaction();
+    } catch (error) {
+      return error instanceof Error ? error : new Error(String(error));
     } finally {
       db.close();
     }
   }
-  return changes.filter((change) => change.estimatedRows !== 0 || change.action === "skip");
+  return undefined;
+}
+
+function codexRollbackWhere(table: string): string | undefined {
+  if (table === "threads") return "id = ?";
+  if (table === "thread_spawn_edges") return "parent_thread_id = ? OR child_thread_id = ?";
+  if (["thread_dynamic_tools", "thread_goals", "stage1_outputs"].includes(table)) return "thread_id = ?";
+  return undefined;
+}
+
+function rollbackWhereParams(where: string, sessionId: string): unknown[] {
+  return Array(Math.max(1, where.match(/\?/g)?.length ?? 1)).fill(sessionId);
+}
+
+function preflightCodexDatabaseBundles(manifest: BackupManifest, backupDir: string, home: string | undefined): void {
+  if (manifest.agent !== "codex") return;
+  const bundles = manifest.databaseBundles ?? [];
+  const codexRoot = codexHome(home);
+  for (const bundle of bundles) {
+    assertAllowedCodexBundleManifest(bundle, manifest.sessionId);
+    const source = resolveSafeRelative(backupDir, bundle.relativePath);
+    if (!fs.existsSync(source)) throw new Error(`Codex row bundle is missing: ${source}`);
+    const actualSha = hashPathSync(source);
+    if (bundle.sha256 && actualSha && bundle.sha256 !== actualSha) throw new Error(`Codex row bundle checksum mismatch: ${source}`);
+    const payload = JSON.parse(fs.readFileSync(source, "utf8")) as Record<string, unknown>;
+    validateCodexBundlePayload(payload, bundle, manifest.sessionId);
+    const rows = Array.isArray(payload.rows) ? payload.rows.filter(isObjectValue) : [];
+    validateCodexBundleRows(bundle.table, rows, manifest.sessionId, bundle.action);
+    if (bundle.action !== "restore") continue;
+    const dbPath = path.join(codexRoot, bundle.databaseName);
+    const db = openWritableDb(dbPath);
+    if (!db) continue;
+    try {
+      db.pragma("busy_timeout = 5000");
+      const columns = tableColumns(db, bundle.table);
+      if (!columns.size) continue;
+      const identity = bundleIdentity(bundle.table, columns);
+      if (identity && rowExists(db, bundle.table, identity, manifest.sessionId)) {
+        throw new Error(`Import target already exists in ${bundle.table}: ${manifest.sessionId}`);
+      }
+    } finally {
+      db.close();
+    }
+  }
+}
+
+function assertAllowedCodexBundleManifest(bundle: CodexDatabaseBundleManifest, sessionId: string): void {
+  const spec = codexBundleSpecs(sessionId, "").find(
+    (item) => item.databaseName === bundle.databaseName && item.table === bundle.table
+  );
+  if (!spec) throw new Error(`Unsupported Codex SQLite row bundle target: ${bundle.databaseName}:${bundle.table}`);
+  const expectedAction = spec.summary ? "summary" : "restore";
+  if (bundle.action !== expectedAction) throw new Error(`Unsupported Codex SQLite row bundle action for ${bundle.table}: ${bundle.action}`);
+  const expectedRelative = path.join("db", `${bundle.databaseName}-${bundle.table}.json`);
+  if (path.normalize(bundle.relativePath) !== path.normalize(expectedRelative)) {
+    throw new Error(`Unsafe Codex row bundle relative path: ${bundle.relativePath}`);
+  }
+}
+
+function validateCodexBundlePayload(
+  payload: Record<string, unknown>,
+  bundle: CodexDatabaseBundleManifest,
+  sessionId: string
+): void {
+  if (payload.schemaVersion !== 1 || payload.kind !== "AgentScope Codex SQLite Row Bundle") {
+    throw new Error("Codex row bundle is not an AgentScope SQLite row bundle.");
+  }
+  if (payload.agent !== "codex") throw new Error("Codex row bundle agent mismatch.");
+  if (payload.sessionId !== sessionId) throw new Error("Codex row bundle session id mismatch.");
+  if (payload.databaseName !== bundle.databaseName) throw new Error("Codex row bundle database mismatch.");
+  if (payload.table !== bundle.table) throw new Error("Codex row bundle table mismatch.");
+  if (payload.action !== bundle.action) throw new Error("Codex row bundle action mismatch.");
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  if (rows.length !== bundle.rowCount) throw new Error(`Codex row bundle row count mismatch for ${bundle.table}.`);
+}
+
+function validateCodexBundleRows(
+  table: string,
+  rows: Record<string, unknown>[],
+  sessionId: string,
+  action: CodexDatabaseBundleManifest["action"]
+): void {
+  for (const row of rows) {
+    if (table === "logs") {
+      if (action !== "summary" || row.thread_id !== sessionId) {
+        throw new Error("Codex logs summary bundle row does not belong to this session.");
+      }
+      continue;
+    }
+    if (table === "threads" && row.id !== sessionId) throw new Error("Codex threads bundle row does not belong to this session.");
+    if (["thread_dynamic_tools", "thread_goals", "stage1_outputs"].includes(table) && row.thread_id !== sessionId) {
+      throw new Error(`Codex ${table} bundle row does not belong to this session.`);
+    }
+    if (table === "thread_spawn_edges" && row.parent_thread_id !== sessionId && row.child_thread_id !== sessionId) {
+      throw new Error("Codex thread_spawn_edges bundle row does not reference this session.");
+    }
+  }
 }
 
 function codexBundleSpecs(sessionId: string, codexRoot: string): Array<{
@@ -1652,6 +1826,12 @@ function insertBundleRows(
 
 function bundleIdentity(table: string, columns: Set<string>): { where: string; params: unknown[] } | undefined {
   if (table === "threads" && columns.has("id")) return { where: "id = ?", params: [] };
+  if (table === "thread_dynamic_tools" && columns.has("thread_id")) return { where: "thread_id = ?", params: [] };
+  if (table === "thread_goals" && columns.has("thread_id")) return { where: "thread_id = ?", params: [] };
+  if (table === "stage1_outputs" && columns.has("thread_id")) return { where: "thread_id = ?", params: [] };
+  if (table === "thread_spawn_edges" && columns.has("parent_thread_id") && columns.has("child_thread_id")) {
+    return { where: "parent_thread_id = ? OR child_thread_id = ?", params: [] };
+  }
   return undefined;
 }
 
@@ -1661,7 +1841,7 @@ function rowExists(
   identity: { where: string; params: unknown[] },
   sessionId: string
 ): boolean {
-  const params = identity.params.length ? identity.params : [sessionId];
+  const params = identity.params.length ? identity.params : Array(Math.max(1, identity.where.match(/\?/g)?.length ?? 1)).fill(sessionId);
   return countRows(db, table, identity.where, params) > 0;
 }
 
@@ -1756,7 +1936,7 @@ function backupNotes(agent: AgentKind): string[] {
 function deleteNotes(agent: AgentKind): string[] {
   const common = ["Delete writes an AgentScope backup first, then records each destructive step in quarantine/journal.json."];
   if (agent === "codex") return [...common, "Codex SQLite rows are deleted in transactions before rollout files are quarantined; logs_2.sqlite log bodies are not deleted."];
-  if (agent === "claude") return [...common, "History and .claude.json changes are patch-based and exact session-id only."];
+  if (agent === "claude") return [...common, "Global history, daemon roster, and .claude.json are inspected but not modified until reversible patch restore is implemented."];
   return common;
 }
 
@@ -1787,6 +1967,33 @@ async function listBackupFiles(backupDir: string): Promise<SessionOperationFile[
   return out;
 }
 
+async function directoryManifest(root: string, role: string): Promise<DirectoryManifest> {
+  const entries: DirectoryManifestEntry[] = [];
+  await walkMaybe(root, async (filePath) => {
+    const stat = await fs.promises.stat(filePath);
+    const relativePath = path.relative(root, filePath).split(path.sep).join("/");
+    if (!relativePath || relativePath.startsWith("../") || path.isAbsolute(relativePath)) {
+      throw new Error(`Unsafe directory backup path: ${filePath}`);
+    }
+    const fileHash = await hashPath(filePath);
+    if (!fileHash) return;
+    entries.push({
+      relativePath,
+      kind: "file",
+      bytes: stat.size,
+      sha256: fileHash
+    });
+  });
+  entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  return {
+    schemaVersion: 1,
+    kind: "AgentScope Directory Tree",
+    rootRole: role,
+    entries,
+    treeHash: hashDirectoryEntries(entries)
+  };
+}
+
 async function readBackupManifest(backupDir: string): Promise<BackupManifest> {
   const manifestPath = path.join(backupDir, "manifest.json");
   const manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8")) as Record<string, unknown>;
@@ -1807,11 +2014,127 @@ function manifestCopiedFiles(manifest: BackupManifest): Array<Record<string, unk
   return Array.isArray(copiedFiles) ? copiedFiles.filter(isObjectValue) : [];
 }
 
+async function preflightImportFiles(manifest: BackupManifest, backupDir: string, home: string | undefined): Promise<void> {
+  const filesRoot = path.join(backupDir, "files");
+  for (const file of manifestCopiedFiles(manifest)) {
+    const role = typeof file.role === "string" ? file.role : "";
+    const originalPath = typeof file.path === "string" ? file.path : undefined;
+    const backupRelativePath = typeof file.backupRelativePath === "string" ? file.backupRelativePath : undefined;
+    if (!originalPath || !backupRelativePath) throw new Error("Backup manifest copied file is missing path or backupRelativePath.");
+    assertSafeImportTarget(manifest.agent, role, originalPath, manifest.sessionId, home, file);
+    const source = resolveSafeRelative(filesRoot, backupRelativePath);
+    if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
+    const stat = await fs.promises.stat(source);
+    if (stat.isDirectory()) {
+      if (!isDirectoryManifest(file.directoryTree)) throw new Error(`Backup directory tree manifest is missing for ${role}: ${source}`);
+      validateBackupSourceTree(file, source);
+    } else {
+      const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
+      const actualSha = await hashPath(source);
+      if (expectedSha && actualSha && expectedSha !== actualSha) throw new Error(`Backup checksum mismatch: ${source}`);
+    }
+  }
+}
+
 async function assertImportTargetsAbsent(copiedFiles: Array<Record<string, unknown>>): Promise<void> {
   for (const file of copiedFiles) {
     const originalPath = typeof file.path === "string" ? file.path : undefined;
     if (originalPath && await pathExists(originalPath)) throw new Error(`Import target already exists: ${originalPath}`);
   }
+}
+
+function assertSafeImportTarget(
+  agent: AgentKind,
+  role: string,
+  targetPath: string,
+  sessionId: string,
+  home: string | undefined,
+  manifestFile?: Record<string, unknown> | undefined
+): void {
+  const root = home ?? userHome();
+  const normalized = path.resolve(targetPath).toLowerCase();
+  const forbiddenNames = [
+    "auth.json",
+    "auth",
+    ".auth",
+    "credentials",
+    ".credentials",
+    "credentials.json",
+    ".credentials.json",
+    "credential.json",
+    ".credential.json",
+    "settings.json",
+    "settings.local.json",
+    "settings.local.toml",
+    "settings.toml",
+    "config.toml",
+    "config.json",
+    "plugins",
+    "skills",
+    "rules",
+    ".claude.json",
+    "history.jsonl"
+  ];
+  const parts = normalized.split(/[\\/]+/);
+  if (forbiddenNames.some((name) => parts.includes(name) || normalized.endsWith(`\\${name}`) || normalized.endsWith(`/${name}`))) {
+    throw new Error(`Unsafe import target is a protected agent file or directory: ${targetPath}`);
+  }
+  if (agent === "codex") {
+    const codexRoot = codexHome(root);
+    const sessionsRoot = path.join(codexRoot, "sessions");
+    const name = path.basename(targetPath);
+    if (role !== "transcript" || !pathInside(sessionsRoot, targetPath) || !name.startsWith("rollout-") || !name.endsWith(".jsonl") || !name.includes(sessionId)) {
+      throw new Error(`Unsafe Codex import target for ${role}: ${targetPath}`);
+    }
+    return;
+  }
+  if (agent === "claude") {
+    const claudeRoot = claudeHome(root);
+    const jobsRoot = path.join(claudeRoot, "jobs");
+    const allowedByRole: Record<string, string[]> = {
+      transcript: [path.join(claudeRoot, "projects")],
+      "claude.active_session_pid_map": [path.join(claudeRoot, "sessions")],
+      "claude.session_sidecar": [path.join(claudeRoot, "projects")],
+      "claude.file_history": [path.join(claudeRoot, "file-history", sessionId)],
+      "claude.session_env": [path.join(claudeRoot, "session-env", sessionId)],
+      "claude.image_cache": [path.join(claudeRoot, "image-cache", sessionId)],
+      "claude.job_state": [jobsRoot]
+    };
+    const roots = allowedByRole[role];
+    if (!roots || !roots.some((allowedRoot) => pathInside(allowedRoot, targetPath))) {
+      throw new Error(`Unsafe Claude import target for ${role}: ${targetPath}`);
+    }
+    const basename = path.basename(targetPath).toLowerCase();
+    if (role === "transcript" && !basename.endsWith(".jsonl")) {
+      throw new Error(`Unsafe Claude import target extension for ${role}: ${targetPath}`);
+    }
+    if ((role === "claude.active_session_pid_map" || role === "claude.job_state") && !basename.endsWith(".json")) {
+      throw new Error(`Unsafe Claude import target extension for ${role}: ${targetPath}`);
+    }
+    if (role === "claude.job_state") {
+      if (basename !== "state.json" || path.dirname(path.resolve(targetPath)).toLowerCase() === path.resolve(jobsRoot).toLowerCase()) {
+        throw new Error(`Unsafe Claude job state import target for ${role}: ${targetPath}`);
+      }
+      if (!manifestEvidenceReferencesSession(manifestFile)) {
+        throw new Error(`Unsafe Claude job state import target is missing session evidence: ${targetPath}`);
+      }
+    }
+    if ((role === "transcript" || role === "claude.session_sidecar" || role === "claude.file_history" || role === "claude.session_env" || role === "claude.image_cache") && !targetPath.toLowerCase().includes(sessionId.toLowerCase())) {
+      throw new Error(`Unsafe Claude import target is not keyed by this session id: ${targetPath}`);
+    }
+    return;
+  }
+  throw new Error(`Unsupported backup agent for import target validation: ${agent}`);
+}
+
+function manifestEvidenceReferencesSession(file: Record<string, unknown> | undefined): boolean {
+  const evidence = Array.isArray(file?.evidence) ? file.evidence : [];
+  return evidence.some((item) => {
+    if (!isObjectValue(item)) return false;
+    const source = typeof item.source === "string" ? item.source : "";
+    const field = typeof item.field === "string" ? item.field : "";
+    return source === "claude.jobs" && /(?:^|,)resumeSessionId(?:,|$)|(?:^|,)sessionId(?:,|$)/i.test(field.replace(/\s/g, ""));
+  });
 }
 
 async function describeTree(root: string, depth: number): Promise<Record<string, unknown>> {
@@ -1843,6 +2166,7 @@ async function walkMaybe(root: string, visitor: (filePath: string) => Promise<vo
   const entries = await fs.promises.readdir(root, { withFileTypes: true });
   for (const entry of entries) {
     const filePath = path.join(root, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`Unsafe symbolic link in session directory backup: ${filePath}`);
     if (entry.isDirectory()) await walkMaybe(filePath, visitor);
     else await visitor(filePath);
   }
@@ -1886,10 +2210,95 @@ async function hashPath(filePath: string): Promise<string | undefined> {
   return hash.digest("hex");
 }
 
+function validateBackupSourceTree(file: Record<string, unknown>, source: string): void {
+  const tree = file.directoryTree;
+  if (!isDirectoryManifest(tree)) return;
+  const expected = new Map(tree.entries.map((entry) => [entry.relativePath, entry]));
+  const seen = new Set<string>();
+  const actualEntries: DirectoryManifestEntry[] = [];
+  walkMaybeSync(source, (filePath) => {
+    const relativePath = path.relative(source, filePath).split(path.sep).join("/");
+    if (!relativePath || relativePath.startsWith("../") || path.isAbsolute(relativePath)) {
+      throw new Error(`Unsafe backup directory entry: ${filePath}`);
+    }
+    const expectedEntry = expected.get(relativePath);
+    if (!expectedEntry) throw new Error(`Unexpected file in backup directory: ${relativePath}`);
+    const stat = fs.statSync(filePath);
+    const actualSha = hashPathSync(filePath);
+    if (!actualSha || actualSha !== expectedEntry.sha256 || stat.size !== expectedEntry.bytes) {
+      throw new Error(`Backup directory checksum mismatch: ${relativePath}`);
+    }
+    seen.add(relativePath);
+    actualEntries.push({
+      relativePath,
+      kind: "file",
+      bytes: stat.size,
+      sha256: actualSha
+    });
+  });
+  for (const relativePath of expected.keys()) {
+    if (!seen.has(relativePath)) throw new Error(`Backup directory file is missing: ${relativePath}`);
+  }
+  actualEntries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  if (hashDirectoryEntries(actualEntries) !== tree.treeHash) throw new Error(`Backup directory tree hash mismatch: ${source}`);
+}
+
+function isDirectoryManifest(value: unknown): value is DirectoryManifest {
+  if (!isObjectValue(value)) return false;
+  if (value.schemaVersion !== 1 || value.kind !== "AgentScope Directory Tree") return false;
+  if (typeof value.rootRole !== "string" || typeof value.treeHash !== "string") return false;
+  if (!Array.isArray(value.entries)) return false;
+  return value.entries.every((entry) => {
+    if (!isObjectValue(entry)) return false;
+    return typeof entry.relativePath === "string" &&
+      entry.kind === "file" &&
+      typeof entry.bytes === "number" &&
+      Number.isFinite(entry.bytes) &&
+      typeof entry.sha256 === "string" &&
+      !entry.relativePath.startsWith("../") &&
+      !entry.relativePath.startsWith("..\\") &&
+      !entry.relativePath.includes("/../") &&
+      !entry.relativePath.includes("\\..\\") &&
+      !path.isAbsolute(entry.relativePath);
+  });
+}
+
+function hashDirectoryEntries(entries: DirectoryManifestEntry[]): string {
+  return crypto.createHash("sha256").update(JSON.stringify(entries)).digest("hex");
+}
+
 function hashPathSync(filePath: string): string | undefined {
   const stat = fs.statSync(filePath, { throwIfNoEntry: false });
   if (!stat?.isFile()) return undefined;
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function walkMaybeSync(root: string, visitor: (filePath: string) => void): void {
+  if (!fs.existsSync(root)) return;
+  const entries = fs.readdirSync(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const filePath = path.join(root, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`Unsafe symbolic link in backup directory: ${filePath}`);
+    if (entry.isDirectory()) walkMaybeSync(filePath, visitor);
+    else visitor(filePath);
+  }
+}
+
+async function removeImportedFiles(importedFiles: SessionOperationFile[]): Promise<void> {
+  for (const file of [...importedFiles].reverse()) {
+    await fs.promises.rm(file.path, { recursive: true, force: true }).catch(() => undefined);
+    await pruneEmptyParents(path.dirname(file.path), 3);
+  }
+}
+
+async function pruneEmptyParents(start: string, maxDepth: number): Promise<void> {
+  let current = start;
+  for (let index = 0; index < maxDepth; index += 1) {
+    const entries = await fs.promises.readdir(current).catch(() => undefined);
+    if (!entries || entries.length) return;
+    await fs.promises.rmdir(current).catch(() => undefined);
+    current = path.dirname(current);
+  }
 }
 
 function resolveSafeRelative(root: string, relativePath: string): string {

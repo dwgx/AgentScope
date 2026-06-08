@@ -64,6 +64,16 @@ type ProcessGroupMode = "task" | "role" | "agent" | "parent" | "cwd" | "none";
 type SessionGroupMode = "agent" | "cwd" | "parent" | "none";
 type RelationKindFilter = "all" | Relation["kind"];
 type RelationConfidenceFilter = "all" | Relation["confidence"];
+type NoticePathRole =
+  | "text"
+  | "journal"
+  | "manifest"
+  | "directory"
+  | "backup"
+  | "quarantine"
+  | "cwd"
+  | "executable"
+  | "sqlite";
 type SelectionKey =
   | { type: "session"; agent: AgentKind; id: string }
   | { type: "process"; pid: number }
@@ -129,7 +139,6 @@ interface TranscriptContext {
   query?: string;
   eventType?: string;
   timestamp?: string;
-  excerpt?: string;
 }
 
 interface RelationEndpointDisplay {
@@ -175,6 +184,7 @@ interface AppSettings {
   codeFont: string;
   uiLineHeight: "compact" | "normal" | "spacious";
   searchLimit: number;
+  includeSqlitePreviewSearch: boolean;
   suggestionsEnabled: boolean;
   transcriptPreviewEnabled: boolean;
   showUnknownCandidates: boolean;
@@ -205,6 +215,7 @@ const defaultSettings: AppSettings = {
   codeFont: "Cascadia Code",
   uiLineHeight: "normal",
   searchLimit: 24,
+  includeSqlitePreviewSearch: false,
   suggestionsEnabled: true,
   transcriptPreviewEnabled: true,
   showUnknownCandidates: true,
@@ -381,7 +392,7 @@ function App() {
       void runSearchText(query);
     }, query.trim() ? 180 : 0);
     return () => window.clearTimeout(searchDebounceRef.current);
-  }, [query, searchOpen, settings.searchLimit]);
+  }, [query, searchOpen, settings.searchLimit, settings.includeSqlitePreviewSearch]);
 
   async function runSearch() {
     await runSearchText(query);
@@ -394,7 +405,9 @@ function App() {
       return;
     }
     const trimmed = value.trim();
-    const nextResults = await window.agentscope.search(trimmed, settings.searchLimit);
+    const nextResults = await window.agentscope.search(trimmed, settings.searchLimit, {
+      includeSqlitePreview: settings.includeSqlitePreviewSearch
+    });
     if (requestId !== searchRequestIdRef.current) return;
     setResults(nextResults.map((result) => ({ ...result, query: trimmed })));
   }
@@ -416,7 +429,7 @@ function App() {
         : {
             message: t("toast.snapshotExported"),
             detail: result.path,
-            actions: noticePathActions(result.path)
+            actions: noticePathActions(result.path, "text")
           }
     );
   }
@@ -434,13 +447,13 @@ function App() {
         ? {
             message: t("toast.openFailed", { message: result }),
             items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }],
-            actions: noticePathActions(targetPath),
+            actions: noticePathActions(targetPath, "directory"),
             ttlMs: 30000
           }
         : {
             message: t("toast.pathOpened"),
             items: [{ label: t("common.path.path"), value: targetPath, path: targetPath }],
-            actions: noticePathActions(targetPath)
+            actions: noticePathActions(targetPath, "text")
           }
     );
   }
@@ -452,7 +465,7 @@ function App() {
       showNotice({
         message: t("toast.operationFailed", { message: result }),
         items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }],
-        actions: noticePathActions(targetPath),
+        actions: noticePathActions(targetPath, "directory"),
         ttlMs: 30000
       });
       return;
@@ -460,7 +473,7 @@ function App() {
     showNotice({
       message: t("toast.pathRevealed"),
       items: [{ label: t("common.path.path"), value: targetPath, path: targetPath }],
-      actions: noticePathActions(targetPath)
+      actions: noticePathActions(targetPath, "directory")
     });
   }
 
@@ -485,7 +498,7 @@ function App() {
           }))
         ],
         actions: [
-          ...(result.directories[0] ? noticePathActions(result.directories[0]) : []),
+          ...(result.directories[0] ? noticePathActions(result.directories[0], "directory") : []),
           ...(result.restartRequired ? [{ label: t("common.action.restart"), onClick: () => void window.agentscope.reloadApp() }] : [])
         ],
         ttlMs: 30000
@@ -545,7 +558,7 @@ function App() {
           })),
           ...failures
         ],
-        actions: noticePathActions(firstManifest),
+        actions: noticePathActions(firstManifest, "manifest"),
         ttlMs: uniqueSessions.length > 1 ? 30000 : undefined
       });
       if (firstManifest) await revealPath(firstManifest);
@@ -691,7 +704,7 @@ function App() {
               label: `${displayTitle(session)} quarantine`,
               value: result.quarantineDir,
               path: result.quarantineDir,
-              onClick: () => void openPath(result.quarantineDir)
+              onClick: () => void revealPath(result.quarantineDir)
             }
           ]),
           ...failures
@@ -700,7 +713,7 @@ function App() {
           ? [
               { label: t("common.action.openJournal"), onClick: () => void openPath(firstResult.journalPath) },
               { label: t("common.action.revealJournal"), onClick: () => void revealPath(firstResult.journalPath) },
-              ...noticePathActions(firstResult.quarantineDir)
+              ...noticePathActions(firstResult.quarantineDir, "quarantine")
             ]
           : undefined,
         ttlMs: targets.length > 1 || failures.length ? 30000 : undefined
@@ -800,8 +813,8 @@ function App() {
           ...(result.cwd ? [{ label: "cwd", value: result.cwd, path: result.cwd, tone: "ok" as const }] : [])
         ],
         actions: [
-          ...noticePathActions(result.filePath),
-          ...(result.cwd ? noticePathActions(result.cwd) : [])
+          ...noticePathActions(result.filePath, "executable"),
+          ...(result.cwd ? noticePathActions(result.cwd, "cwd") : [])
         ],
         ttlMs: 30000
       });
@@ -810,12 +823,20 @@ function App() {
     }
   }
 
-  function noticePathActions(targetPath?: string): NoticeAction[] {
+  function noticePathActions(targetPath?: string, role: NoticePathRole = "text"): NoticeAction[] {
     if (!targetPath) return [];
-    return [
-      { label: t("common.action.reveal"), onClick: () => void revealPath(targetPath) },
-      { label: t("common.action.open"), onClick: () => void openPath(targetPath) }
+    const actions: NoticeAction[] = [
+      { label: t("common.action.reveal"), onClick: () => void revealPath(targetPath) }
     ];
+    if (canOpenNoticePath(role, targetPath)) {
+      actions.push({ label: t("common.action.open"), onClick: () => void openPath(targetPath) });
+    }
+    return actions;
+  }
+
+  function canOpenNoticePath(role: NoticePathRole, targetPath: string): boolean {
+    if (role !== "text" && role !== "journal" && role !== "manifest") return false;
+    return /\.(?:json|jsonl|txt|md|log)$/i.test(targetPath);
   }
 
   function showImportOrRestoreNotice(result: SessionImportResult | SessionRestoreResult) {
@@ -849,9 +870,9 @@ function App() {
         ? [
             { label: t("common.action.openJournal"), onClick: () => void openPath(result.restoreJournalPath) },
             { label: t("common.action.revealJournal"), onClick: () => void revealPath(result.restoreJournalPath) },
-            ...noticePathActions(result.quarantineDir)
+            ...noticePathActions(result.quarantineDir, "quarantine")
           ]
-        : noticePathActions(result.backupDir),
+        : noticePathActions(result.backupDir, "backup"),
       ttlMs: 30000
     });
   }
@@ -2627,6 +2648,23 @@ function SettingsPanel(props: {
                   <Badge text={t("common.status.local")} tone="ok" />
                 </SettingRow>
                 <SettingRow
+                  label={t("settings.searchPreview.label")}
+                  detail={t("settings.searchPreview.detail")}
+                >
+                  <button
+                    className={`toggleButton ${props.settings.includeSqlitePreviewSearch ? "on" : ""}`}
+                    onClick={() =>
+                      props.updateSettings({
+                        includeSqlitePreviewSearch: !props.settings.includeSqlitePreviewSearch
+                      })
+                    }
+                  >
+                    {props.settings.includeSqlitePreviewSearch
+                      ? t("common.action.show")
+                      : t("common.action.hide")}
+                  </button>
+                </SettingRow>
+                <SettingRow
                   label={t("settings.searchLimit.label")}
                   detail={t("settings.searchLimit.detail")}
                 >
@@ -3885,7 +3923,7 @@ function ModelRuntimeSummary(props: { session: AgentSession }) {
   const fields = [
     ["modelProvider", metadataValue(metadata, "model_provider", "provider")],
     ["model", metadataValue(metadata, "model") ?? firstCounterKey(modelCounts)],
-    ["reasoningEffort", metadataValue(metadata, "reasoning_effort", "reasoning")],
+    ["reasoningEffort", metadataValue(metadata, "reasoning_effort")],
     ["tokensUsed", metadataValue(metadata, "tokens_used", "total_tokens")],
     ["approvalMode", metadataValue(metadata, "approval_mode", "approval_policy")],
     ["sandboxPolicy", metadataValue(metadata, "sandbox_policy", "sandbox_mode")],
@@ -3972,27 +4010,10 @@ function TranscriptHitContext(props: { context: TranscriptContext | undefined })
           {props.context.eventType && <Badge text={props.context.eventType} />}
           {props.context.timestamp && <span>{formatMaybeDate(props.context.timestamp)}</span>}
         </div>
-        {props.context.excerpt && (
-          <p className="hitExcerpt mono">
-            {highlightExcerpt(props.context.excerpt, props.context.query)}
-          </p>
-        )}
+        <p className="hitExcerpt mono">{t("inspector.safeSearchHitDetail")}</p>
         <span className="mono">{props.context.path}</span>
       </section>
     </FieldGroup>
-  );
-}
-
-function highlightExcerpt(excerpt: string, query?: string): ReactNode {
-  if (!query?.trim()) return excerpt;
-  const index = excerpt.toLowerCase().indexOf(query.trim().toLowerCase());
-  if (index < 0) return excerpt;
-  return (
-    <>
-      {excerpt.slice(0, index)}
-      <mark>{excerpt.slice(index, index + query.trim().length)}</mark>
-      {excerpt.slice(index + query.trim().length)}
-    </>
   );
 }
 
@@ -4002,9 +4023,54 @@ function metadataValue(metadata: Record<string, unknown>, ...keys: string[]): st
     if (value === undefined || value === null || value === "") continue;
     if (typeof value === "number" || typeof value === "string") return value;
     if (typeof value === "boolean") return value ? "true" : "false";
-    return JSON.stringify(value);
+    return undefined;
   }
   return undefined;
+}
+
+const metadataDisplayAllowlist = new Set([
+  "model_provider",
+  "provider",
+  "model",
+  "reasoning_effort",
+  "tokens_used",
+  "total_tokens",
+  "approval_mode",
+  "approval_policy",
+  "sandbox_policy",
+  "sandbox_mode",
+  "git_branch",
+  "git_sha",
+  "cli_version",
+  "version",
+  "entrypoint",
+  "agent_nickname",
+  "agent_role",
+  "daemon_worker",
+  "storedPid",
+  "metadata_scan_lines",
+  "log_rows",
+  "log_warn_count",
+  "log_error_count",
+  "log_process_uuid_count"
+]);
+
+function safeMetadataEntries(metadata: Record<string, unknown>): Array<[string, string | number]> {
+  return Object.entries(metadata)
+    .filter(([key, value]) => metadataDisplayAllowlist.has(key) && !isSensitiveMetadataKey(key) && value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => [key, sanitizeMetadataValue(value)] as [string, string | number])
+    .filter(([, value]) => value !== "");
+}
+
+function sanitizeMetadataValue(value: unknown): string | number {
+  if (typeof value === "number") return value;
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value !== "string") return "";
+  return value.length > 160 ? `${value.slice(0, 157)}...` : value;
+}
+
+function isSensitiveMetadataKey(key: string): boolean {
+  return /reasoning|thinking|content|message|secret|token|password|credential|auth|key/i.test(key) && key !== "reasoning_effort";
 }
 
 function firstCounterKey(values: Record<string, number> | undefined): string | undefined {
@@ -4289,9 +4355,7 @@ function CommandPalette(props: {
 
 function MetadataSummary(props: { metadata?: Record<string, unknown> | undefined }) {
   const { t } = useTranslation();
-  const entries = Object.entries(props.metadata ?? {}).filter(
-    ([, value]) => value !== undefined && value !== null && value !== ""
-  );
+  const entries = safeMetadataEntries(props.metadata ?? {});
   if (!entries.length) return null;
   return (
     <FieldGroup title={t("inspector.indexMetadata")}>
@@ -4319,7 +4383,6 @@ function SearchResults(props: {
           <span>{String(result.source ?? "")}</span>
           <span className="mono">{short(String(result.sessionId ?? ""))}</span>
           <strong>{searchResultTitle(result)}</strong>
-          {typeof result.excerpt === "string" && <em className="mono">{result.excerpt}</em>}
         </button>
       ))}
     </section>
@@ -4862,14 +4925,12 @@ function transcriptContextForSession(
   const query = typeof result.query === "string" ? result.query : undefined;
   const eventType = typeof result.eventType === "string" ? result.eventType : undefined;
   const timestamp = typeof result.timestamp === "string" ? result.timestamp : undefined;
-  const excerpt = typeof result.excerpt === "string" ? result.excerpt : undefined;
   return {
     path: String(result.path),
     line: Number(result.line),
     ...(query ? { query } : {}),
     ...(eventType ? { eventType } : {}),
-    ...(timestamp ? { timestamp } : {}),
-    ...(excerpt ? { excerpt } : {})
+    ...(timestamp ? { timestamp } : {})
   };
 }
 
@@ -5300,6 +5361,10 @@ function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     codeFont: pickFont(settings.codeFont, defaultSettings.codeFont),
     uiLineHeight: pickEnum(settings.uiLineHeight, lineHeightValues, defaultSettings.uiLineHeight),
     searchLimit: clampNumber(settings.searchLimit, 8, 80, defaultSettings.searchLimit),
+    includeSqlitePreviewSearch: pickBoolean(
+      settings.includeSqlitePreviewSearch,
+      defaultSettings.includeSqlitePreviewSearch
+    ),
     suggestionsEnabled: pickBoolean(settings.suggestionsEnabled, defaultSettings.suggestionsEnabled),
     transcriptPreviewEnabled: pickBoolean(
       settings.transcriptPreviewEnabled,

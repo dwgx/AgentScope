@@ -27,7 +27,7 @@ export interface AppInfo {
 export interface AgentScopeApi {
   getSnapshot(): Promise<ScopeSnapshot>;
   getDoctor(): Promise<Diagnostic[]>;
-  search(query: string, limit?: number): Promise<Record<string, unknown>[]>;
+  search(query: string, limit?: number, options?: { includeSqlitePreview?: boolean }): Promise<Record<string, unknown>[]>;
   exportSnapshot(): Promise<{ canceled: boolean; path?: string }>;
   getAppInfo(): Promise<AppInfo>;
   listFonts(): Promise<string[]>;

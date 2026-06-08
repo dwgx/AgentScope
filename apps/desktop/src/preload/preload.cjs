@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("agentscope", {
   getSnapshot: () => ipcRenderer.invoke("snapshot:get"),
   getDoctor: () => ipcRenderer.invoke("doctor:get"),
-  search: (query, limit = 50) => ipcRenderer.invoke("search:run", query, limit),
+  search: (query, limit = 50, options) => ipcRenderer.invoke("search:run", query, limit, options),
   exportSnapshot: () => ipcRenderer.invoke("snapshot:export"),
   getAppInfo: () => ipcRenderer.invoke("app:info"),
   listFonts: () => ipcRenderer.invoke("fonts:list"),

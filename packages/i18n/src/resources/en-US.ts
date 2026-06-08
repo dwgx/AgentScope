@@ -317,7 +317,11 @@ export const enUS = {
     },
     searchScope: {
       label: "Search scope",
-      detail: "SQLite title/preview plus local Codex and Claude JSONL transcripts."
+      detail: "SQLite identity fields plus safe local Codex and Claude JSONL metadata. Transcript bodies and hidden/internal fields are not searched."
+    },
+    searchPreview: {
+      label: "SQLite preview search",
+      detail: "Include Codex SQLite preview text in matching. Results still never display preview body text."
     },
     searchLimit: {
       label: "Search result limit",
@@ -502,6 +506,7 @@ export const enUS = {
     endpoints: "Endpoints",
     evidence: "Evidence",
     searchHit: "Search Hit",
+    safeSearchHitDetail: "Safe search shows only event metadata, matched fields, and file location; transcript body text is not displayed.",
     activity: "Activity",
     topEvents: "Top Events",
     topTools: "Top Tools",

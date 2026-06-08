@@ -31,16 +31,16 @@ export async function iterateJsonl(
 export async function searchJsonl(filePath: string, query: string, limit: number): Promise<Record<string, unknown>[]> {
   const matches: Record<string, unknown>[] = [];
   const needle = query.toLowerCase();
-  await iterateJsonl(filePath, (line, raw, value) => {
-    const lowerRaw = raw.toLowerCase();
-    if (lowerRaw.includes(needle)) {
+  await iterateJsonl(filePath, (line, _raw, value) => {
+    const matchedFields = findMatchingFields(value, needle).slice(0, 8);
+    if (matchedFields.length) {
       matches.push({
         path: filePath,
         line,
         eventType: safeEventType(value),
         timestamp: safeTimestamp(value),
-        matchedFields: findMatchingFields(value, needle).slice(0, 8),
-        excerpt: redactedExcerpt(raw, lowerRaw.indexOf(needle), query.length)
+        matchedFields,
+        matchKind: "jsonl.safe-fields"
       });
     }
     return matches.length < limit;
@@ -63,8 +63,13 @@ function findMatchingFields(value: Record<string, unknown>, needle: string): str
   const matches = new Set<string>();
   const walk = (item: unknown, prefix: string, depth: number): void => {
     if (depth > 4 || matches.size >= 16) return;
+    if (isDeniedJsonlField(prefix)) return;
     if (typeof item === "string") {
-      if (item.toLowerCase().includes(needle)) matches.add(prefix);
+      if (isAllowedJsonlField(prefix) && item.toLowerCase().includes(needle)) matches.add(prefix);
+      return;
+    }
+    if (typeof item === "number" || typeof item === "boolean") {
+      if (isAllowedJsonlField(prefix) && String(item).toLowerCase().includes(needle)) matches.add(prefix);
       return;
     }
     if (!item || typeof item !== "object") return;
@@ -82,9 +87,34 @@ function findMatchingFields(value: Record<string, unknown>, needle: string): str
   return [...matches];
 }
 
-function redactedExcerpt(raw: string, index: number, length: number): string {
-  if (index < 0) return "";
-  return `...${raw.slice(index, index + length).replace(/\s+/g, " ")}...`;
+function isAllowedJsonlField(prefix: string): boolean {
+  const normalized = prefix.replace(/\[\]/g, "");
+  if (!normalized) return false;
+  if (["type", "timestamp", "session_id", "sessionId", "thread_id", "threadId", "cwd", "title", "model", "cli_version", "version", "tool_name", "name"].includes(normalized)) return true;
+  return [
+    /^payload\.type$/,
+    /^payload\.timestamp$/,
+    /^payload\.session_id$/,
+    /^payload\.sessionId$/,
+    /^payload\.thread_id$/,
+    /^payload\.threadId$/,
+    /^payload\.cwd$/,
+    /^payload\.title$/,
+    /^payload\.model$/,
+    /^payload\.cli_version$/,
+    /^payload\.tool_name$/,
+    /^data\.cwd$/,
+    /^data\.title$/,
+    /^data\.model$/,
+    /^data\.session_id$/,
+    /^data\.thread_id$/,
+    /^message\.role$/,
+    /^message\.model$/
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function isDeniedJsonlField(prefix: string): boolean {
+  return /(?:^|\.)(reasoning|thinking|internal|hidden|content|text|result|output|delta|message\.content|tool_result)(?:\.|$)/i.test(prefix);
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

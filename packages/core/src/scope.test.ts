@@ -5,11 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentProcess, AgentSession, ScopeSnapshot } from "@agentscope/shared";
 import { annotateProcessTree, classifyProcess } from "./processes.js";
 import { readRolloutMetadata } from "./codex.js";
-import {
-  heuristicSessionsForProcess,
-  mergeSessions,
-  sessionCandidatesForProcess
-} from "./scope.js";
+import { heuristicSessionsForProcess, mergeSessions, sessionCandidatesForProcess } from "./scope.js";
 
 describe("scope confidence", () => {
   it("merges to the best index confidence", () => {
@@ -65,6 +61,31 @@ describe("scope confidence", () => {
     expect(candidate?.sessionId).toBe("t1");
     expect(candidate?.confidence).toBe("heuristic");
     expect(candidate?.reasons.map((reason) => reason.source)).toContain("process.match.cwd");
+  });
+
+  it("does not mutate primary session fields when computing heuristic candidates", () => {
+    const session = baseSession("runtime-thread", "indexed");
+    session.cwd = String.raw`D:\Project\AgentScope`;
+    const process: AgentProcess = {
+      pid: 10,
+      ppid: 1,
+      processName: "codex.exe",
+      commandLine: String.raw`codex --cwd D:\Project\AgentScope`,
+      agent: "codex",
+      evidence: []
+    };
+    const snapshot: ScopeSnapshot = {
+      processes: [process],
+      sessions: [session],
+      transcripts: [],
+      indexRecords: [],
+      relations: []
+    };
+
+    expect(heuristicSessionsForProcess(snapshot, process, 5)).toHaveLength(1);
+    expect(session.confidence).toBe("indexed");
+    expect(session.pid).toBeUndefined();
+    expect(session.commandLine).toBeUndefined();
   });
 
   it("does not treat executable paths under the user profile as cwd evidence", () => {

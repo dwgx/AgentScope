@@ -2,7 +2,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, session as electronSession, shell } from "electron";
 import {
@@ -91,7 +92,11 @@ async function createWindow(): Promise<void> {
 
 ipcMain.handle("snapshot:get", async () => buildSnapshot());
 ipcMain.handle("doctor:get", async () => runDoctor());
-ipcMain.handle("search:run", async (_event, query: string, limit = 50) => searchAll(query, undefined, limit));
+ipcMain.handle("search:run", async (_event, query: string, limit = 50, options?: { includeSqlitePreview?: boolean }) =>
+  searchAll(query, undefined, limit, {
+    includeSqlitePreview: options?.includeSqlitePreview === true
+  })
+);
 ipcMain.handle("snapshot:export", async () => exportSnapshot());
 ipcMain.handle("app:info", async () => appInfo());
 ipcMain.handle("fonts:list", async () => listInstalledFonts());
@@ -114,6 +119,7 @@ ipcMain.handle("shell:openExternal", async (_event, url: string) => {
 ipcMain.handle("shell:openPath", async (_event, targetPath: string) => {
   if (!(await isAllowedLocalPath(targetPath))) return "Path is not in AgentScope's local trace allowlist";
   if (!fs.existsSync(targetPath)) return "Path does not exist";
+  if (!isAllowedOpenPath(targetPath)) return "Path can only be revealed, not opened by AgentScope";
   return shell.openPath(targetPath);
 });
 ipcMain.handle("shell:revealPath", async (_event, targetPath: string) => {
@@ -295,10 +301,10 @@ async function runDoctor() {
   }
 }
 
-async function searchAll(query: string, home?: string, limit?: number) {
+async function searchAll(query: string, home?: string, limit?: number, options?: { includeSqlitePreview?: boolean }) {
   try {
     const core = await loadCore();
-    return core.searchAll(query, home, limit);
+    return core.searchAll(query, home, limit, options);
   } catch (error) {
     log(`searchAll failed ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
     lastCoreError = error instanceof Error ? error.message : String(error);
@@ -379,20 +385,29 @@ async function isAllowedLocalPath(targetPath: string): Promise<boolean> {
 
 function allowedLocalPathPrefixes(): string[] {
   const info = appInfo();
-  const workspaceRoot = findWorkspaceRoot();
   return [
     normalizeFsPath(info.userData),
-    normalizeFsPath(path.join(os.homedir(), ".agentscope")),
-    normalizeFsPath(workspaceRoot)
+    normalizeFsPath(path.join(os.homedir(), ".agentscope"))
   ].filter((item): item is string => !!item);
+}
+
+function isAllowedOpenPath(targetPath: string): boolean {
+  if (isSensitiveAgentPath(targetPath)) return false;
+  try {
+    const stat = fs.statSync(targetPath);
+    if (!stat.isFile()) return false;
+  } catch {
+    return false;
+  }
+  const ext = path.extname(targetPath).toLowerCase();
+  if ([".exe", ".cmd", ".bat", ".ps1", ".msi", ".dll", ".node", ".sqlite", ".db"].includes(ext)) return false;
+  return [".json", ".jsonl", ".txt", ".md", ".log"].includes(ext);
 }
 
 async function allowedLocalPaths(): Promise<string[]> {
   const info = appInfo();
   const paths = new Set<string>();
   addAllowedPath(paths, info.userData);
-  addAllowedPath(paths, info.codexHome);
-  addAllowedPath(paths, info.claudeHome);
   addAllowedPath(paths, path.join(os.homedir(), ".agentscope"));
   addAllowedPath(paths, path.join(info.codexHome, "state_5.sqlite"));
 
@@ -437,7 +452,19 @@ function addEvidencePaths(paths: Set<string>, evidence: Evidence[] | undefined):
 
 function addAllowedPath(paths: Set<string>, candidate: string | undefined): void {
   const normalized = normalizeFsPath(candidate);
-  if (normalized) paths.add(normalized);
+  if (normalized && !isSensitiveAgentPath(normalized)) paths.add(normalized);
+}
+
+function isSensitiveAgentPath(candidate: string | undefined): boolean {
+  const normalized = normalizeFsPath(candidate);
+  if (!normalized) return false;
+  const parts = normalized.split(/[\\/]+/);
+  if (!parts.some((part) => part === ".codex" || part === ".claude" || part === ".agentscope")) return false;
+  const basename = path.basename(normalized).toLowerCase();
+  if (["auth", ".auth", "credentials", ".credentials", "plugins", "skills", "rules"].some((part) => parts.includes(part))) return true;
+  if (/^(?:\.?credentials?|auth|settings(?:\.local)?|config)\.(?:json|toml)$/i.test(basename)) return true;
+  if (basename === ".claude.json" || basename === "history.jsonl") return true;
+  return false;
 }
 
 function normalizeFsPath(candidate: string | undefined): string | undefined {
@@ -548,37 +575,51 @@ async function launchSessionCommand(
   const workingDirectory = context?.cwd && await isAllowedLocalPath(context.cwd) && fs.existsSync(context.cwd) ? context.cwd : undefined;
   const snapshot = await buildSnapshot();
   const resolution = resolveSessionLauncher(agent, action as SessionLaunchAction, sessionId, await launchResolverEnvironment(snapshot), context);
-  const payload = JSON.stringify({
-    filePath: resolution.filePath,
-    args: resolution.args,
-    workingDirectory
+  assertLaunchResolutionSafe(resolution.filePath);
+  const child = spawn(resolution.filePath, resolution.args, {
+    cwd: workingDirectory,
+    detached: true,
+    windowsHide: false,
+    stdio: "ignore"
   });
-  const script = `
-$ErrorActionPreference = 'Stop'
-$payload = ConvertFrom-Json @'
-${payload}
-'@
-$argumentList = @()
-foreach ($item in $payload.args) { $argumentList += [string]$item }
-$parameters = @{
-  FilePath = [string]$payload.filePath
-  ArgumentList = $argumentList
-  WindowStyle = 'Normal'
-}
-if ($payload.workingDirectory) { $parameters.WorkingDirectory = [string]$payload.workingDirectory }
-Start-Process @parameters
-`;
-  await execFileAsync(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-    { windowsHide: true, timeout: 10000, maxBuffer: 256 * 1024 }
-  );
+  await waitForLaunchAccepted(child);
+  child.unref();
   return {
     ok: true,
     ...resolution,
     command: formatCommandForDisplay(resolution.filePath, resolution.args),
     ...(workingDirectory ? { cwd: workingDirectory } : {})
   };
+}
+
+function assertLaunchResolutionSafe(filePath: string): void {
+  if (!fs.existsSync(filePath)) throw new Error("Resolved launcher does not exist.");
+  const ext = path.extname(filePath).toLowerCase();
+  if ([".ps1", ".bat"].includes(ext)) throw new Error("Refusing to launch script entrypoints.");
+  if (![".exe", ".cmd"].includes(ext)) throw new Error("Resolved launcher must be an executable or cmd shim.");
+}
+
+async function waitForLaunchAccepted(child: ChildProcess): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const done = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onError = (error: Error) => done(error);
+    const onExit = (code: number | null) => {
+      if (code === null || code === 0) done();
+      else done(new Error(`Launcher exited before startup completed with code ${code}.`));
+    };
+    const timer = setTimeout(() => done(), 350);
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
 }
 
 async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
@@ -590,7 +631,7 @@ async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
     existingFiles.add(path.resolve(candidate).toLowerCase());
   };
   const addCandidates = async (command: string) => {
-    candidates[command] = await whereCommand(command);
+    candidates[command] = (await whereCommand(command)).filter((candidate) => isTrustedWhereLauncher(command, candidate.path));
     for (const candidate of candidates[command] ?? []) addFile(candidate.path);
   };
   const addDirectCandidate = (command: string, candidatePath: string | undefined, source: string) => {
@@ -628,6 +669,21 @@ async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
     existingFiles,
     processes: snapshot.processes
   };
+}
+
+function isTrustedWhereLauncher(command: string, candidatePath: string): boolean {
+  const normalized = normalizeFsPath(candidatePath);
+  if (!normalized) return false;
+  const appDataNpm = process.env.APPDATA ? normalizeFsPath(path.join(process.env.APPDATA, "npm")) : undefined;
+  const programFilesNode = process.env.ProgramFiles ? normalizeFsPath(path.join(process.env.ProgramFiles, "nodejs")) : undefined;
+  const programFilesX86Node = process.env["ProgramFiles(x86)"] ? normalizeFsPath(path.join(process.env["ProgramFiles(x86)"], "nodejs")) : undefined;
+  if (command.toLowerCase() === "node.exe") {
+    return [programFilesNode, programFilesX86Node].some((root) => !!root && (normalized === root || normalized.startsWith(`${root}${path.sep}`)));
+  }
+  if (/^(?:codex|claude)\.(?:cmd|exe)$/i.test(command)) {
+    return !!appDataNpm && (normalized === appDataNpm || normalized.startsWith(`${appDataNpm}${path.sep}`));
+  }
+  return false;
 }
 
 async function whereCommand(command: string): Promise<LaunchFileCandidate[]> {

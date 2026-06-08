@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { loadClaudeSessions, loadClaudeTranscripts } from "./claude.js";
 
 describe("Claude indexes", () => {
-  it("loads daemon roster as exact PID evidence", () => {
+  it("loads daemon roster PID as stored evidence until a process row confirms it", () => {
     const home = tempHome();
     const daemon = path.join(home, ".claude", "daemon");
     fs.mkdirSync(daemon, { recursive: true });
@@ -30,8 +30,9 @@ describe("Claude indexes", () => {
 
     const [session] = loadClaudeSessions(home);
     expect(session?.sessionId).toBe("session-1");
-    expect(session?.pid).toBe(222);
-    expect(session?.confidence).toBe("exact");
+    expect(session?.pid).toBeUndefined();
+    expect(session?.indexMetadata?.storedPid).toBe(222);
+    expect(session?.confidence).toBe("indexed");
     expect(session?.indexSource).toBe("claude.daemon.roster");
     expect(session?.indexMetadata?.daemon_worker).toBe("abc12345");
   });

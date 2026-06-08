@@ -77,7 +77,12 @@ export function mergeSessions(items: AgentSession[]): AgentSession[] {
     const key = `${item.agent}\0${item.sessionId}`;
     const existing = merged.get(key);
     if (!existing) {
-      merged.set(key, { ...item, childSessionIds: [...item.childSessionIds], evidence: [...item.evidence] });
+      merged.set(key, {
+        ...item,
+        childSessionIds: [...item.childSessionIds],
+        runtimeCandidates: item.runtimeCandidates ? [...item.runtimeCandidates] : undefined,
+        evidence: [...item.evidence]
+      });
       continue;
     }
     mergeSession(existing, item);
@@ -126,7 +131,7 @@ function attachProcesses(sessions: AgentSession[], processes: AgentProcess[], re
     if (session.pid === undefined) continue;
     const process = byPid.get(session.pid);
     if (!process) {
-      session.evidence.push({ source: "process.match", detail: "Session carries a PID, but no active Win32_Process row currently matches it.", field: "pid" });
+      session.evidence.push({ source: "process.match.stale_pid", detail: "Session carries a stored PID, but no active Win32_Process row currently matches it.", field: "pid" });
       continue;
     }
     session.ppid = process.ppid;
@@ -154,12 +159,7 @@ function attachProcesses(sessions: AgentSession[], processes: AgentProcess[], re
     if (!candidate) continue;
     const session = sessions.find((item) => item.agent === candidate.agent && item.sessionId === candidate.sessionId);
     if (!session || session.pid !== undefined || !canAttachHeuristicProcess(candidate)) continue;
-    session.pid = process.pid;
-    session.ppid = process.ppid;
-    session.processName = process.processName;
-    session.commandLine = process.commandLine;
-    session.path = process.executablePath;
-    session.confidence = bestConfidence(session.confidence, "heuristic");
+    session.runtimeCandidates = mergeRuntimeCandidate(session.runtimeCandidates, candidate);
     session.evidence.push({
       source: "process.heuristic",
       detail: `Process candidate score ${candidate.score}; Codex has no exact PID map in MVP.`,
@@ -200,6 +200,7 @@ function mergeSession(target: AgentSession, source: AgentSession): void {
   target.updatedAt = maxText(target.updatedAt, source.updatedAt);
   target.indexMetadata = mergeMetadata(target.indexMetadata, source.indexMetadata);
   target.activity = mergeActivity(target.activity, source.activity);
+  target.runtimeCandidates = mergeRuntimeCandidates(target.runtimeCandidates, source.runtimeCandidates);
   target.confidence = bestConfidence(target.confidence, source.confidence);
   target.evidence = appendEvidenceUnique(target.evidence, source.evidence);
 }
@@ -335,6 +336,26 @@ function sessionFromCandidate(snapshot: ScopeSnapshot, candidate: SessionCandida
 function candidateConfidence(process: AgentProcess, session: AgentSession, reasons: Evidence[]): Confidence {
   if (session.pid !== undefined && session.pid === process.pid) return "exact";
   return hasStrongReason(reasons) ? "heuristic" : "unknown";
+}
+
+function mergeRuntimeCandidate(existing: SessionCandidate[] | undefined, candidate: SessionCandidate): SessionCandidate[] {
+  return mergeRuntimeCandidates(existing, [candidate]) ?? [];
+}
+
+function mergeRuntimeCandidates(
+  left: SessionCandidate[] | undefined,
+  right: SessionCandidate[] | undefined
+): SessionCandidate[] | undefined {
+  const out: SessionCandidate[] = [];
+  const seen = new Set<string>();
+  for (const candidate of [...(left ?? []), ...(right ?? [])]) {
+    const key = `${candidate.agent}:${candidate.sessionId}:${candidate.score}:${candidate.confidence}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(candidate);
+  }
+  out.sort((a, b) => b.score - a.score || a.sessionId.localeCompare(b.sessionId));
+  return out.length ? out.slice(0, 5) : undefined;
 }
 
 function hasStrongReason(reasons: Evidence[]): boolean {

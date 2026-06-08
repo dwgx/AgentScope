@@ -117,6 +117,7 @@ export interface AgentSession {
   updatedAt?: string | undefined;
   indexMetadata?: Record<string, unknown> | undefined;
   activity?: SessionActivity | undefined;
+  runtimeCandidates?: SessionCandidate[] | undefined;
   evidence: Evidence[];
 }
 

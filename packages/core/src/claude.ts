@@ -115,16 +115,16 @@ function loadClaudeSessionFile(filePath: string): AgentSession | undefined {
     return {
       agent: "claude",
       sessionId,
-      pid: Number.isFinite(pid) ? pid : undefined,
       cwd,
       status: payload.status,
       transcriptPath,
       indexSource: "claude.sessions",
       childSessionIds: [],
-      confidence: Number.isFinite(pid) ? "exact" : "indexed",
+      confidence: "indexed",
       startedAt: timestampValue(payload.startedAt),
       updatedAt: timestampValue(payload.updatedAt),
       indexMetadata: compactMetadata({
+        storedPid: Number.isFinite(pid) ? pid : undefined,
         kind: payload.kind,
         entrypoint: payload.entrypoint,
         peerProtocol: payload.peerProtocol,
@@ -134,7 +134,7 @@ function loadClaudeSessionFile(filePath: string): AgentSession | undefined {
       evidence: [
         {
           source: "claude.sessions",
-          detail: "Claude session PID mapping loaded from .claude/sessions/*.json.",
+          detail: "Claude session stored PID claim loaded from .claude/sessions/*.json; it is exact only if a current process row matches.",
           path: filePath,
           field: "pid,sessionId,cwd,status,startedAt,updatedAt"
         },
@@ -173,16 +173,16 @@ function loadClaudeDaemonSessions(home?: string): AgentSession[] {
         {
           agent: "claude" as const,
           sessionId,
-          pid,
           cwd,
           transcriptPath,
           indexSource: "claude.daemon.roster",
           childSessionIds: [],
-          confidence: pid === undefined ? "indexed" : "exact",
+          confidence: "indexed",
           startedAt: timestampValue(worker.startedAt),
           updatedAt: timestampValue(payload.updatedAt) ?? timestampValue(objectValue(worker.dispatch)?.createdAt),
           indexMetadata: compactMetadata({
             daemon_worker: workerId,
+            storedPid: pid,
             cliVersion: worker.cliVersion,
             attempt: worker.attempt,
             proto: payload.proto,
@@ -192,7 +192,7 @@ function loadClaudeDaemonSessions(home?: string): AgentSession[] {
           evidence: [
             {
               source: "claude.daemon.roster",
-              detail: "Claude daemon worker exact PID/session mapping loaded from daemon/roster.json.",
+              detail: "Claude daemon worker stored PID/session mapping loaded from daemon/roster.json; it is exact only if a current process row matches.",
               path: rosterPath,
               field: "workers.*.pid,workers.*.sessionId,workers.*.cwd,workers.*.startedAt"
             }

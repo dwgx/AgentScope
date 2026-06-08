@@ -300,7 +300,11 @@ export const zhCN = {
     },
     searchScope: {
       label: "搜索范围",
-      detail: "SQLite 标题/预览，以及本地 Codex 和 Claude JSONL 转录。"
+      detail: "SQLite 身份字段与本地 Codex/Claude JSONL 安全元数据。不会搜索转录正文或隐藏/内部字段。"
+    },
+    searchPreview: {
+      label: "SQLite 预览搜索",
+      detail: "允许用 Codex SQLite preview 文本参与匹配。结果仍不会展示 preview 正文。"
     },
     searchLimit: { label: "搜索结果数量", detail: "命令栏搜索返回的最大匹配数。" },
     notifications: {
@@ -472,6 +476,7 @@ export const zhCN = {
     endpoints: "端点",
     evidence: "证据",
     searchHit: "搜索命中",
+    safeSearchHitDetail: "安全搜索只显示事件元数据、命中字段和文件位置；不会展示转录正文。",
     activity: "活动",
     topEvents: "主要事件",
     topTools: "主要工具",

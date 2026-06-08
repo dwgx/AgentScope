@@ -95,6 +95,13 @@ describe("session operations", () => {
 
     expect(plan.risk).toBe("blocked");
     expect(plan.blockers.join(" ")).toContain("child sessions");
+    await expect(
+      deleteSession(parentId, "codex", {
+        home,
+        allowActive: true,
+        now: new Date("2026-06-07T00:00:00Z")
+      })
+    ).rejects.toThrow(/child sessions/);
   });
 
   it("copies a Claude backup manifest and session files", async () => {
@@ -118,7 +125,7 @@ describe("session operations", () => {
     expect(manifest.sessionId).toBe(sessionId);
   });
 
-  it("deletes a Claude session by backing up and quarantining files", async () => {
+  it("deletes a Claude session by backing up and quarantining files without patching global state", async () => {
     const home = tempHome();
     const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-delete-"));
     const sessionId = "55555555-5555-4555-8555-555555555555";
@@ -146,10 +153,10 @@ describe("session operations", () => {
     expect(fs.existsSync(transcript)).toBe(false);
     expect(fs.existsSync(path.join(sidecar, "1.txt"))).toBe(false);
     expect(fs.existsSync(jobState)).toBe(false);
-    expect(fs.readFileSync(path.join(home, ".claude", "history.jsonl"), "utf8")).not.toContain(sessionId);
+    expect(fs.readFileSync(path.join(home, ".claude", "history.jsonl"), "utf8")).toContain(sessionId);
     expect(result.movedFiles.some((file) => file.role === "transcript")).toBe(true);
     expect(result.movedFiles.some((file) => file.role === "claude.job_state")).toBe(true);
-    expect(result.patchedFiles.some((file) => file.role === "claude.history_jsonl_patch")).toBe(true);
+    expect(result.patchedFiles).toHaveLength(0);
     expect(fs.existsSync(result.journalPath)).toBe(true);
     const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as Record<string, unknown>;
     expect(journal.kind).toBe("AgentScope Session Delete Journal");
@@ -191,6 +198,41 @@ describe("session operations", () => {
     expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.status === "failed")).toBe(true);
   });
 
+  it("keeps Codex files in place and records prior sqlite delete evidence when a later DB fails", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-partial-fail-"));
+    const sessionId = "56565656-5555-4555-8555-565656565656";
+    const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout);
+    const goals = new Database(path.join(home, ".codex", "goals_1.sqlite"));
+    goals.exec(`
+      CREATE TRIGGER agentscope_fail_goals_delete BEFORE DELETE ON thread_goals
+      BEGIN
+        SELECT RAISE(FAIL, 'goals delete failed');
+      END;
+    `);
+    goals.close();
+
+    await expect(
+      deleteSession(sessionId, "codex", {
+        home,
+        outputRoot,
+        includeProcesses: false,
+        now: new Date("2026-06-07T04:31:00Z")
+      })
+    ).rejects.toThrow(/backupDir=.*quarantineDir=.*journalPath=/);
+
+    const expectedDir = path.join(outputRoot, "quarantine", `2026-06-07T04-31-00-000Z-codex-${sessionId}`);
+    const journalPath = path.join(expectedDir, "journal.json");
+    expect(fs.existsSync(rollout)).toBe(true);
+    expect(fs.existsSync(path.join(expectedDir, "files"))).toBe(false);
+    const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
+    expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.status === "succeeded" && step.table === "threads")).toBe(true);
+    expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.status === "failed" && step.table === "thread_goals")).toBe(true);
+  });
+
   it("imports an AgentScope backup when target files are absent", async () => {
     const home = tempHome();
     const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-import-exec-"));
@@ -210,6 +252,22 @@ describe("session operations", () => {
 
     expect(fs.existsSync(transcript)).toBe(true);
     expect(imported.importedFiles.some((file) => file.path === transcript)).toBe(true);
+  });
+
+  it("rejects destructive operations with partial session ids", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-exact-id-"));
+    const sessionA = "12121212-1212-4121-8121-121212121212";
+    const sessionB = "99991212-1212-4121-8121-121212129999";
+    for (const sessionId of [sessionA, sessionB]) {
+      const transcript = path.join(home, ".claude", "projects", "D--Project-AgentScope", `${sessionId}.jsonl`);
+      fs.mkdirSync(path.dirname(transcript), { recursive: true });
+      fs.writeFileSync(transcript, "{}\n");
+    }
+
+    await expect(planSessionDelete("1212", "claude", { home, outputRoot })).rejects.toThrow(/Session not found/);
+    await expect(backupSession("1212", "claude", { home, outputRoot })).rejects.toThrow(/Session not found/);
+    await expect(deleteSession("1212", "claude", { home, outputRoot })).rejects.toThrow(/Session not found/);
   });
 
   it("lists restorable quarantined sessions from AgentScope delete journals only", async () => {
@@ -320,6 +378,55 @@ describe("session operations", () => {
     await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/Unsafe backup relative path/);
   });
 
+  it("rejects import targets outside agent session stores", async () => {
+    const home = tempHome();
+    const backupDir = makeBackupFixture(home, "12121212-aaaa-4aaa-8aaa-121212121212");
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    const copiedFiles = manifest.copiedFiles as Array<Record<string, unknown>>;
+    copiedFiles[0]!.path = path.join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "evil.jsonl");
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/Unsafe Claude import target/);
+  });
+
+  it("rejects import targets for protected agent files", async () => {
+    const home = tempHome();
+    const backupDir = makeBackupFixture(home, "34343434-aaaa-4aaa-8aaa-343434343434");
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    const copiedFiles = manifest.copiedFiles as Array<Record<string, unknown>>;
+    copiedFiles[0]!.path = path.join(home, ".claude", "settings.json");
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/protected agent file/);
+  });
+
+  it("rejects import targets for credential-like agent files", async () => {
+    const home = tempHome();
+    const backupDir = makeBackupFixture(home, "35353535-aaaa-4aaa-8aaa-353535353535");
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    const copiedFiles = manifest.copiedFiles as Array<Record<string, unknown>>;
+    copiedFiles[0]!.path = path.join(home, ".claude", "projects", "D--Project-AgentScope", "credentials.json");
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/protected agent file/);
+  });
+
+  it("rejects Claude transcript imports that are not jsonl", async () => {
+    const home = tempHome();
+    const sessionId = "36363636-aaaa-4aaa-8aaa-363636363636";
+    const backupDir = makeBackupFixture(home, sessionId);
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    const copiedFiles = manifest.copiedFiles as Array<Record<string, unknown>>;
+    copiedFiles[0]!.path = path.join(home, ".claude", "projects", "D--Project-AgentScope", `${sessionId}.json`);
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/Unsafe Claude import target extension/);
+  });
+
   it("rejects import hash mismatches", async () => {
     const home = tempHome();
     const backupDir = makeBackupFixture(home, "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
@@ -371,12 +478,94 @@ describe("session operations", () => {
 
     const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
     expect(Number((state.prepare("SELECT COUNT(*) AS count FROM threads WHERE id = ?").get(sessionId) as { count: number }).count)).toBe(1);
+    expect(Number((state.prepare("SELECT COUNT(*) AS count FROM thread_spawn_edges WHERE child_thread_id = ?").get(sessionId) as { count: number }).count)).toBe(1);
     expect(Number((state.prepare("SELECT COUNT(*) AS count FROM thread_dynamic_tools WHERE thread_id = ?").get(sessionId) as { count: number }).count)).toBe(1);
     state.close();
+    const goals = new Database(path.join(home, ".codex", "goals_1.sqlite"), { readonly: true });
+    expect(Number((goals.prepare("SELECT COUNT(*) AS count FROM thread_goals WHERE thread_id = ?").get(sessionId) as { count: number }).count)).toBe(1);
+    goals.close();
+    const memories = new Database(path.join(home, ".codex", "memories_1.sqlite"), { readonly: true });
+    expect(Number((memories.prepare("SELECT COUNT(*) AS count FROM stage1_outputs WHERE thread_id = ?").get(sessionId) as { count: number }).count)).toBe(1);
+    memories.close();
     const logs = new Database(path.join(home, ".codex", "logs_2.sqlite"), { readonly: true });
     expect(Number((logs.prepare("SELECT COUNT(*) AS count FROM logs WHERE thread_id = ?").get(sessionId) as { count: number }).count)).toBe(0);
     logs.close();
     expect(imported.databaseChanges?.some((change) => change.table === "threads" && change.action === "insert")).toBe(true);
+  });
+
+  it("rolls back copied files and earlier Codex SQLite rows when a later DB import fails", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-import-rollback-"));
+    const sessionId = "f1f1f1f1-1111-4f1f-8f1f-f1f1f1f1f1f1";
+    const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout);
+    const backup = await backupSession(sessionId, "codex", { home, outputRoot });
+
+    fs.rmSync(rollout);
+    recreateCodexEmptySchema(home);
+    const goals = new Database(path.join(home, ".codex", "goals_1.sqlite"));
+    goals.exec(`
+      CREATE TRIGGER agentscope_fail_goals_import BEFORE INSERT ON thread_goals
+      BEGIN
+        SELECT RAISE(FAIL, 'goals import failed');
+      END;
+    `);
+    goals.close();
+
+    await expect(importSessionBackup(backup.backupDir, { home, outputRoot })).rejects.toThrow(/goals import failed/);
+
+    expect(fs.existsSync(rollout)).toBe(false);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    expect(Number((state.prepare("SELECT COUNT(*) AS count FROM threads WHERE id = ?").get(sessionId) as { count: number }).count)).toBe(0);
+    expect(Number((state.prepare("SELECT COUNT(*) AS count FROM thread_spawn_edges WHERE child_thread_id = ?").get(sessionId) as { count: number }).count)).toBe(0);
+    expect(Number((state.prepare("SELECT COUNT(*) AS count FROM thread_dynamic_tools WHERE thread_id = ?").get(sessionId) as { count: number }).count)).toBe(0);
+    state.close();
+  });
+
+  it("rejects Codex SQLite row bundles that target unsupported databases or tables", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-bad-bundle-"));
+    const sessionId = "abababab-1111-4aba-8aba-abababababab";
+    const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout);
+    const backup = await backupSession(sessionId, "codex", { home, outputRoot });
+    fs.rmSync(rollout);
+    recreateCodexEmptySchema(home);
+    const manifestPath = path.join(backup.backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { databaseBundles: Array<Record<string, unknown>> };
+    manifest.databaseBundles[0]!.databaseName = "..\\state_5.sqlite";
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backup.backupDir, { home, outputRoot })).rejects.toThrow(/Unsupported Codex SQLite row bundle target|Unsafe Codex row bundle/);
+  });
+
+  it("rejects Codex SQLite row bundles whose rows belong to another session", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-wrong-session-"));
+    const sessionId = "cdcdcdcd-1111-4cdc-8cdc-cdcdcdcdcdcd";
+    const otherId = "edededed-1111-4ede-8ede-edededededed";
+    const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout);
+    const backup = await backupSession(sessionId, "codex", { home, outputRoot });
+    fs.rmSync(rollout);
+    recreateCodexEmptySchema(home);
+    const manifestPath = path.join(backup.backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { databaseBundles: Array<Record<string, unknown>> };
+    const threadsBundle = manifest.databaseBundles.find((bundle) => bundle.table === "threads")!;
+    const bundlePath = path.join(backup.backupDir, String(threadsBundle.relativePath));
+    const payload = JSON.parse(fs.readFileSync(bundlePath, "utf8")) as { rows: Array<Record<string, unknown>> };
+    payload.rows[0]!.id = otherId;
+    fs.writeFileSync(bundlePath, JSON.stringify(payload, null, 2));
+    threadsBundle.sha256 = sha256(bundlePath);
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backup.backupDir, { home, outputRoot })).rejects.toThrow(/does not belong to this session/);
   });
 
   it("restores quarantined Codex file and row bundles without logs bodies", async () => {

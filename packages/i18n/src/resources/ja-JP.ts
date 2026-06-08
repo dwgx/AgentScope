@@ -303,7 +303,11 @@ export const jaJP = {
     },
     searchScope: {
       label: "検索範囲",
-      detail: "SQLite のタイトル/プレビューと、ローカル Codex/Claude JSONL 転写を検索します。"
+      detail: "SQLite の識別フィールドとローカル Codex/Claude JSONL の安全なメタデータを検索します。転写本文や hidden/internal フィールドは検索しません。"
+    },
+    searchPreview: {
+      label: "SQLite preview 検索",
+      detail: "Codex SQLite preview テキストを一致判定に含めます。結果には preview 本文を表示しません。"
     },
     searchLimit: { label: "検索結果数", detail: "コマンドバー検索で返す最大一致数です。" },
     notifications: {
@@ -480,6 +484,7 @@ export const jaJP = {
     endpoints: "端点",
     evidence: "証拠",
     searchHit: "検索ヒット",
+    safeSearchHitDetail: "安全検索ではイベントメタデータ、命中フィールド、ファイル位置だけを表示し、転写本文は表示しません。",
     activity: "アクティビティ",
     topEvents: "主要イベント",
     topTools: "主要ツール",
