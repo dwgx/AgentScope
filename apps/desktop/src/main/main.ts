@@ -16,7 +16,7 @@ import {
   type SessionLaunchContext,
   type SessionLaunchResult
 } from "@agentscope/shared";
-import type { Evidence, ScopeSnapshot } from "@agentscope/shared";
+import type { CodexModeConfigPatch, Evidence, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -122,6 +122,14 @@ ipcMain.handle("codexControl:read", async (_event, id: string) => {
 ipcMain.handle("codexControl:save", async (_event, id: string, content: string, expectedSha256: string) => {
   const core = await loadCore();
   return core.saveCodexControlDocument(id, content, expectedSha256);
+});
+ipcMain.handle("codexControl:readModes", async () => {
+  const core = await loadCore();
+  return core.readCodexModeConfig();
+});
+ipcMain.handle("codexControl:saveModes", async (_event, patch: CodexModeConfigPatch, expectedSha256: string) => {
+  const core = await loadCore();
+  return core.saveCodexModeConfig(patch, expectedSha256);
 });
 ipcMain.handle("app:reload", async () => {
   mainWindow?.reload();

@@ -5,8 +5,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   listCodexControlSurfaces,
+  readCodexModeConfig,
   readCodexControlDocument,
-  saveCodexControlDocument
+  saveCodexControlDocument,
+  saveCodexModeConfig
 } from "./codexControl.js";
 
 const tempRoots: string[] = [];
@@ -128,5 +130,99 @@ describe("Codex control surfaces", () => {
     expect(fs.existsSync(target)).toBe(true);
     expect(result.backupPath).toBeUndefined();
     expect(await readFile(target, "utf8")).toBe("# allowlist\n");
+  });
+
+  it("summarizes Codex default, plan, and review model modes", async () => {
+    const home = await tempHome();
+    await writeFile(
+      path.join(home, ".codex", "config.toml"),
+      [
+        'model = "gpt-5.5"',
+        'review_model = "gpt-5.4-mini"',
+        'model_reasoning_effort = "xhigh"',
+        'plan_mode_reasoning_effort = "medium"'
+      ].join("\n")
+    );
+
+    const snapshot = await readCodexModeConfig(home);
+
+    expect(snapshot.modes.default.model).toBe("gpt-5.5");
+    expect(snapshot.modes.default.reasoningEffort).toBe("xhigh");
+    expect(snapshot.modes.plan.model).toBe("gpt-5.5");
+    expect(snapshot.modes.plan.reasoningEffort).toBe("medium");
+    expect(snapshot.modes.plan.source).toBe("config");
+    expect(snapshot.modes.review.model).toBe("gpt-5.4-mini");
+    expect(snapshot.modes.review.reasoningEffort).toBe("xhigh");
+  });
+
+  it("saves Codex mode defaults with backup and preserves tables", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(configPath, ['model = "gpt-5.4-mini"', "", "[mcp_servers.playwright]", 'command = "npx"'].join("\n"));
+    const snapshot = await readCodexModeConfig(home);
+
+    const result = await saveCodexModeConfig(
+      {
+        defaultModel: "gpt-5.5",
+        defaultReasoningEffort: "xhigh",
+        planReasoningEffort: "medium",
+        reviewModel: "gpt-5.5"
+      },
+      snapshot.sha256,
+      home
+    );
+    const saved = await readFile(configPath, "utf8");
+
+    expect(result.backupPath).toBeDefined();
+    expect(saved).toContain('model = "gpt-5.5"');
+    expect(saved).toContain('model_reasoning_effort = "xhigh"');
+    expect(saved).toContain('plan_mode_reasoning_effort = "medium"');
+    expect(saved).toContain('review_model = "gpt-5.5"');
+    expect(saved).toContain("[mcp_servers.playwright]");
+    expect(result.modes.plan.reasoningEffort).toBe("medium");
+  });
+
+  it("can clear explicit Codex mode overrides back to inheritance", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(
+      configPath,
+      [
+        'model = "gpt-5.5"',
+        'model_reasoning_effort = "xhigh"',
+        'plan_mode_reasoning_effort = "medium"',
+        'review_model = "gpt-5.4-mini"',
+        "",
+        "[mcp_servers.playwright]",
+        'command = "npx"'
+      ].join("\n")
+    );
+    const snapshot = await readCodexModeConfig(home);
+
+    await saveCodexModeConfig({ planReasoningEffort: null, reviewModel: null }, snapshot.sha256, home);
+    const saved = await readFile(configPath, "utf8");
+    const restoredInheritance = await readCodexModeConfig(home);
+
+    expect(saved).not.toContain("plan_mode_reasoning_effort");
+    expect(saved).not.toContain("review_model");
+    expect(saved).toContain('model = "gpt-5.5"');
+    expect(saved).toContain("[mcp_servers.playwright]");
+    expect(restoredInheritance.modes.plan.source).toBe("inherits_default");
+    expect(restoredInheritance.modes.review.source).toBe("inherits_default");
+  });
+
+  it("rejects invalid Codex mode values and stale mode writes", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(configPath, 'model = "gpt-5.5"\n');
+    const snapshot = await readCodexModeConfig(home);
+
+    await expect(saveCodexModeConfig({ planReasoningEffort: "extreme" }, snapshot.sha256, home)).rejects.toThrow(
+      /Invalid Codex reasoning/
+    );
+    await writeFile(configPath, 'model = "gpt-5.4-mini"\n');
+    await expect(saveCodexModeConfig({ planReasoningEffort: "medium" }, snapshot.sha256, home)).rejects.toThrow(
+      /changed on disk/
+    );
   });
 });

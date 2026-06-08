@@ -349,4 +349,34 @@ export interface CodexControlSaveResult {
   evidence: Evidence[];
 }
 
+export type CodexModeId = "default" | "plan" | "review";
+
+export interface CodexModeValue {
+  model?: string | undefined;
+  reasoningEffort?: string | undefined;
+  source: "config" | "inherits_default" | "unset";
+  evidence: Evidence[];
+}
+
+export interface CodexModeConfigSnapshot {
+  configPath: string;
+  sha256: string;
+  modes: Record<CodexModeId, CodexModeValue>;
+  recommendedModels: string[];
+  reasoningEffortValues: string[];
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexModeConfigPatch {
+  defaultModel?: string | null | undefined;
+  defaultReasoningEffort?: string | null | undefined;
+  planReasoningEffort?: string | null | undefined;
+  reviewModel?: string | null | undefined;
+}
+
+export interface CodexModeConfigSaveResult extends CodexControlSaveResult {
+  modes: Record<CodexModeId, CodexModeValue>;
+}
+
 export * from "./launcher.js";

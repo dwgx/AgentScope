@@ -46,7 +46,10 @@ import type {
   SessionCandidate,
   CodexControlDocument,
   CodexControlSnapshot,
-  CodexControlSurface
+  CodexControlSurface,
+  CodexModeConfigPatch,
+  CodexModeId,
+  CodexModeConfigSnapshot
 } from "@agentscope/shared";
 import { i18n, resolveAppLocale } from "./i18n.js";
 import claudeLogoUrl from "./assets/claude-color.svg";
@@ -69,6 +72,12 @@ type SessionGroupMode = "agent" | "cwd" | "parent" | "none";
 type SessionKindFilter = "all" | "root" | "child" | "subagent";
 type RelationKindFilter = "all" | Relation["kind"];
 type RelationConfidenceFilter = "all" | Relation["confidence"];
+type CodexModeDraft = {
+  defaultModel: string;
+  defaultReasoningEffort: string;
+  planReasoningEffort: string;
+  reviewModel: string;
+};
 type NoticePathRole =
   | "text"
   | "journal"
@@ -250,6 +259,8 @@ const fontPresetValues: FontPreset[] = [
 ];
 const lineHeightValues: AppSettings["uiLineHeight"][] = ["compact", "normal", "spacious"];
 const accentValues = ["#b8c2cc", "#4aa3ff", "#8b5cf6", "#f59e0b", "#f43f5e", "#e5e7eb"] as const;
+const fallbackCodexModels = ["gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark"];
+const fallbackReasoningEfforts = ["minimal", "low", "medium", "high", "xhigh"];
 
 function App() {
   const { t } = useTranslation();
@@ -2569,13 +2580,22 @@ function SettingsPanel(props: {
   const [codexDraft, setCodexDraft] = useState("");
   const [codexDocumentLoading, setCodexDocumentLoading] = useState(false);
   const [codexSaveStatus, setCodexSaveStatus] = useState<string | undefined>();
+  const [codexModes, setCodexModes] = useState<CodexModeConfigSnapshot | null>(null);
+  const [codexModeDraft, setCodexModeDraft] = useState<CodexModeDraft>({
+    defaultModel: "",
+    defaultReasoningEffort: "",
+    planReasoningEffort: "",
+    reviewModel: ""
+  });
+  const [codexModeLoading, setCodexModeLoading] = useState(false);
+  const [codexModeStatus, setCodexModeStatus] = useState<string | undefined>();
   const warnings = props.doctor.filter((item) => item.status === "warn").length;
   const translateDiagnosticHelp = (key: string, options?: Record<string, unknown>) =>
     String(options ? t(key, options) : t(key));
   const refreshCodexControl = () => {
     setCodexControlLoading(true);
     setCodexControlError(undefined);
-    window.agentscope
+    void window.agentscope
       .listCodexControl()
       .then((snapshot) => {
         setCodexControl(snapshot);
@@ -2583,6 +2603,19 @@ function SettingsPanel(props: {
       })
       .catch((error: unknown) => setCodexControlError(errorMessage(error)))
       .finally(() => setCodexControlLoading(false));
+    refreshCodexModes();
+  };
+  const refreshCodexModes = () => {
+    setCodexModeLoading(true);
+    setCodexModeStatus(undefined);
+    void window.agentscope
+      .readCodexModeConfig()
+      .then((snapshot) => {
+        setCodexModes(snapshot);
+        setCodexModeDraft(codexModeDraftFromSnapshot(snapshot));
+      })
+      .catch((error: unknown) => setCodexModeStatus(errorMessage(error)))
+      .finally(() => setCodexModeLoading(false));
   };
   useEffect(() => {
     if (section === "codexControl" && !codexControl && !codexControlLoading) refreshCodexControl();
@@ -2639,6 +2672,30 @@ function SettingsPanel(props: {
       })
       .catch((error: unknown) => setCodexSaveStatus(errorMessage(error)))
       .finally(() => setCodexDocumentLoading(false));
+  };
+  const saveCodexModes = () => {
+    if (!codexModes) return;
+    setCodexModeLoading(true);
+    setCodexModeStatus(undefined);
+    window.agentscope
+      .saveCodexModeConfig(
+        codexModePatchFromDraft(codexModeDraft),
+        codexModes.sha256
+      )
+      .then((result) => {
+        setCodexModeStatus(
+          result.backupPath
+            ? t("settings.codexControl.savedWithBackup", { path: result.backupPath })
+            : t("settings.codexControl.saved")
+        );
+        return window.agentscope.readCodexModeConfig();
+      })
+      .then((snapshot) => {
+        setCodexModes(snapshot);
+        setCodexModeDraft(codexModeDraftFromSnapshot(snapshot));
+      })
+      .catch((error: unknown) => setCodexModeStatus(errorMessage(error)))
+      .finally(() => setCodexModeLoading(false));
   };
   return (
     <>
@@ -3202,6 +3259,15 @@ function SettingsPanel(props: {
                   </div>
                 </div>
                 {codexControlError && <p className="inlineError">{codexControlError}</p>}
+                <CodexModeConfigPanel
+                  snapshot={codexModes}
+                  draft={codexModeDraft}
+                  loading={codexModeLoading}
+                  status={codexModeStatus}
+                  onDraftChange={setCodexModeDraft}
+                  onRefresh={refreshCodexModes}
+                  onSave={saveCodexModes}
+                />
                 <div className="codexControlLayout">
                   <div className="codexSurfaceList" aria-label={t("settings.codexControl.surfaces")}>
                     {(codexControl?.surfaces ?? []).map((surface) => (
@@ -3330,6 +3396,224 @@ function SettingRow(props: { label: string; detail: string; children: ReactNode 
       <div className="settingControl">{props.children}</div>
     </div>
   );
+}
+
+function CodexModeConfigPanel(props: {
+  snapshot: CodexModeConfigSnapshot | null;
+  draft: CodexModeDraft;
+  loading: boolean;
+  status?: string | undefined;
+  onDraftChange: (next: CodexModeDraft) => void;
+  onRefresh: () => void;
+  onSave: () => void;
+}) {
+  const { t } = useTranslation();
+  const modelOptions = props.snapshot?.recommendedModels.length
+    ? props.snapshot.recommendedModels
+    : fallbackCodexModels;
+  const reasoningOptions = props.snapshot?.reasoningEffortValues.length
+    ? props.snapshot.reasoningEffortValues
+    : fallbackReasoningEfforts;
+  const dirty = props.snapshot ? !codexModeDraftEqualsSnapshot(props.draft, props.snapshot) : false;
+  const disabled = props.loading || !props.snapshot;
+  const mode = (id: CodexModeId) => props.snapshot?.modes[id];
+  const setDraft = (patch: Partial<CodexModeDraft>) => props.onDraftChange({ ...props.draft, ...patch });
+  const defaultModel = props.draft.defaultModel || props.snapshot?.modes.default.model || "";
+  const defaultReasoning = props.draft.defaultReasoningEffort || props.snapshot?.modes.default.reasoningEffort || "";
+  const inheritedPlanModel = defaultModel || props.snapshot?.modes.plan.model || "";
+  const inheritedReviewReasoning = defaultReasoning || props.snapshot?.modes.review.reasoningEffort || "";
+  return (
+    <section className="codexModePanel">
+      <div className="codexModeHeader">
+        <div>
+          <strong>{t("settings.codexControl.modeTitle")}</strong>
+          <span>{t("settings.codexControl.modeDetail")}</span>
+          {props.snapshot?.configPath && <code className="mono">{props.snapshot.configPath}</code>}
+        </div>
+        <div className="settingInlineActions">
+          <ActionButton label={t("common.action.refresh")} onClick={props.onRefresh} disabled={props.loading} />
+          <ActionButton label={t("settings.codexControl.save")} onClick={props.onSave} disabled={disabled || !dirty} />
+        </div>
+      </div>
+      {props.snapshot?.warnings.map((warning) => (
+        <p className="inlineError" key={warning}>{warning}</p>
+      ))}
+      <datalist id="codex-model-suggestions">
+        {modelOptions.map((option) => (
+          <option key={option} value={option} />
+        ))}
+      </datalist>
+      <div className="codexModeGrid">
+        <CodexModeCard
+          title={t("settings.codexControl.mode.default")}
+          source={mode("default")?.source}
+          evidence={mode("default")?.evidence ?? []}
+        >
+          <CodexModelField
+            label={t("settings.codexControl.model")}
+            value={props.draft.defaultModel}
+            options={modelOptions}
+            placeholder={props.snapshot?.modes.default.model ?? "gpt-5.5"}
+            disabled={disabled}
+            onChange={(value) => setDraft({ defaultModel: value })}
+          />
+          <CodexReasoningField
+            label={t("settings.codexControl.reasoning")}
+            value={props.draft.defaultReasoningEffort}
+            options={reasoningOptions}
+            disabled={disabled}
+            allowUnset
+            unsetLabel={t("settings.codexControl.unset")}
+            onChange={(value) => setDraft({ defaultReasoningEffort: value })}
+          />
+        </CodexModeCard>
+        <CodexModeCard
+          title={t("settings.codexControl.mode.plan")}
+          source={mode("plan")?.source}
+          evidence={mode("plan")?.evidence ?? []}
+        >
+          <CodexModeReadonlyField
+            label={t("settings.codexControl.model")}
+            value={inheritedPlanModel || t("settings.codexControl.unset")}
+            detail={t("settings.codexControl.planModelNote")}
+          />
+          <CodexReasoningField
+            label={t("settings.codexControl.reasoning")}
+            value={props.draft.planReasoningEffort}
+            options={reasoningOptions}
+            disabled={disabled}
+            allowUnset
+            unsetLabel={t("settings.codexControl.inheritDefault")}
+            onChange={(value) => setDraft({ planReasoningEffort: value })}
+          />
+        </CodexModeCard>
+        <CodexModeCard
+          title={t("settings.codexControl.mode.review")}
+          source={mode("review")?.source}
+          evidence={mode("review")?.evidence ?? []}
+        >
+          <CodexModelField
+            label={t("settings.codexControl.model")}
+            value={props.draft.reviewModel}
+            options={modelOptions}
+            placeholder={props.snapshot?.modes.review.model ?? (defaultModel || "gpt-5.5")}
+            disabled={disabled}
+            allowUnset
+            unsetLabel={t("settings.codexControl.inheritDefault")}
+            onChange={(value) => setDraft({ reviewModel: value })}
+          />
+          <CodexModeReadonlyField
+            label={t("settings.codexControl.reasoning")}
+            value={inheritedReviewReasoning || t("settings.codexControl.unset")}
+            detail={t("settings.codexControl.reviewReasoningNote")}
+          />
+        </CodexModeCard>
+      </div>
+      <div className="codexModeFooter">
+        <span className="inlineHint">{t("settings.codexControl.modeEvidence")}</span>
+        {props.status && <span className="inlineHint">{props.status}</span>}
+        {props.loading && <span className="inlineHint">{t("settings.codexControl.loading")}</span>}
+      </div>
+    </section>
+  );
+}
+
+function CodexModeCard(props: {
+  title: string;
+  source?: string | undefined;
+  evidence: Evidence[];
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const source = props.source ?? "unset";
+  return (
+    <div className="codexModeCard">
+      <div className="codexModeCardTitle">
+        <strong>{props.title}</strong>
+        <Badge text={t(`settings.codexControl.source.${source}`)} tone={source === "config" ? "ok" : undefined} />
+      </div>
+      <div className="codexModeFields">{props.children}</div>
+      <div className="codexModeEvidence">
+        {props.evidence.slice(0, 2).map((evidence, index) => (
+          <span key={`${evidence.source}:${evidence.field ?? ""}:${index}`} title={evidence.detail}>
+            {codexModeEvidenceLabel(evidence)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CodexModelField(props: {
+  label: string;
+  value: string;
+  options: string[];
+  placeholder: string;
+  disabled?: boolean | undefined;
+  allowUnset?: boolean | undefined;
+  unsetLabel?: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="codexModeField">
+      <span>{props.label}</span>
+      <input
+        className="codexModeInput mono"
+        list="codex-model-suggestions"
+        value={props.value}
+        placeholder={props.allowUnset ? props.unsetLabel : props.placeholder}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function CodexReasoningField(props: {
+  label: string;
+  value: string;
+  options: string[];
+  disabled?: boolean | undefined;
+  allowUnset?: boolean | undefined;
+  unsetLabel?: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="codexModeField">
+      <span>{props.label}</span>
+      <select
+        className="codexModeSelect"
+        value={props.value}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.target.value)}
+      >
+        {props.allowUnset && <option value="">{props.unsetLabel ?? ""}</option>}
+        {props.options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function CodexModeReadonlyField(props: { label: string; value: string; detail: string }) {
+  return (
+    <div className="codexModeReadonlyField">
+      <span>{props.label}</span>
+      <strong className="mono">{props.value}</strong>
+      <em>{props.detail}</em>
+    </div>
+  );
+}
+
+function codexModeEvidenceLabel(evidence: Evidence): string {
+  if (!evidence.field) return evidence.source;
+  if (evidence.field === "plan_mode_reasoning_effort") return "plan reasoning";
+  if (evidence.field === "model_reasoning_effort") return "default reasoning";
+  if (evidence.field === "review_model") return "review model";
+  return evidence.field;
 }
 
 function CodexControlDetail(props: {
@@ -5589,6 +5873,34 @@ function cleanTitle(value: string): string {
 
 function firstEditableSurface(snapshot: CodexControlSnapshot): CodexControlSurface | undefined {
   return snapshot.surfaces.find((surface) => surface.editable) ?? snapshot.surfaces[0];
+}
+
+function codexModeDraftFromSnapshot(snapshot: CodexModeConfigSnapshot): CodexModeDraft {
+  return {
+    defaultModel: snapshot.modes.default.model ?? "",
+    defaultReasoningEffort: snapshot.modes.default.reasoningEffort ?? "",
+    planReasoningEffort: snapshot.modes.plan.source === "config" ? snapshot.modes.plan.reasoningEffort ?? "" : "",
+    reviewModel: snapshot.modes.review.source === "config" ? snapshot.modes.review.model ?? "" : ""
+  };
+}
+
+function codexModePatchFromDraft(draft: CodexModeDraft): CodexModeConfigPatch {
+  return {
+    defaultModel: draft.defaultModel.trim() || null,
+    defaultReasoningEffort: draft.defaultReasoningEffort.trim() || null,
+    planReasoningEffort: draft.planReasoningEffort.trim() || null,
+    reviewModel: draft.reviewModel.trim() || null
+  };
+}
+
+function codexModeDraftEqualsSnapshot(draft: CodexModeDraft, snapshot: CodexModeConfigSnapshot): boolean {
+  const current = codexModeDraftFromSnapshot(snapshot);
+  return (
+    draft.defaultModel.trim() === current.defaultModel &&
+    draft.defaultReasoningEffort.trim() === current.defaultReasoningEffort &&
+    draft.planReasoningEffort.trim() === current.planReasoningEffort &&
+    draft.reviewModel.trim() === current.reviewModel
+  );
 }
 
 function Notification(props: { notice: NoticeState; onClose: () => void; onRevealPath: (targetPath: string) => void }) {

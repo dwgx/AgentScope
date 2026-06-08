@@ -12,7 +12,10 @@ import type {
   SessionLaunchResult,
   CodexControlDocument,
   CodexControlSaveResult,
-  CodexControlSnapshot
+  CodexControlSnapshot,
+  CodexModeConfigPatch,
+  CodexModeConfigSaveResult,
+  CodexModeConfigSnapshot
 } from "@agentscope/shared";
 
 export interface AppInfo {
@@ -41,6 +44,11 @@ export interface AgentScopeApi {
     content: string,
     expectedSha256: string
   ): Promise<CodexControlSaveResult>;
+  readCodexModeConfig(): Promise<CodexModeConfigSnapshot>;
+  saveCodexModeConfig(
+    patch: CodexModeConfigPatch,
+    expectedSha256: string
+  ): Promise<CodexModeConfigSaveResult>;
   reloadApp(): Promise<boolean>;
   clearCache(): Promise<{ ok: boolean; directories: string[]; files: string[] }>;
   quitApp(): Promise<boolean>;

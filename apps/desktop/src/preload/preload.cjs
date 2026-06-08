@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld("agentscope", {
   readCodexControlDocument: (id) => ipcRenderer.invoke("codexControl:read", id),
   saveCodexControlDocument: (id, content, expectedSha256) =>
     ipcRenderer.invoke("codexControl:save", id, content, expectedSha256),
+  readCodexModeConfig: () => ipcRenderer.invoke("codexControl:readModes"),
+  saveCodexModeConfig: (patch, expectedSha256) =>
+    ipcRenderer.invoke("codexControl:saveModes", patch, expectedSha256),
   reloadApp: () => ipcRenderer.invoke("app:reload"),
   clearCache: () => ipcRenderer.invoke("app:clearCache"),
   quitApp: () => ipcRenderer.invoke("app:quit"),

@@ -1909,6 +1909,168 @@ input {
   padding: 12px 14px 14px;
 }
 
+.codexModePanel {
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px;
+}
+
+.codexModeHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.codexModeHeader strong,
+.codexModeHeader span,
+.codexModeHeader code {
+  display: block;
+  min-width: 0;
+}
+
+.codexModeHeader strong {
+  font-size: 13px;
+}
+
+.codexModeHeader span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.codexModeHeader code {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+
+.codexModeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.codexModeCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 50%, transparent);
+  padding: 9px;
+}
+
+.codexModeCardTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.codexModeCardTitle strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.codexModeFields {
+  display: grid;
+  gap: 7px;
+}
+
+.codexModeField,
+.codexModeReadonlyField {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.codexModeField > span,
+.codexModeReadonlyField > span {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.codexModeInput,
+.codexModeSelect {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--control) 76%, var(--surface));
+  color: var(--text);
+  padding: 7px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.codexModeInput:focus,
+.codexModeSelect:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.codexModeReadonlyField {
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 68%, transparent);
+  padding: 7px 8px;
+}
+
+.codexModeReadonlyField strong,
+.codexModeReadonlyField em {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.codexModeReadonlyField strong {
+  font-size: 12px;
+}
+
+.codexModeReadonlyField em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.codexModeEvidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 7px;
+}
+
+.codexModeEvidence span {
+  max-width: 100%;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  color: var(--muted);
+  padding: 3px 6px;
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codexModeFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
 .codexSurfaceList {
   min-height: 0;
   max-height: 250px;

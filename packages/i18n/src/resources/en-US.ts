@@ -533,6 +533,27 @@ export const enUS = {
       exists: "exists",
       bytes: "bytes",
       updated: "updated",
+      modeTitle: "Codex mode defaults",
+      modeDetail:
+        "Writes only documented config.toml keys. Plan mode inherits the default model and can override reasoning effort.",
+      model: "Model",
+      reasoning: "Reasoning",
+      inheritDefault: "Inherit default",
+      unset: "unset",
+      planModelNote: "No separate Plan model key is documented; AgentScope shows the inherited default model.",
+      reviewReasoningNote: "Review reasoning inherits the default reasoning setting.",
+      modeEvidence:
+        "Evidence source: OpenAI Codex manual for config keys, plus local config.toml top-level assignments.",
+      mode: {
+        default: "Default mode",
+        plan: "Plan mode",
+        review: "Review"
+      },
+      source: {
+        config: "config",
+        inherits_default: "inherits",
+        unset: "unset"
+      },
       mcpTitle: "MCP servers from config.toml",
       noMcp: "No MCP server table was found in the current config.toml.",
       kind: {

@@ -7,6 +7,11 @@ import type {
   CodexControlSnapshot,
   CodexControlSurface,
   CodexControlSurfaceKind,
+  CodexModeConfigPatch,
+  CodexModeConfigSaveResult,
+  CodexModeConfigSnapshot,
+  CodexModeId,
+  CodexModeValue,
   CodexMcpServerSummary,
   Evidence
 } from "@agentscope/shared";
@@ -15,6 +20,8 @@ import { openCodexDb, tableColumns } from "./codex.js";
 
 const maxEditableBytes = 256 * 1024;
 const textEncoding: BufferEncoding = "utf8";
+const recommendedModels = ["gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark"];
+const reasoningEffortValues = ["minimal", "low", "medium", "high", "xhigh"];
 const sensitivePathPartRe = /^(auth|credentials?|secrets?|tokens?|keyrings?|keychains?)$/i;
 const safeSkillNameRe = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const safeRuleNameRe = /^[a-z0-9][a-z0-9._-]{0,79}\.rules$/i;
@@ -152,6 +159,79 @@ export async function readCodexControlDocument(id: string, home = userHome()): P
         detail: "Document was read through an allowlisted Codex control id.",
         path: resolved.path
       }
+    ]
+  };
+}
+
+export async function readCodexModeConfig(home = userHome()): Promise<CodexModeConfigSnapshot> {
+  const root = codexHome(home);
+  const configPath = path.join(root, "config.toml");
+  const current = await readCurrentBytes(configPath);
+  const content = current.toString(textEncoding);
+  const sensitive = sensitiveLineNumbers(content);
+  const assignments = parseTopLevelAssignments(content, configPath);
+  return modeConfigSnapshot(configPath, current, assignments, sensitive);
+}
+
+export async function saveCodexModeConfig(
+  patch: CodexModeConfigPatch,
+  expectedSha256: string,
+  home = userHome()
+): Promise<CodexModeConfigSaveResult> {
+  validateModePatch(patch);
+  const resolved = resolveDocument("config.global", home);
+  const current = await readCurrentBytes(resolved.path);
+  const content = current.toString(textEncoding);
+  const currentHash = sha256(content);
+  if (currentHash !== expectedSha256) {
+    throw new Error(`Codex mode config changed on disk; reload before saving: ${resolved.path}`);
+  }
+  if (sensitiveLineNumbers(content).length > 0) {
+    throw new Error("AgentScope refuses to structurally edit config.toml with sensitive-looking key names.");
+  }
+  const next = applyModePatch(content, patch);
+  const validation = validateTomlShape(next);
+  if (validation) throw new Error(`config.toml validation failed: ${validation}`);
+  const backupPath = current.length ? await writeBackup(resolved, current, home) : undefined;
+  await fs.promises.mkdir(path.dirname(resolved.path), { recursive: true });
+  const tempPath = path.join(path.dirname(resolved.path), `.${path.basename(resolved.path)}.agentscope-${Date.now()}.tmp`);
+  try {
+    await fs.promises.writeFile(tempPath, next, { encoding: textEncoding, flag: "wx" });
+    await fs.promises.rename(tempPath, resolved.path);
+  } catch (error) {
+    await fs.promises.rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+  const nextBytes = Buffer.from(next, textEncoding);
+  const snapshot = modeConfigSnapshot(
+    resolved.path,
+    nextBytes,
+    parseTopLevelAssignments(next, resolved.path),
+    sensitiveLineNumbers(next)
+  );
+  return {
+    id: "config.modeDefaults",
+    path: resolved.path,
+    backupPath,
+    sha256: snapshot.sha256,
+    bytes: nextBytes.length,
+    modes: snapshot.modes,
+    evidence: [
+      {
+        source: "codex.control.mode_config.save",
+        detail: "Mode defaults were saved by updating allowlisted top-level config.toml keys only.",
+        path: resolved.path,
+        field: changedPatchKeys(patch).join(",")
+      },
+      ...(backupPath
+        ? [
+            {
+              source: "codex.control.backup",
+              detail: "Previous config.toml bytes were copied before save.",
+              path: backupPath
+            }
+          ]
+        : [])
     ]
   };
 }
@@ -542,6 +622,223 @@ function inspectToml(content: string, filePath: string): ConfigInventory {
     projectTables: tables.filter((table) => /^projects\./.test(table.name)).map((table) => table.name),
     sensitiveLines: sensitiveLineNumbers(content)
   };
+}
+
+interface TopLevelAssignment {
+  key: string;
+  value: string;
+  line: number;
+  raw: string;
+  path: string;
+}
+
+function parseTopLevelAssignments(content: string, filePath: string): Map<string, TopLevelAssignment> {
+  const assignments = new Map<string, TopLevelAssignment>();
+  let inTopLevel = true;
+  for (const [index, rawLine] of content.split(/\r?\n/).entries()) {
+    const line = stripTomlComment(rawLine).trim();
+    if (!line) continue;
+    if (/^\[+/.test(line)) {
+      inTopLevel = false;
+      continue;
+    }
+    if (!inTopLevel) continue;
+    const match = /^([A-Za-z0-9_.-]+)\s*=\s*(.+)$/.exec(line);
+    if (!match) continue;
+    assignments.set(match[1]!, {
+      key: match[1]!,
+      value: match[2]!.trim(),
+      line: index + 1,
+      raw: rawLine,
+      path: filePath
+    });
+  }
+  return assignments;
+}
+
+function modeConfigSnapshot(
+  configPath: string,
+  bytes: Buffer,
+  assignments: Map<string, TopLevelAssignment>,
+  sensitiveLines: number[]
+): CodexModeConfigSnapshot {
+  const model = stringTomlValue(assignments.get("model")?.value);
+  const reviewModel = stringTomlValue(assignments.get("review_model")?.value);
+  const defaultReasoning = stringTomlValue(assignments.get("model_reasoning_effort")?.value);
+  const planReasoning = stringTomlValue(assignments.get("plan_mode_reasoning_effort")?.value);
+  const modes: Record<CodexModeId, CodexModeValue> = {
+    default: {
+      model,
+      reasoningEffort: defaultReasoning,
+      source: model || defaultReasoning ? "config" : "unset",
+      evidence: modeEvidence(configPath, [
+        assignments.get("model"),
+        assignments.get("model_reasoning_effort")
+      ])
+    },
+    plan: {
+      model,
+      reasoningEffort: planReasoning ?? defaultReasoning,
+      source: planReasoning ? "config" : defaultReasoning || model ? "inherits_default" : "unset",
+      evidence: modeEvidence(configPath, [
+        assignments.get("plan_mode_reasoning_effort"),
+        assignments.get("model"),
+        assignments.get("model_reasoning_effort")
+      ])
+    },
+    review: {
+      model: reviewModel ?? model,
+      reasoningEffort: defaultReasoning,
+      source: reviewModel ? "config" : model || defaultReasoning ? "inherits_default" : "unset",
+      evidence: modeEvidence(configPath, [
+        assignments.get("review_model"),
+        assignments.get("model"),
+        assignments.get("model_reasoning_effort")
+      ])
+    }
+  };
+  return {
+    configPath,
+    sha256: sha256(bytes),
+    modes,
+    recommendedModels,
+    reasoningEffortValues,
+    warnings: sensitiveLines.length
+      ? ["Sensitive key names were detected; mode defaults are read-only until config.toml is edited externally."]
+      : [],
+    evidence: [
+      {
+        source: "codex.control.official_manual",
+        detail:
+          "Codex manual documents model, review_model, model_reasoning_effort, and plan_mode_reasoning_effort in config.toml.",
+        path: configPath,
+        field: "model,review_model,model_reasoning_effort,plan_mode_reasoning_effort"
+      }
+    ]
+  };
+}
+
+function modeEvidence(configPath: string, assignments: Array<TopLevelAssignment | undefined>): Evidence[] {
+  const present = assignments.filter((assignment): assignment is TopLevelAssignment => !!assignment);
+  if (!present.length) {
+    return [
+      {
+        source: "codex.control.mode_config",
+        detail: "Mode setting is not present in user config; Codex will use profile, project, CLI, or built-in defaults.",
+        path: configPath
+      }
+    ];
+  }
+  return present.map((assignment) => ({
+    source: "codex.control.config.toml",
+    detail: `Top-level config key ${assignment.key} found at line ${assignment.line}.`,
+    path: assignment.path,
+    field: assignment.key
+  }));
+}
+
+function applyModePatch(content: string, patch: CodexModeConfigPatch): string {
+  let next = normalizeTrailingNewline(content);
+  const entries: Array<[string, string | null | undefined]> = [
+    ["model", patch.defaultModel],
+    ["model_reasoning_effort", patch.defaultReasoningEffort],
+    ["plan_mode_reasoning_effort", patch.planReasoningEffort],
+    ["review_model", patch.reviewModel]
+  ];
+  for (const [key, value] of entries) {
+    if (value === undefined) continue;
+    next = value === null ? removeTopLevelTomlKey(next, key) : setTopLevelTomlString(next, key, value);
+  }
+  return next;
+}
+
+function setTopLevelTomlString(content: string, key: string, value: string): string {
+  const lines = content.split(/\r?\n/);
+  const assignmentRe = new RegExp(`^\\\\s*${escapeRegExp(key)}\\\\s*=`);
+  let insertAt = 0;
+  let inTopLevel = true;
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index] ?? "";
+    const stripped = stripTomlComment(rawLine).trim();
+    if (!stripped) {
+      if (inTopLevel) insertAt = index + 1;
+      continue;
+    }
+    if (/^\[+/.test(stripped)) {
+      inTopLevel = false;
+      break;
+    }
+    if (inTopLevel && assignmentRe.test(rawLine)) {
+      lines[index] = `${key} = ${tomlString(value)}`;
+      return lines.join("\n");
+    }
+    if (inTopLevel) insertAt = index + 1;
+  }
+  lines.splice(insertAt, 0, `${key} = ${tomlString(value)}`);
+  return lines.join("\n");
+}
+
+function removeTopLevelTomlKey(content: string, key: string): string {
+  const assignmentRe = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
+  const lines = content.split(/\r?\n/);
+  let inTopLevel = true;
+  const next: string[] = [];
+  for (const rawLine of lines) {
+    const stripped = stripTomlComment(rawLine).trim();
+    if (stripped && /^\[+/.test(stripped)) inTopLevel = false;
+    if (inTopLevel && assignmentRe.test(rawLine)) continue;
+    next.push(rawLine);
+  }
+  return next.join("\n");
+}
+
+function normalizeTrailingNewline(content: string): string {
+  return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+function validateModePatch(patch: CodexModeConfigPatch): void {
+  const modelEntries = [
+    ["defaultModel", patch.defaultModel],
+    ["reviewModel", patch.reviewModel]
+  ];
+  for (const [key, value] of modelEntries) {
+    if (value === null) continue;
+    if (value !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,80}$/.test(value)) {
+      throw new Error(`Invalid Codex model value for ${key}.`);
+    }
+  }
+  const reasoningEntries = [
+    ["defaultReasoningEffort", patch.defaultReasoningEffort],
+    ["planReasoningEffort", patch.planReasoningEffort]
+  ];
+  for (const [key, value] of reasoningEntries) {
+    if (value === null) continue;
+    if (value !== undefined && !reasoningEffortValues.includes(value)) {
+      throw new Error(`Invalid Codex reasoning effort for ${key}.`);
+    }
+  }
+}
+
+function changedPatchKeys(patch: CodexModeConfigPatch): string[] {
+  return Object.entries(patch)
+    .filter(([, value]) => value !== undefined)
+    .map(([key]) => key);
+}
+
+function stringTomlValue(value?: string): string | undefined {
+  if (!value) return undefined;
+  const quoted = /^"((?:\\"|[^"])*)"|'([^']*)'/.exec(value);
+  if (quoted) return (quoted[1] ?? quoted[2] ?? "").replace(/\\"/g, '"');
+  const bare = /^[A-Za-z0-9._:-]+/.exec(value)?.[0];
+  return bare || undefined;
+}
+
+function tomlString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function validateTomlShape(content: string): string | undefined {

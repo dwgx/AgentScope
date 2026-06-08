@@ -385,6 +385,27 @@ export const zhCN = {
       exists: "存在",
       bytes: "字节",
       updated: "更新",
+      modeTitle: "Codex 模式默认值",
+      modeDetail:
+        "只写官方文档明确的 config.toml 键。Plan 模式继承默认模型，只能覆盖 reasoning effort。",
+      model: "模型",
+      reasoning: "推理强度",
+      inheritDefault: "继承 Default",
+      unset: "未设置",
+      planModelNote: "官方文档没有独立 Plan 模型键；AgentScope 只展示继承的默认模型。",
+      reviewReasoningNote: "Review 的 reasoning 继承默认 reasoning 设置。",
+      modeEvidence:
+        "证据来源：OpenAI Codex 手册中的配置键说明，以及本机 config.toml 顶层赋值。",
+      mode: {
+        default: "Default 模式",
+        plan: "Plan 模式",
+        review: "Review"
+      },
+      source: {
+        config: "配置",
+        inherits_default: "继承",
+        unset: "未设置"
+      },
       mcpTitle: "config.toml 中的 MCP 服务器",
       noMcp: "当前 config.toml 没有找到 MCP server 表。",
       kind: {
