@@ -4,7 +4,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import type { AgentSession, AgentSessionKind, Evidence, IndexRecord, Relation, Transcript } from "@agentscope/shared";
 import { analyzeTranscriptActivity } from "./activity.js";
-import { codexHome, normalizeWindowsPath } from "./paths.js";
+import { codexHome, codexSqliteHome, normalizeWindowsPath } from "./paths.js";
 import { iterateJsonl } from "./jsonl.js";
 
 const rolloutNameRe = /^rollout-(.+)\.jsonl$/i;
@@ -25,13 +25,14 @@ export function loadCodexIndex(home?: string): {
   records: IndexRecord[];
   relations: Relation[];
 } {
-  const dbPath = path.join(codexHome(home), "state_5.sqlite");
+  const sqliteRoot = codexSqliteHome(home);
+  const dbPath = path.join(sqliteRoot, "state_5.sqlite");
   if (!fs.existsSync(dbPath)) return { sessions: [], records: [], relations: [] };
   const opened = openCodexDb(dbPath);
   if (!opened) return { sessions: [], records: [], relations: [] };
   const { db, evidencePath } = opened;
   try {
-    const logMetadata = loadCodexLogMetadata(codexHome(home));
+    const logMetadata = loadCodexLogMetadata(sqliteRoot);
     const rows = selectExistingColumns(db, "threads", [
       "id",
       "rollout_path",
@@ -152,18 +153,20 @@ export async function scanCodexRollouts(home?: string): Promise<{
   records: IndexRecord[];
   relations: Relation[];
 }> {
-  const root = path.join(codexHome(home), "sessions");
-  if (!fs.existsSync(root)) return { transcripts: [], sessions: [], records: [], relations: [] };
-  const files: string[] = [];
-  walk(root, (filePath) => {
-    if (rolloutThreadId(filePath)) files.push(filePath);
-  });
-  files.sort();
+  const roots = codexRolloutRoots(home).filter((root) => fs.existsSync(root.path));
+  if (!roots.length) return { transcripts: [], sessions: [], records: [], relations: [] };
+  const files: Array<{ filePath: string; archived: boolean; rootPath: string }> = [];
+  for (const root of roots) {
+    walk(root.path, (filePath) => {
+      if (rolloutThreadId(filePath)) files.push({ filePath, archived: root.archived, rootPath: root.path });
+    });
+  }
+  files.sort((left, right) => left.filePath.localeCompare(right.filePath));
   const transcripts: Transcript[] = [];
   const sessions: AgentSession[] = [];
   const records: IndexRecord[] = [];
   const relations: Relation[] = [];
-  for (const filePath of files) {
+  for (const { filePath, archived, rootPath } of files) {
     const sessionId = rolloutThreadId(filePath);
     if (!sessionId) continue;
     const metadata = await readRolloutMetadata(filePath);
@@ -174,9 +177,11 @@ export async function scanCodexRollouts(home?: string): Promise<{
     const evidence = [
       {
         source: "codex.sessions.rollout",
-        detail: "Codex rollout JSONL discovered under .codex/sessions/YYYY/MM/DD.",
+        detail: archived
+          ? "Codex archived rollout JSONL discovered under .codex/archived_sessions."
+          : "Codex rollout JSONL discovered under .codex/sessions/YYYY/MM/DD.",
         path: filePath,
-        field: "filename,cwd,jsonl"
+        field: archived ? "archived_sessions,filename,cwd,jsonl" : "sessions,filename,cwd,jsonl"
       }
     ];
     const kindEvidence = codexSessionKindEvidence(metadata);
@@ -194,7 +199,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
       title: stringValue(metadata.title),
       startedAt,
       updatedAt,
-      indexMetadata: compactMetadata({ ...metadata, activity_line_count: activity.lineCount }),
+      indexMetadata: compactMetadata({ ...metadata, activity_line_count: activity.lineCount, archived_rollout: archived }),
       activity,
       evidence: appendEvidenceUnique(evidence, kindEvidence.evidence)
     });
@@ -207,7 +212,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
       title: stringValue(metadata.title),
       startedAt,
       updatedAt,
-      metadata: { ...metadata, activity },
+      metadata: { ...metadata, archived_rollout: archived, rollout_root: rootPath, activity },
       evidence
     });
     const parentSessionId = stringValue(metadata.parent_thread_id) ?? stringValue(metadata.parent_id);
@@ -232,6 +237,14 @@ export async function scanCodexRollouts(home?: string): Promise<{
     }
   }
   return { transcripts, sessions, records, relations: mergeRelations(relations) };
+}
+
+export function codexRolloutRoots(home?: string): Array<{ path: string; archived: boolean }> {
+  const root = codexHome(home);
+  return [
+    { path: path.join(root, "sessions"), archived: false },
+    { path: path.join(root, "archived_sessions"), archived: true }
+  ];
 }
 
 export function rolloutThreadId(filePath: string): string | undefined {

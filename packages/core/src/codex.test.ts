@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadCodexIndex, rolloutStartedAt, rolloutThreadId } from "./codex.js";
+import { loadCodexIndex, rolloutStartedAt, rolloutThreadId, scanCodexRollouts } from "./codex.js";
 
 const tempRoots: string[] = [];
 
@@ -176,5 +176,47 @@ describe("Codex helpers", () => {
     const plain = loadCodexIndex(home).sessions.find((session) => session.sessionId === "plain-thread");
     expect(plain?.sessionKind).toBe("session");
     expect(plain?.sessionKindEvidence ?? []).toHaveLength(0);
+  });
+
+  it("uses configured sqlite_home instead of assuming the Codex home directory", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-sqlite-home-"));
+    tempRoots.push(home);
+    const codexRoot = join(home, ".codex");
+    const sqliteRoot = join(home, "sqlite-state");
+    mkdirSync(codexRoot, { recursive: true });
+    mkdirSync(sqliteRoot, { recursive: true });
+    writeFileSync(join(codexRoot, "config.toml"), `sqlite_home = "${sqliteRoot.replaceAll("\\", "\\\\")}"\n`);
+    const db = new Database(join(sqliteRoot, "state_5.sqlite"));
+    db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, cwd TEXT);");
+    db.prepare("INSERT INTO threads (id, title, cwd) VALUES (?, ?, ?)").run("configured-thread", "Configured", String.raw`D:\work`);
+    db.close();
+
+    const snapshot = loadCodexIndex(home);
+    const session = snapshot.sessions.find((item) => item.sessionId === "configured-thread");
+    expect(session?.title).toBe("Configured");
+    expect(session?.evidence[0]?.path).toContain("sqlite-state");
+  });
+
+  it("indexes archived Codex rollout files with explicit archived evidence", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-archived-"));
+    tempRoots.push(home);
+    const sessionId = "019ea000-0000-7000-8000-000000000001";
+    const archivedPath = join(
+      home,
+      ".codex",
+      "archived_sessions",
+      "2026",
+      "06",
+      "07",
+      `rollout-2026-06-07T12-00-00-${sessionId}.jsonl`
+    );
+    mkdirSync(dirname(archivedPath), { recursive: true });
+    writeFileSync(archivedPath, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\work`, title: "Archived" } }) + "\n");
+
+    const snapshot = await scanCodexRollouts(home);
+    const session = snapshot.sessions.find((item) => item.sessionId === sessionId);
+    expect(session?.title).toBe("Archived");
+    expect(session?.indexMetadata?.archived_rollout).toBe(true);
+    expect(session?.evidence[0]?.detail).toContain("archived");
   });
 });

@@ -19,7 +19,7 @@ import type {
 } from "@agentscope/shared";
 import { tableColumns } from "./codex.js";
 import { buildSnapshot, findSession } from "./scope.js";
-import { claudeHome, codexHome, encodeClaudeProjectPath, normalizeWindowsPath, userHome } from "./paths.js";
+import { claudeHome, codexHome, codexSqliteHome, encodeClaudeProjectPath, normalizeWindowsPath, userHome } from "./paths.js";
 
 export interface SessionOperationOptions {
   home?: string | undefined;
@@ -757,14 +757,15 @@ async function discoverSessionFiles(
 
   if (session.agent === "codex") {
     const codexRoot = codexHome(root);
-    await add("codex.state_threads", path.join(codexRoot, "state_5.sqlite"), [
+    const sqliteRoot = codexSqliteHome(root);
+    await add("codex.state_threads", path.join(sqliteRoot, "state_5.sqlite"), [
       {
         source: "codex.sqlite.threads",
         detail: "Codex thread row and spawn edges are indexed in state_5.sqlite.",
         field: "threads.id,thread_spawn_edges.parent_thread_id,thread_spawn_edges.child_thread_id"
       }
     ], "inspect");
-    await add("codex.logs_metadata", path.join(codexRoot, "logs_2.sqlite"), [
+    await add("codex.logs_metadata", path.join(sqliteRoot, "logs_2.sqlite"), [
       {
         source: "codex.sqlite.logs",
         detail: "Codex logs may contain rows keyed by thread_id; default backup does not copy global log bodies.",
@@ -789,7 +790,7 @@ function databasePlanForSession(
   operation: "backup" | "delete"
 ): SessionOperationDatabaseChange[] {
   if (session.agent === "codex") {
-    const root = codexHome(home);
+    const root = codexSqliteHome(home);
     const action = operation === "delete" ? "delete" : "inspect";
     return [
       dbChange(path.join(root, "state_5.sqlite"), "threads", `id = ${jsonQuote(session.sessionId)}`, action, "codex.sqlite.threads"),
@@ -817,7 +818,7 @@ function databasePlanForSession(
 
 function importDatabasePlan(agent: AgentKind, sessionId: string, home: string | undefined): SessionOperationDatabaseChange[] {
   if (agent === "codex") {
-    const root = codexHome(home);
+    const root = codexSqliteHome(home);
     return [
       dbChange(path.join(root, "state_5.sqlite"), "threads", `id = ${jsonQuote(sessionId)}`, "insert", "agentscope.import.codex"),
       dbChange(path.join(root, "state_5.sqlite"), "thread_spawn_edges", `parent/child references ${jsonQuote(sessionId)}`, "insert", "agentscope.import.codex"),
@@ -1072,7 +1073,7 @@ function applyCodexDatabaseDelete(
   quarantineDir: string,
   journal?: DeleteJournal | undefined
 ): SessionOperationDatabaseChange[] {
-  const root = codexHome(home);
+  const root = codexSqliteHome(home);
   const applied: SessionOperationDatabaseChange[] = [];
   const recordApplied = (changes: SessionOperationDatabaseChange[]) => {
     for (const change of changes.filter((item) => item.estimatedRows !== 0)) {
@@ -1226,7 +1227,7 @@ function restoreSqliteBackupFiles(backupPath: string, targetPath: string): void 
 }
 
 async function backupCodexDatabases(home: string | undefined, quarantineDir: string, journal?: DeleteJournal | undefined): Promise<void> {
-  const root = codexHome(home);
+  const root = codexSqliteHome(home);
   const backupDir = path.join(quarantineDir, "sqlite-backup");
   await fs.promises.mkdir(backupDir, { recursive: true });
   for (const name of ["state_5.sqlite", "goals_1.sqlite", "memories_1.sqlite", "logs_2.sqlite"]) {
@@ -1536,7 +1537,7 @@ async function exportCodexDatabaseBundles(
 ): Promise<CodexDatabaseBundleManifest[]> {
   const bundles: CodexDatabaseBundleManifest[] = [];
   const dbRoot = path.join(backupDir, "db");
-  const codexRoot = codexHome(home);
+  const codexRoot = codexSqliteHome(home);
   const specs = codexBundleSpecs(sessionId, codexRoot);
   for (const spec of specs) {
     const rows = spec.summary ? exportCodexLogSummary(spec.dbPath, sessionId) : exportRows(spec.dbPath, spec.table, spec.where, spec.params);
@@ -1577,7 +1578,7 @@ function importCodexDatabaseBundles(
 ): SessionOperationDatabaseChange[] {
   const bundles = manifest.databaseBundles ?? [];
   if (!bundles.length) return [];
-  const codexRoot = codexHome(home);
+  const codexRoot = codexSqliteHome(home);
   const changes: SessionOperationDatabaseChange[] = [];
   const grouped = new Map<string, CodexDatabaseBundleManifest[]>();
   for (const bundle of bundles) {
@@ -1683,7 +1684,7 @@ function rollbackWhereParams(where: string, sessionId: string): unknown[] {
 function preflightCodexDatabaseBundles(manifest: BackupManifest, backupDir: string, home: string | undefined): void {
   if (manifest.agent !== "codex") return;
   const bundles = manifest.databaseBundles ?? [];
-  const codexRoot = codexHome(home);
+  const codexRoot = codexSqliteHome(home);
   for (const bundle of bundles) {
     assertAllowedCodexBundleManifest(bundle, manifest.sessionId);
     const source = resolveSafeRelative(backupDir, bundle.relativePath);
@@ -2157,9 +2158,15 @@ function assertSafeImportTarget(
   }
   if (agent === "codex") {
     const codexRoot = codexHome(root);
-    const sessionsRoot = path.join(codexRoot, "sessions");
+    const sessionsRoots = [path.join(codexRoot, "sessions"), path.join(codexRoot, "archived_sessions")];
     const name = path.basename(targetPath);
-    if (role !== "transcript" || !pathInside(sessionsRoot, targetPath) || !name.startsWith("rollout-") || !name.endsWith(".jsonl") || !name.includes(sessionId)) {
+    if (
+      role !== "transcript" ||
+      !sessionsRoots.some((sessionsRoot) => pathInside(sessionsRoot, targetPath)) ||
+      !name.startsWith("rollout-") ||
+      !name.endsWith(".jsonl") ||
+      !name.includes(sessionId)
+    ) {
       throw new Error(`Unsafe Codex import target for ${role}: ${targetPath}`);
     }
     return;

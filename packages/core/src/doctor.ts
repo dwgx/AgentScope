@@ -3,26 +3,29 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import type { Diagnostic } from "@agentscope/shared";
 import { openCodexDb } from "./codex.js";
-import { claudeHome, codexHome, userHome } from "./paths.js";
+import { claudeHome, codexHome, codexSqliteHome, userHome } from "./paths.js";
 import { isWindows, listProcesses } from "./processes.js";
 
 const require = createRequire(import.meta.url);
 
 export async function runDoctor(home = userHome()): Promise<Diagnostic[]> {
   const codex = codexHome(home);
+  const codexSqlite = codexSqliteHome(home);
   const claude = claudeHome(home);
   const checks: Diagnostic[] = [
     check("platform.windows", isWindows(), `platform=${process.platform}`),
     check("home.exists", fs.existsSync(home), home),
     check("codex.home", fs.existsSync(codex), codex),
     check("claude.home", fs.existsSync(claude), claude),
-    check("codex.sqlite", fs.existsSync(path.join(codex, "state_5.sqlite")), path.join(codex, "state_5.sqlite")),
+    check("codex.sqlite_home", fs.existsSync(codexSqlite), codexSqlite),
+    check("codex.sqlite", fs.existsSync(path.join(codexSqlite, "state_5.sqlite")), path.join(codexSqlite, "state_5.sqlite")),
     check("codex.sessions", fs.existsSync(path.join(codex, "sessions")), path.join(codex, "sessions")),
+    checkOptionalDir("codex.archived_sessions", path.join(codex, "archived_sessions")),
     check("claude.sessions", fs.existsSync(path.join(claude, "sessions")), path.join(claude, "sessions")),
     check("claude.projects", fs.existsSync(path.join(claude, "projects")), path.join(claude, "projects")),
-    checkOptionalFile("codex.logs.sqlite", path.join(codex, "logs_2.sqlite")),
-    checkOptionalFile("codex.goals.sqlite", path.join(codex, "goals_1.sqlite")),
-    checkOptionalFile("codex.memories.sqlite", path.join(codex, "memories_1.sqlite")),
+    checkOptionalFile("codex.logs.sqlite", path.join(codexSqlite, "logs_2.sqlite")),
+    checkOptionalFile("codex.goals.sqlite", path.join(codexSqlite, "goals_1.sqlite")),
+    checkOptionalFile("codex.memories.sqlite", path.join(codexSqlite, "memories_1.sqlite")),
     checkOptionalFile("codex.history", path.join(codex, "history.jsonl")),
     checkOptionalDir("claude.daemon", path.join(claude, "daemon")),
     checkOptionalDir("claude.jobs", path.join(claude, "jobs")),
@@ -36,8 +39,8 @@ export async function runDoctor(home = userHome()): Promise<Diagnostic[]> {
   checks.push(native);
   checks.push(
     ...(native.status === "ok"
-      ? [...sqliteChecks(path.join(codex, "state_5.sqlite")), ...sqliteInventoryChecks(codex)]
-      : sqliteBlockedByNativeChecks(codex, native.detail))
+      ? [...sqliteChecks(path.join(codexSqlite, "state_5.sqlite")), ...sqliteInventoryChecks(codexSqlite)]
+      : sqliteBlockedByNativeChecks(codexSqlite, native.detail))
   );
   const processes = await listProcesses(false);
   checks.push(check("win32.process.scan", isWindows(), `${processes.length} related process rows`));
@@ -71,21 +74,21 @@ function nativeModuleCheck(): Diagnostic {
   }
 }
 
-function sqliteBlockedByNativeChecks(codex: string, detail: string): Diagnostic[] {
+function sqliteBlockedByNativeChecks(codexSqlite: string, detail: string): Diagnostic[] {
   const blocked = `blocked by native.better_sqlite3: ${detail}`;
   return [
     check("codex.sqlite.readable", false, blocked),
-    check("codex.logs.tables", false, fs.existsSync(path.join(codex, "logs_2.sqlite")) ? blocked : `not found: ${path.join(codex, "logs_2.sqlite")}`),
-    check("codex.goals.tables", false, fs.existsSync(path.join(codex, "goals_1.sqlite")) ? blocked : `not found: ${path.join(codex, "goals_1.sqlite")}`),
-    check("codex.memories.tables", false, fs.existsSync(path.join(codex, "memories_1.sqlite")) ? blocked : `not found: ${path.join(codex, "memories_1.sqlite")}`)
+    check("codex.logs.tables", false, fs.existsSync(path.join(codexSqlite, "logs_2.sqlite")) ? blocked : `not found: ${path.join(codexSqlite, "logs_2.sqlite")}`),
+    check("codex.goals.tables", false, fs.existsSync(path.join(codexSqlite, "goals_1.sqlite")) ? blocked : `not found: ${path.join(codexSqlite, "goals_1.sqlite")}`),
+    check("codex.memories.tables", false, fs.existsSync(path.join(codexSqlite, "memories_1.sqlite")) ? blocked : `not found: ${path.join(codexSqlite, "memories_1.sqlite")}`)
   ];
 }
 
-function sqliteInventoryChecks(codex: string): Diagnostic[] {
+function sqliteInventoryChecks(codexSqlite: string): Diagnostic[] {
   return [
-    sqliteInventoryCheck("codex.logs.tables", path.join(codex, "logs_2.sqlite")),
-    sqliteInventoryCheck("codex.goals.tables", path.join(codex, "goals_1.sqlite")),
-    sqliteInventoryCheck("codex.memories.tables", path.join(codex, "memories_1.sqlite"))
+    sqliteInventoryCheck("codex.logs.tables", path.join(codexSqlite, "logs_2.sqlite")),
+    sqliteInventoryCheck("codex.goals.tables", path.join(codexSqlite, "goals_1.sqlite")),
+    sqliteInventoryCheck("codex.memories.tables", path.join(codexSqlite, "memories_1.sqlite"))
   ];
 }
 

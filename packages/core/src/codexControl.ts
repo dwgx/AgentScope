@@ -15,7 +15,7 @@ import type {
   CodexMcpServerSummary,
   Evidence
 } from "@agentscope/shared";
-import { codexHome, normalizeWindowsPath, userHome } from "./paths.js";
+import { codexHome, codexSqliteHome, normalizeWindowsPath, userHome } from "./paths.js";
 import { openCodexDb, tableColumns } from "./codex.js";
 
 const maxEditableBytes = 256 * 1024;
@@ -47,6 +47,7 @@ interface FileSnapshot {
 
 export async function listCodexControlSurfaces(home = userHome()): Promise<CodexControlSnapshot> {
   const root = codexHome(home);
+  const sqliteRoot = codexSqliteHome(home);
   const configPath = path.join(root, "config.toml");
   const configText = await readSmallText(configPath);
   const configInventory = configText === undefined ? emptyConfigInventory() : inspectToml(configText, configPath);
@@ -74,9 +75,9 @@ export async function listCodexControlSurfaces(home = userHome()): Promise<Codex
       warnings: []
     }),
     configSummarySurface(root, configInventory),
-    await archiveSurface(root),
-    await memorySurface(root),
-    ...(await codexDatabaseSurfaces(root)),
+    await archiveSurface(sqliteRoot),
+    await memorySurface(sqliteRoot),
+    ...(await codexDatabaseSurfaces(root, sqliteRoot)),
     await directorySurface({
       id: "browser.state",
       kind: "browser",
@@ -577,30 +578,30 @@ async function memorySurface(root: string): Promise<CodexControlSurface> {
   };
 }
 
-async function codexDatabaseSurfaces(root: string): Promise<CodexControlSurface[]> {
+async function codexDatabaseSurfaces(root: string, sqliteRoot: string): Promise<CodexControlSurface[]> {
   const inputs = [
     {
       id: "database.state",
       label: "state_5.sqlite",
-      filePath: path.join(root, "state_5.sqlite"),
+      filePath: path.join(sqliteRoot, "state_5.sqlite"),
       detail: "Codex state database schema and row-count summary only. Transcript bodies are not read here."
     },
     {
       id: "database.goals",
       label: "goals_1.sqlite",
-      filePath: path.join(root, "goals_1.sqlite"),
+      filePath: path.join(sqliteRoot, "goals_1.sqlite"),
       detail: "Codex goals database schema and row-count summary only."
     },
     {
       id: "database.memories",
       label: "memories_1.sqlite",
-      filePath: path.join(root, "memories_1.sqlite"),
+      filePath: path.join(sqliteRoot, "memories_1.sqlite"),
       detail: "Codex memories database schema and row-count summary only; memory content is not read."
     },
     {
       id: "database.logs",
       label: "logs_2.sqlite",
-      filePath: path.join(root, "logs_2.sqlite"),
+      filePath: path.join(sqliteRoot, "logs_2.sqlite"),
       detail: "Codex logs database schema and row-count summary only. Log body text is not restored or displayed."
     },
     {

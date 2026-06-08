@@ -635,6 +635,38 @@ describe("session operations", () => {
     expect(restored.databaseChanges?.some((change) => change.table === "logs" && change.action === "skip")).toBe(true);
   });
 
+  it("uses configured sqlite_home for Codex backup delete and restore row bundles", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-sqlite-home-"));
+    const sqliteRoot = path.join(home, "sqlite-state");
+    const sessionId = "fdfdfdfd-fdfd-4fdf-8fdf-fdfdfdfdfdfd";
+    const codexRoot = path.join(home, ".codex");
+    fs.mkdirSync(codexRoot, { recursive: true });
+    fs.writeFileSync(path.join(codexRoot, "config.toml"), `sqlite_home = "${sqliteRoot.replaceAll("\\", "\\\\")}"\n`);
+    const rollout = path.join(codexRoot, "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout, sqliteRoot);
+
+    const deleted = await deleteSession(sessionId, "codex", {
+      home,
+      outputRoot,
+      includeProcesses: false,
+      now: new Date("2026-06-07T08:40:00Z")
+    });
+
+    const stateAfterDelete = new Database(path.join(sqliteRoot, "state_5.sqlite"), { readonly: true });
+    expect(Number((stateAfterDelete.prepare("SELECT COUNT(*) AS count FROM threads WHERE id = ?").get(sessionId) as { count: number }).count)).toBe(0);
+    stateAfterDelete.close();
+    expect(deleted.databaseChanges.some((change) => change.database.includes("sqlite-state") && change.table === "threads")).toBe(true);
+
+    await restoreQuarantinedSession(deleted.quarantineDir, { home, outputRoot });
+
+    const stateAfterRestore = new Database(path.join(sqliteRoot, "state_5.sqlite"), { readonly: true });
+    expect(Number((stateAfterRestore.prepare("SELECT COUNT(*) AS count FROM threads WHERE id = ?").get(sessionId) as { count: number }).count)).toBe(1);
+    stateAfterRestore.close();
+  });
+
   it("plans Codex delete as row-level sqlite operations", async () => {
     const home = tempHome();
     const sessionId = "33333333-3333-4333-8333-333333333333";
@@ -706,47 +738,47 @@ function makeBackupFixture(home: string, sessionId: string): string {
   return backupDir;
 }
 
-function createCodexBundleFixture(home: string, sessionId: string, rollout: string): void {
-  recreateCodexEmptySchema(home);
-  const state = new Database(path.join(home, ".codex", "state_5.sqlite"));
+function createCodexBundleFixture(home: string, sessionId: string, rollout: string, sqliteRoot = path.join(home, ".codex")): void {
+  recreateCodexEmptySchema(home, sqliteRoot);
+  const state = new Database(path.join(sqliteRoot, "state_5.sqlite"));
   state.prepare("INSERT INTO threads (id, rollout_path, cwd, title) VALUES (?, ?, ?, ?)").run(sessionId, rollout, String.raw`D:\Project\AgentScope`, "bundle test");
   state.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id) VALUES (?, ?)").run("parent-thread", sessionId);
   state.prepare("INSERT INTO thread_dynamic_tools (thread_id, name, value) VALUES (?, ?, ?)").run(sessionId, "shell", "enabled");
   state.close();
 
-  const goals = new Database(path.join(home, ".codex", "goals_1.sqlite"));
+  const goals = new Database(path.join(sqliteRoot, "goals_1.sqlite"));
   goals.prepare("INSERT INTO thread_goals (thread_id, goal) VALUES (?, ?)").run(sessionId, "ship");
   goals.close();
 
-  const memories = new Database(path.join(home, ".codex", "memories_1.sqlite"));
+  const memories = new Database(path.join(sqliteRoot, "memories_1.sqlite"));
   memories.prepare("INSERT INTO stage1_outputs (thread_id, output) VALUES (?, ?)").run(sessionId, "memory");
   memories.close();
 
-  const logs = new Database(path.join(home, ".codex", "logs_2.sqlite"));
+  const logs = new Database(path.join(sqliteRoot, "logs_2.sqlite"));
   logs.prepare("INSERT INTO logs (thread_id, level, ts, body) VALUES (?, ?, ?, ?)").run(sessionId, "INFO", "2026-06-07T00:00:00Z", "do not restore body");
   logs.close();
 }
 
-function recreateCodexEmptySchema(home: string): void {
-  const codexRoot = path.join(home, ".codex");
-  fs.mkdirSync(codexRoot, { recursive: true });
+function recreateCodexEmptySchema(home: string, sqliteRoot = path.join(home, ".codex")): void {
+  fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+  fs.mkdirSync(sqliteRoot, { recursive: true });
   for (const name of ["state_5.sqlite", "goals_1.sqlite", "memories_1.sqlite", "logs_2.sqlite"]) {
-    fs.rmSync(path.join(codexRoot, name), { force: true });
+    fs.rmSync(path.join(sqliteRoot, name), { force: true });
   }
-  const state = new Database(path.join(codexRoot, "state_5.sqlite"));
+  const state = new Database(path.join(sqliteRoot, "state_5.sqlite"));
   state.exec(`
     CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, cwd TEXT, title TEXT);
     CREATE TABLE thread_spawn_edges (parent_thread_id TEXT, child_thread_id TEXT);
     CREATE TABLE thread_dynamic_tools (thread_id TEXT, name TEXT, value TEXT);
   `);
   state.close();
-  const goals = new Database(path.join(codexRoot, "goals_1.sqlite"));
+  const goals = new Database(path.join(sqliteRoot, "goals_1.sqlite"));
   goals.exec("CREATE TABLE thread_goals (thread_id TEXT, goal TEXT);");
   goals.close();
-  const memories = new Database(path.join(codexRoot, "memories_1.sqlite"));
+  const memories = new Database(path.join(sqliteRoot, "memories_1.sqlite"));
   memories.exec("CREATE TABLE stage1_outputs (thread_id TEXT, output TEXT);");
   memories.close();
-  const logs = new Database(path.join(codexRoot, "logs_2.sqlite"));
+  const logs = new Database(path.join(sqliteRoot, "logs_2.sqlite"));
   logs.exec("CREATE TABLE logs (thread_id TEXT, level TEXT, ts TEXT, body TEXT);");
   logs.close();
 }

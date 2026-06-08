@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { searchJsonl } from "./jsonl.js";
-import { claudeHome, codexHome, userHome } from "./paths.js";
-import { openCodexDb, rolloutThreadId } from "./codex.js";
+import { claudeHome, codexSqliteHome, userHome } from "./paths.js";
+import { codexRolloutRoots, openCodexDb, rolloutThreadId } from "./codex.js";
 
 export interface SearchOptions {
   includeSqlitePreview?: boolean | undefined;
@@ -16,7 +16,7 @@ export async function searchAll(query: string, home = userHome(), limit = 50, op
 }
 
 function searchCodexSqlite(query: string, home: string, limit: number, options: SearchOptions): Record<string, unknown>[] {
-  const filePath = path.join(codexHome(home), "state_5.sqlite");
+  const filePath = path.join(codexSqliteHome(home), "state_5.sqlite");
   if (!fs.existsSync(filePath)) return [];
   const opened = openCodexDb(filePath);
   if (!opened) return [];
@@ -67,7 +67,9 @@ function sqliteMatchedFields(row: Record<string, unknown>, query: string, option
 
 async function searchJsonlRoots(query: string, home: string, limit: number): Promise<Record<string, unknown>[]> {
   const files: string[] = [];
-  collectFiles(path.join(codexHome(home), "sessions"), (filePath) => !!rolloutThreadId(filePath), files);
+  for (const root of codexRolloutRoots(home)) {
+    collectFiles(root.path, (filePath) => !!rolloutThreadId(filePath), files);
+  }
   collectFiles(path.join(claudeHome(home), "projects"), (filePath) => filePath.endsWith(".jsonl"), files);
   const matches: Record<string, unknown>[] = [];
   for (const filePath of files) {
