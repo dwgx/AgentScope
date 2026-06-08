@@ -609,17 +609,34 @@ input {
 .recyclePanel {
   flex: none;
   display: grid;
-  gap: 7px;
   border-bottom: 1px solid var(--border-soft);
-  padding: 9px 10px;
+  padding: 0 10px;
   background: color-mix(in srgb, var(--surface) 62%, transparent);
 }
 
 .recycleHeader {
+  min-width: 0;
+  width: 100%;
+  height: 42px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 7px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.recycleHeader > svg {
+  flex: none;
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+
+.recycleHeader > svg.open {
+  transform: rotate(90deg);
 }
 
 .recycleHeader > div {
@@ -643,6 +660,28 @@ input {
 .recycleRows {
   display: grid;
   gap: 5px;
+}
+
+.recycleBody {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    grid-template-rows 180ms ease,
+    opacity 160ms ease,
+    padding-bottom 180ms ease;
+}
+
+.recyclePanel[data-open="true"] .recycleBody {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  padding-bottom: 9px;
+}
+
+.recycleBody > * {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .recycleRow {
@@ -1399,7 +1438,21 @@ input {
   grid-template-columns: 112px minmax(0, 1fr);
   align-items: start;
   border-bottom: 1px solid var(--border-soft);
+  border-left: 2px solid transparent;
   padding: 11px 8px;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.relationItem:hover,
+.relationItem:focus-visible,
+.relationItem.selected {
+  background: color-mix(in srgb, var(--surface2) 48%, transparent);
+}
+
+.relationItem.selected {
+  border-left-color: var(--accent);
 }
 
 .relationKind {
@@ -1477,7 +1530,8 @@ input {
 
 .relationEvidence span {
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 7px;
   align-items: baseline;
   overflow-wrap: anywhere;
@@ -1498,7 +1552,20 @@ input {
 }
 
 .relationToolbar {
-  grid-template-columns: minmax(230px, 1.15fr) minmax(210px, 0.85fr) minmax(220px, 1fr);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.relationToolbar .toolbarControl {
+  flex: 1 1 258px;
+  max-width: 100%;
+}
+
+.relationToolbar .relationSearch {
+  flex: 1 1 260px;
+  max-width: 100%;
 }
 
 .relationSearch {
@@ -1530,6 +1597,59 @@ input {
   grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
   padding: 6px 0;
   color: color-mix(in srgb, var(--text) 64%, var(--muted));
+}
+
+.relationInspectorEndpoint {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 8px;
+  background: var(--surface);
+}
+
+.relationInspectorEndpoint > span,
+.relationInspectorEndpoint > em {
+  color: var(--muted2);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.relationInspectorEndpoint > strong,
+.relationInspectorEndpoint > em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relationInspectorEndpoint > div {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.relationInspectorEndpoint button {
+  max-width: 100%;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--control);
+  cursor: pointer;
+}
+
+.relationInspectorEndpoint button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .activityBlock {
@@ -1840,6 +1960,16 @@ input {
   min-width: 74px;
 }
 
+.fontSettingControl {
+  width: min(318px, 100%);
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: end;
+  gap: 6px;
+}
+
 .fontCombo {
   position: relative;
   width: min(280px, 100%);
@@ -1898,13 +2028,18 @@ input {
   display: grid;
   gap: 4px;
   max-height: 230px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 96%, #000000);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
   padding: 5px;
   animation: menuIn 120ms ease both;
+}
+
+.fontComboMenu::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .fontComboSearch {
@@ -1924,14 +2059,35 @@ input {
 }
 
 .fontComboMenu button {
+  width: 100%;
   min-width: 0;
   height: 28px;
+  display: flex;
+  align-items: center;
   border-radius: 6px;
   color: var(--text);
   background: transparent;
   cursor: pointer;
   text-align: left;
   padding: 0 8px;
+}
+
+.fontResetButton {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--control);
+  cursor: pointer;
+}
+
+.fontResetButton:hover {
+  color: var(--text);
+  background: var(--hover);
 }
 
 .fontComboMenu button:hover,

@@ -5,11 +5,22 @@ import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, session as electronSession, shell } from "electron";
+import {
+  formatCommandForDisplay,
+  isSafeSessionId,
+  resolveSessionLauncher,
+  splitWindowsCommandLine,
+  type LaunchFileCandidate,
+  type SessionLaunchAction,
+  type SessionLaunchContext,
+  type SessionLaunchResult
+} from "@agentscope/shared";
 import type { Evidence, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === "development" || process.env.VITE_DEV_SERVER_URL;
+const isSmoke = process.env.AGENTSCOPE_SMOKE === "1" || process.argv.includes("--agentscope-smoke");
 const execFileAsync = promisify(execFile);
 
 let mainWindow: BrowserWindow | undefined;
@@ -25,17 +36,19 @@ async function createWindow(): Promise<void> {
     title: "AgentScope",
     autoHideMenuBar: true,
     backgroundColor: "#f7f5f0",
-    show: true,
+    show: !isSmoke,
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      offscreen: isSmoke
     }
   });
   log("browser window created");
   mainWindow.setMenuBarVisibility(false);
 
   const showWindow = (): void => {
+    if (isSmoke) return;
     mainWindow?.show();
     mainWindow?.focus();
   };
@@ -135,8 +148,8 @@ ipcMain.handle("session:delete", async (_event, agent: string, sessionId: string
   const core = await loadCore();
   return core.deleteSession(sessionId, asAgent(agent), createdAt ? { now: new Date(createdAt) } : undefined);
 });
-ipcMain.handle("session:launch", async (_event, agent: string, sessionId: string, action: string, cwd?: string) => {
-  return launchSessionCommand(agent, sessionId, action, cwd);
+ipcMain.handle("session:launch", async (_event, agent: string, sessionId: string, action: string, context?: SessionLaunchContext) => {
+  return launchSessionCommand(agent, sessionId, action, context);
 });
 ipcMain.handle("session:import", async (_event, backupDir: string) => {
   if (await isAllowedAgentScopeQuarantinePath(backupDir)) {
@@ -526,18 +539,18 @@ async function launchSessionCommand(
   agentValue: string,
   sessionId: string,
   action: string,
-  cwd?: string
-): Promise<{ ok: boolean; command: string; cwd?: string }> {
+  context?: SessionLaunchContext
+): Promise<SessionLaunchResult> {
   const agent = asAgent(agentValue);
   if (!agent) throw new Error("Unsupported agent for session launch.");
   if (action !== "resume" && action !== "fork") throw new Error("Unsupported session launch action.");
   if (!isSafeSessionId(sessionId)) throw new Error("Session id contains unsupported characters.");
-  const workingDirectory = cwd && await isAllowedLocalPath(cwd) && fs.existsSync(cwd) ? cwd : undefined;
-  const command = sessionLaunchCommand(agent, action, sessionId);
-  const args = sessionLaunchArgs(agent, action, sessionId);
+  const workingDirectory = context?.cwd && await isAllowedLocalPath(context.cwd) && fs.existsSync(context.cwd) ? context.cwd : undefined;
+  const snapshot = await buildSnapshot();
+  const resolution = resolveSessionLauncher(agent, action as SessionLaunchAction, sessionId, await launchResolverEnvironment(snapshot), context);
   const payload = JSON.stringify({
-    filePath: agent === "codex" ? "codex" : "claude",
-    args,
+    filePath: resolution.filePath,
+    args: resolution.args,
     workingDirectory
   });
   const script = `
@@ -562,23 +575,80 @@ Start-Process @parameters
   );
   return {
     ok: true,
-    command,
+    ...resolution,
+    command: formatCommandForDisplay(resolution.filePath, resolution.args),
     ...(workingDirectory ? { cwd: workingDirectory } : {})
   };
 }
 
-function sessionLaunchCommand(agent: "codex" | "claude", action: string, sessionId: string): string {
-  if (agent === "codex") return `codex ${action} ${sessionId}`;
-  return action === "fork" ? `claude --resume ${sessionId} --fork-session` : `claude --resume ${sessionId}`;
+async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
+  const existingFiles = new Set<string>();
+  const candidates: Record<string, LaunchFileCandidate[]> = {};
+  const addFile = (candidate: string | undefined) => {
+    if (!candidate) return;
+    if (!fs.existsSync(candidate)) return;
+    existingFiles.add(path.resolve(candidate).toLowerCase());
+  };
+  const addCandidates = async (command: string) => {
+    candidates[command] = await whereCommand(command);
+    for (const candidate of candidates[command] ?? []) addFile(candidate.path);
+  };
+  const addDirectCandidate = (command: string, candidatePath: string | undefined, source: string) => {
+    if (!candidatePath || !fs.existsSync(candidatePath)) return;
+    const list = candidates[command] ?? [];
+    list.push({
+      path: candidatePath,
+      source,
+      evidence: [{ source: "launcher.wellKnown", detail: source, path: candidatePath }]
+    });
+    candidates[command] = list;
+    addFile(candidatePath);
+  };
+  for (const item of snapshot.processes) {
+    addFile(item.executablePath);
+    for (const arg of item.commandLine ? splitWindowsCommandLine(item.commandLine) : []) {
+      if (/\.js$/i.test(arg)) addFile(arg);
+    }
+  }
+  addFile(process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "node_modules", "@openai", "codex", "bin", "codex.js") : undefined);
+  addFile(process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "nodejs", "node.exe") : undefined);
+  addFile(process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "nodejs", "node.exe") : undefined);
+  await Promise.all(["node.exe", "codex.cmd", "codex.exe", "claude.cmd", "claude.exe"].map(addCandidates));
+  const npmBin = process.env.APPDATA ? path.join(process.env.APPDATA, "npm") : undefined;
+  addDirectCandidate("codex.cmd", npmBin ? path.join(npmBin, "codex.cmd") : undefined, "appdata.npm.codexCmd");
+  addDirectCandidate("codex.exe", npmBin ? path.join(npmBin, "codex.exe") : undefined, "appdata.npm.codexExe");
+  addDirectCandidate("claude.cmd", npmBin ? path.join(npmBin, "claude.cmd") : undefined, "appdata.npm.claudeCmd");
+  addDirectCandidate("claude.exe", npmBin ? path.join(npmBin, "claude.exe") : undefined, "appdata.npm.claudeExe");
+  return {
+    homeDir: os.homedir(),
+    ...(process.env.APPDATA ? { appDataDir: process.env.APPDATA } : {}),
+    ...(process.env.ProgramFiles ? { programFilesDir: process.env.ProgramFiles } : {}),
+    ...(process.env["ProgramFiles(x86)"] ? { programFilesX86Dir: process.env["ProgramFiles(x86)"] } : {}),
+    pathCandidates: candidates,
+    existingFiles,
+    processes: snapshot.processes
+  };
 }
 
-function sessionLaunchArgs(agent: "codex" | "claude", action: string, sessionId: string): string[] {
-  if (agent === "codex") return [action, sessionId];
-  return action === "fork" ? ["--resume", sessionId, "--fork-session"] : ["--resume", sessionId];
-}
-
-function isSafeSessionId(sessionId: string): boolean {
-  return /^[A-Za-z0-9._:-]{3,160}$/.test(sessionId);
+async function whereCommand(command: string): Promise<LaunchFileCandidate[]> {
+  try {
+    const { stdout } = await execFileAsync("where.exe", [command], {
+      windowsHide: true,
+      timeout: 5000,
+      maxBuffer: 256 * 1024
+    });
+    return stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && fs.existsSync(line))
+      .map((line) => ({
+        path: line,
+        source: `where.${command}`,
+        evidence: [{ source: "launcher.where", detail: `where.exe ${command}`, path: line }]
+      }));
+  } catch {
+    return [];
+  }
 }
 
 function isNativeSqliteDiagnostic(name: string): boolean {

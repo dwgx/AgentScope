@@ -72,6 +72,9 @@ type Selection =
   | { type: "session"; value: AgentSession }
   | { type: "process"; value: AgentProcess }
   | null;
+type RelationSelection =
+  | { type: "relation"; value: Relation; source?: AgentSession | undefined; target?: AgentSession | undefined }
+  | null;
 type RelationSide = "source" | "target";
 
 interface SearchResultRecord extends Record<string, unknown> {
@@ -240,6 +243,7 @@ function App() {
   const [view, setViewState] = useState<View>(settings.defaultView);
   const [viewHistory, setViewHistory] = useState<View[]>([]);
   const [selectionKey, setSelectionKey] = useState<SelectionKey>(null);
+  const [relationSelectionKey, setRelationSelectionKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResultRecord[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -777,7 +781,13 @@ function App() {
       return;
     }
     try {
-      const result = await window.agentscope.launchSession(session.agent, session.sessionId, action, session.cwd);
+      const result = await window.agentscope.launchSession(session.agent, session.sessionId, action, {
+        cwd: session.cwd,
+        sessionPath: session.transcriptPath ?? session.path,
+        executablePath: session.path,
+        commandLine: session.commandLine,
+        pid: session.pid
+      });
       showNotice({
         message: t("toast.sessionLaunchStarted", {
           agent: session.agent,
@@ -785,9 +795,14 @@ function App() {
         }),
         items: [
           { label: t("inspector.fields.command"), value: result.command, tone: "ok" },
+          { label: t("inspector.fields.executable"), value: result.filePath, path: result.filePath, tone: "ok" },
+          { label: "launcher", value: result.source, tone: "ok" },
           ...(result.cwd ? [{ label: "cwd", value: result.cwd, path: result.cwd, tone: "ok" as const }] : [])
         ],
-        actions: result.cwd ? noticePathActions(result.cwd) : undefined,
+        actions: [
+          ...noticePathActions(result.filePath),
+          ...(result.cwd ? noticePathActions(result.cwd) : [])
+        ],
         ttlMs: 30000
       });
     } catch (error) {
@@ -868,6 +883,7 @@ function App() {
   );
   const relations = snapshot?.relations ?? [];
   const selected = resolveSelection(selectionKey, sessions, processes);
+  const selectedRelation = resolveRelationSelection(relationSelectionKey, relations, sessions);
   const activeProcesses = processes.filter((item) => item.agent !== "unknown");
   const matchedProcesses = processes.filter((item) => strongCandidates(item).length > 0).length;
   const initialLoading = snapshot === null && loading;
@@ -1006,7 +1022,9 @@ function App() {
               <RelationList
                 relations={relations}
                 sessions={sessions}
+                selectedKey={relationSelectionKey}
                 loading={initialLoading}
+                onSelectRelation={setRelationSelectionKey}
                 onSelectSession={(session) => {
                   setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId });
                   navigateView("sessions");
@@ -1041,19 +1059,31 @@ function App() {
             )}
           </section>
           {settings.inspector === "right" && (
-            <Inspector
-              selected={selected}
-              relations={relations}
-              loading={initialLoading}
-              showUnknownCandidates={settings.showUnknownCandidates}
-              transcriptPreviewEnabled={settings.transcriptPreviewEnabled}
-              highlightTarget={highlightTarget}
-              onOpenPath={(targetPath) => void openPath(targetPath)}
-              onRevealPath={(targetPath) => void revealPath(targetPath)}
-              onBackupSession={(session) => void backupSelectedSession(session)}
-              onDeleteSession={(session) => void deleteSelectedSession(session)}
-              onLaunchSession={(session, action) => void launchSelectedSession(session, action)}
-            />
+            view === "graph" ? (
+              <RelationInspector
+                selected={selectedRelation}
+                loading={initialLoading}
+                onSelectSession={(session) => {
+                  setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId });
+                  navigateView("sessions");
+                }}
+                onRevealPath={(targetPath) => void revealPath(targetPath)}
+              />
+            ) : (
+              <Inspector
+                selected={selected}
+                relations={relations}
+                loading={initialLoading}
+                showUnknownCandidates={settings.showUnknownCandidates}
+                transcriptPreviewEnabled={settings.transcriptPreviewEnabled}
+                highlightTarget={highlightTarget}
+                onOpenPath={(targetPath) => void openPath(targetPath)}
+                onRevealPath={(targetPath) => void revealPath(targetPath)}
+                onBackupSession={(session) => void backupSelectedSession(session)}
+                onDeleteSession={(session) => void deleteSelectedSession(session)}
+                onLaunchSession={(session, action) => void launchSelectedSession(session, action)}
+              />
+            )
           )}
         </div>
       </section>
@@ -1846,7 +1876,7 @@ function SessionList(props: {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [selectedSessionKeys, setSelectedSessionKeys] = useState<Set<string>>(() => new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
-  const [recycleOpen, setRecycleOpen] = useState(true);
+  const [recycleOpen, setRecycleOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     sessions: AgentSession[];
     x: number;
@@ -1927,19 +1957,18 @@ function SessionList(props: {
         subtitle={t("views.sessions.subtitle", { count: props.sessions.length })}
         action={
           <div className="paneHeaderActions">
-            <ActionButton label={t("views.sessions.recycle.title")} onClick={() => setRecycleOpen((current) => !current)} />
             <ActionButton label={t("inspector.actions.importSession")} onClick={props.onImportSession} />
           </div>
         }
       />
-      {recycleOpen && (
-        <RecycleBinPanel
-          items={props.quarantinedSessions}
-          onRestore={props.onRestoreQuarantinedSession}
-          onRevealPath={props.onRevealPath}
-          onOpenPath={props.onOpenPath}
-        />
-      )}
+      <RecycleBinPanel
+        open={recycleOpen}
+        items={props.quarantinedSessions}
+        onToggle={() => setRecycleOpen((current) => !current)}
+        onRestore={props.onRestoreQuarantinedSession}
+        onRevealPath={props.onRevealPath}
+        onOpenPath={props.onOpenPath}
+      />
       <div className="listToolbar">
         <MiniSegmentedControl
           value={groupMode}
@@ -2036,7 +2065,9 @@ function SessionList(props: {
 }
 
 function RecycleBinPanel(props: {
+  open: boolean;
   items: QuarantinedSession[];
+  onToggle: () => void;
   onRestore: (item: QuarantinedSession) => void;
   onRevealPath: (targetPath: string) => void;
   onOpenPath: (targetPath: string) => void;
@@ -2045,54 +2076,57 @@ function RecycleBinPanel(props: {
   const visible = props.items.slice(0, 6);
   const restorable = props.items.filter((item) => item.restorePossible).length;
   return (
-    <section className="recyclePanel">
-      <div className="recycleHeader">
+    <section className="recyclePanel" data-open={props.open ? "true" : "false"}>
+      <button type="button" className="recycleHeader" onClick={props.onToggle}>
+        <ChevronRight size={15} className={props.open ? "open" : ""} />
         <div>
           <strong>{t("views.sessions.recycle.title")}</strong>
           <span>{t("views.sessions.recycle.subtitle", { count: props.items.length, restorable })}</span>
         </div>
+      </button>
+      <div className="recycleBody">
+        {visible.length ? (
+          <div className="recycleRows">
+            {visible.map((item) => (
+              <div className={`recycleRow ${item.restorePossible ? "" : "blocked"}`} key={`${item.agent}:${item.sessionId}:${item.deletedAt}`}>
+                <AgentTile agent={item.agent} compact />
+                <div className="recycleMain">
+                  <div className="recycleTop">
+                    <strong>{item.title || short(item.sessionId)}</strong>
+                    <StatusPill status={item.restoreStatus} />
+                  </div>
+                  <div className="recycleMeta">
+                    <span className="mono">{short(item.sessionId)}</span>
+                    <span>{formatDate(item.deletedAt)}</span>
+                    {item.parentSessionId && <span>{t("views.sessions.recycle.parent", { id: short(item.parentSessionId) })}</span>}
+                    <span>{t("views.sessions.recycle.evidence", { files: item.movedFiles, db: item.databaseDeletes })}</span>
+                  </div>
+                  <div className="recyclePath mono">{item.cwd || item.transcriptPath || item.quarantineDir}</div>
+                  {item.blockers[0] && <div className="recycleBlocker">{item.blockers[0]}</div>}
+                </div>
+                <div className="recycleActions">
+                  <button className="iconButton tiny" type="button" title={t("common.action.openJournal")} onClick={() => props.onOpenPath(item.journalPath)}>
+                    <FileText size={15} />
+                  </button>
+                  <button className="iconButton tiny" type="button" title={t("common.action.reveal")} onClick={() => props.onRevealPath(item.quarantineDir)}>
+                    <FolderOpen size={15} />
+                  </button>
+                  <button
+                    className="compactAction"
+                    type="button"
+                    disabled={!item.restorePossible}
+                    onClick={() => props.onRestore(item)}
+                  >
+                    {t("views.sessions.recycle.restore")}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="recycleEmpty">{t("views.sessions.recycle.empty")}</div>
+        )}
       </div>
-      {visible.length ? (
-        <div className="recycleRows">
-          {visible.map((item) => (
-            <div className={`recycleRow ${item.restorePossible ? "" : "blocked"}`} key={`${item.agent}:${item.sessionId}:${item.deletedAt}`}>
-              <AgentTile agent={item.agent} compact />
-              <div className="recycleMain">
-                <div className="recycleTop">
-                  <strong>{item.title || short(item.sessionId)}</strong>
-                  <StatusPill status={item.restoreStatus} />
-                </div>
-                <div className="recycleMeta">
-                  <span className="mono">{short(item.sessionId)}</span>
-                  <span>{formatDate(item.deletedAt)}</span>
-                  {item.parentSessionId && <span>{t("views.sessions.recycle.parent", { id: short(item.parentSessionId) })}</span>}
-                  <span>{t("views.sessions.recycle.evidence", { files: item.movedFiles, db: item.databaseDeletes })}</span>
-                </div>
-                <div className="recyclePath mono">{item.cwd || item.transcriptPath || item.quarantineDir}</div>
-                {item.blockers[0] && <div className="recycleBlocker">{item.blockers[0]}</div>}
-              </div>
-              <div className="recycleActions">
-                <button className="iconButton tiny" type="button" title={t("common.action.openJournal")} onClick={() => props.onOpenPath(item.journalPath)}>
-                  <FileText size={15} />
-                </button>
-                <button className="iconButton tiny" type="button" title={t("common.action.reveal")} onClick={() => props.onRevealPath(item.quarantineDir)}>
-                  <FolderOpen size={15} />
-                </button>
-                <button
-                  className="compactAction"
-                  type="button"
-                  disabled={!item.restorePossible}
-                  onClick={() => props.onRestore(item)}
-                >
-                  {t("views.sessions.recycle.restore")}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="recycleEmpty">{t("views.sessions.recycle.empty")}</div>
-      )}
     </section>
   );
 }
@@ -2232,7 +2266,9 @@ function SessionContextMenu(props: {
 function RelationList(props: {
   relations: Relation[];
   sessions: AgentSession[];
+  selectedKey: string | null;
   loading: boolean;
+  onSelectRelation: (key: string | null) => void;
   onSelectSession: (session: AgentSession) => void;
   onRevealPath: (targetPath: string) => void;
 }) {
@@ -2244,6 +2280,16 @@ function RelationList(props: {
     () => filterRelations(props.relations, props.sessions, kindFilter, confidenceFilter, relationQuery),
     [confidenceFilter, kindFilter, props.relations, props.sessions, relationQuery]
   );
+  useEffect(() => {
+    const keys = new Set(filteredRelations.map(relationKey));
+    if (!filteredRelations.length) {
+      if (props.selectedKey) props.onSelectRelation(null);
+      return;
+    }
+    if (!props.selectedKey || !keys.has(props.selectedKey)) {
+      props.onSelectRelation(relationKey(filteredRelations[0]!));
+    }
+  }, [filteredRelations, props.selectedKey, props.onSelectRelation]);
   if (props.loading) return <LoadingState />;
   if (!props.relations.length) {
     return (
@@ -2288,15 +2334,32 @@ function RelationList(props: {
         </div>
       </div>
       <div className="relationList">
+        {!filteredRelations.length && (
+          <EmptyState
+            icon={<Network size={22} />}
+            title={t("views.relations.filteredEmptyTitle")}
+            detail={t("views.relations.filteredEmptyDetail")}
+          />
+        )}
         {filteredRelations.map((relation, index) => {
+          const key = relationKey(relation);
           const sourceLabel = t(`relations.endpoint.${relation.kind}.source`);
           const targetLabel = t(`relations.endpoint.${relation.kind}.target`);
           const source = relationEndpointDisplay(props.sessions, relation, "source", sourceLabel);
           const target = relationEndpointDisplay(props.sessions, relation, "target", targetLabel);
           return (
             <div
-              className="relationItem"
-                key={`${relation.kind}:${relation.sourceId}:${relation.targetId}:${index}`}
+              role="button"
+              tabIndex={0}
+              className={`relationItem ${props.selectedKey === key ? "selected" : ""}`}
+              key={`${key}:${index}`}
+              onClick={() => props.onSelectRelation(key)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  props.onSelectRelation(key);
+                }
+              }}
             >
               <div className="relationKind relationItemKind">
                 <Badge text={t(`relations.kind.${relation.kind}`)} />
@@ -2357,7 +2420,8 @@ function RelationEndpoint(props: {
       <button
         className="relationEndpoint relationEndpointButton"
         type="button"
-        onClick={() => {
+        onClick={(event) => {
+          event.stopPropagation();
           if (props.endpoint.session) props.onSelectSession(props.endpoint.session);
           else if (props.endpoint.path) props.onRevealPath(props.endpoint.path);
         }}
@@ -3093,7 +3157,13 @@ function FontSettingRow(props: {
       <div className="fontSettingControl">
         <FontComboBox value={props.value} fonts={props.fonts} onChange={props.onChange} />
         {props.defaultValue && props.value !== props.defaultValue && (
-          <button type="button" className="iconTextButton" onClick={() => props.onChange(props.defaultValue!)}>
+          <button
+            type="button"
+            className="fontResetButton"
+            title={props.defaultValue}
+            aria-label={`Reset ${props.label}`}
+            onClick={() => props.onChange(props.defaultValue!)}
+          >
             <RefreshCw size={13} />
           </button>
         )}
@@ -3264,6 +3334,7 @@ function fontOptions(installedFonts: string[], current?: string): string[] {
   ];
   const out: string[] = [];
   const seen = new Set<string>();
+  const installedKeys = new Set(installedFonts.map((font) => font.trim().toLowerCase()).filter(Boolean));
   const add = (font: string | undefined) => {
     const cleaned = font?.trim();
     if (!cleaned) return;
@@ -3272,7 +3343,10 @@ function fontOptions(installedFonts: string[], current?: string): string[] {
     seen.add(key);
     out.push(cleaned);
   };
-  add(current);
+  const currentKey = current?.trim().toLowerCase();
+  if (currentKey && !installedKeys.has(currentKey) && !preferred.some((font) => font.toLowerCase() === currentKey)) {
+    add(current);
+  }
   for (const font of preferred) add(font);
   for (const font of [...installedFonts].sort((left, right) => left.localeCompare(right))) add(font);
   return out;
@@ -3483,6 +3557,98 @@ function ActionButton(props: { label: string; onClick: () => void; disabled?: bo
     <button className="actionButton" disabled={props.disabled} onClick={props.onClick}>
       {props.label}
     </button>
+  );
+}
+
+function RelationInspector(props: {
+  selected: RelationSelection;
+  loading: boolean;
+  onSelectSession: (session: AgentSession) => void;
+  onRevealPath: (targetPath: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (props.loading) {
+    return (
+      <aside className="inspector">
+        <LoadingState compact />
+      </aside>
+    );
+  }
+  if (!props.selected) {
+    return (
+      <aside className="inspector">
+        <EmptyState
+          icon={<Network size={22} />}
+          title={t("views.relations.filteredEmptyTitle")}
+          detail={t("views.relations.filteredEmptyDetail")}
+        />
+      </aside>
+    );
+  }
+  const relation = props.selected.value;
+  return (
+    <aside className="inspector">
+      <InspectorHeader
+        title={t(`relations.kind.${relation.kind}`)}
+        subtitle={`${short(relation.sourceId)} -> ${short(relation.targetId)}`}
+        agent={props.selected.source?.agent ?? props.selected.target?.agent ?? "unknown"}
+      />
+      <FieldGroup title={t("inspector.relationDetail")}>
+        <Field label={t("views.relations.filter.kind")} value={t(`relations.kind.${relation.kind}`)} />
+        <Field label={t("views.relations.filter.confidence")} value={<ConfidenceBadge value={relation.confidence} />} />
+        <Field label={t("inspector.fields.source")} value={relation.sourceId} mono long />
+        <Field label={t("inspector.fields.target")} value={relation.targetId} mono long />
+      </FieldGroup>
+      <FieldGroup title={t("inspector.endpoints")}>
+        <RelationInspectorEndpoint
+          label={t(`relations.endpoint.${relation.kind}.source`)}
+          session={props.selected.source}
+          fallbackId={relation.sourceId}
+          onSelectSession={props.onSelectSession}
+          onRevealPath={props.onRevealPath}
+        />
+        <RelationInspectorEndpoint
+          label={t(`relations.endpoint.${relation.kind}.target`)}
+          session={props.selected.target}
+          fallbackId={relation.targetId}
+          onSelectSession={props.onSelectSession}
+          onRevealPath={props.onRevealPath}
+        />
+      </FieldGroup>
+      <EvidenceList evidence={relation.evidence} />
+    </aside>
+  );
+}
+
+function RelationInspectorEndpoint(props: {
+  label: string;
+  session?: AgentSession | undefined;
+  fallbackId: string;
+  onSelectSession: (session: AgentSession) => void;
+  onRevealPath: (targetPath: string) => void;
+}) {
+  const session = props.session;
+  const maybePath = session?.cwd ?? session?.transcriptPath;
+  return (
+    <div className="relationInspectorEndpoint">
+      <span>{props.label}</span>
+      <strong>{session ? displayTitle(session) : short(props.fallbackId)}</strong>
+      <em className="mono">{maybePath ?? props.fallbackId}</em>
+      <div>
+        {session && (
+          <button type="button" onClick={() => props.onSelectSession(session)}>
+            <CircleDot size={13} />
+            <span>{session.agent}</span>
+          </button>
+        )}
+        {maybePath && (
+          <button type="button" onClick={() => props.onRevealPath(maybePath)}>
+            <FolderOpen size={13} />
+            <span>{maybePath}</span>
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -4385,6 +4551,26 @@ function resolveSelection(
     return session ? { type: "session", value: session } : null;
   }
   return null;
+}
+
+function relationKey(relation: Relation): string {
+  const evidenceKey = relation.evidence[0]
+    ? `${relation.evidence[0].source}:${relation.evidence[0].path ?? ""}:${relation.evidence[0].field ?? ""}`
+    : "";
+  return `${relation.kind}:${relation.sourceId}:${relation.targetId}:${relation.confidence}:${evidenceKey}`;
+}
+
+function resolveRelationSelection(
+  key: string | null,
+  relations: Relation[],
+  sessions: AgentSession[]
+): RelationSelection {
+  if (!key) return null;
+  const relation = relations.find((item) => relationKey(item) === key);
+  if (!relation) return null;
+  const source = sessions.find((session) => session.sessionId === relation.sourceId);
+  const target = sessions.find((session) => session.sessionId === relation.targetId);
+  return { type: "relation", value: relation, source, target };
 }
 
 function sessionKey(session: AgentSession): string {

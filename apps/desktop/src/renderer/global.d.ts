@@ -7,7 +7,9 @@ import type {
   SessionImportResult,
   SessionOperationPlanResult,
   QuarantinedSession,
-  SessionRestoreResult
+  SessionRestoreResult,
+  SessionLaunchContext,
+  SessionLaunchResult
 } from "@agentscope/shared";
 
 export interface AppInfo {
@@ -51,8 +53,8 @@ export interface AgentScopeApi {
     agent: AgentKind,
     sessionId: string,
     action: "resume" | "fork",
-    cwd?: string
-  ): Promise<{ ok: boolean; command: string; cwd?: string }>;
+    context?: SessionLaunchContext
+  ): Promise<SessionLaunchResult>;
   importSessionBackup(backupDir: string): Promise<SessionImportResult | SessionRestoreResult>;
   listQuarantinedSessions(): Promise<QuarantinedSession[]>;
   restoreQuarantinedSession(quarantineDirOrJournalPath: string): Promise<SessionRestoreResult>;

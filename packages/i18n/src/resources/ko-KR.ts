@@ -227,6 +227,8 @@ export const koKR = {
     relations: {
       emptyTitle: "관계 없음",
       emptyDetail: "Codex spawn edge 또는 프로세스 관계가 색인되면 여기에 표시됩니다.",
+      filteredEmptyTitle: "일치하는 관계 없음",
+      filteredEmptyDetail: "관계 종류, 신뢰도 또는 검색어를 조정하세요.",
       subtitle_one: "{{count}}개의 세션/프로세스 그래프 edge",
       subtitle_other: "{{count}}개의 세션/프로세스 그래프 edge",
       filter: {
@@ -471,6 +473,8 @@ export const koKR = {
     control: "안전 제어",
     indexMetadata: "색인 메타데이터",
     relations: "관계",
+    relationDetail: "관계 상세",
+    endpoints: "엔드포인트",
     evidence: "증거",
     searchHit: "검색 hit",
     activity: "활동",
@@ -516,6 +520,8 @@ export const koKR = {
       parentAgentPid: "Agent parent",
       roleEvidence: "Role evidence",
       session: "세션",
+      source: "소스",
+      target: "대상",
       confidence: "신뢰도",
       status: "상태",
       updated: "업데이트",

@@ -227,6 +227,8 @@ export const zhCN = {
     relations: {
       emptyTitle: "没有关系",
       emptyDetail: "索引到 Codex 派生边或进程关系后会显示在这里。",
+      filteredEmptyTitle: "没有匹配关系",
+      filteredEmptyDetail: "调整关系类型、置信度或搜索文本后再查看匹配的图边。",
       subtitle_one: "{{count}} 条会话/进程图边",
       subtitle_other: "{{count}} 条会话/进程图边",
       filter: {
@@ -466,6 +468,8 @@ export const zhCN = {
     control: "安全控制",
     indexMetadata: "索引元数据",
     relations: "关系",
+    relationDetail: "关系详情",
+    endpoints: "端点",
     evidence: "证据",
     searchHit: "搜索命中",
     activity: "活动",
@@ -510,6 +514,8 @@ export const zhCN = {
       parentAgentPid: "Agent 父级",
       roleEvidence: "角色证据",
       session: "会话",
+      source: "来源",
+      target: "目标",
       confidence: "置信度",
       status: "状态",
       updated: "更新",

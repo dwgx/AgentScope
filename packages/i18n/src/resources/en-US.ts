@@ -241,6 +241,8 @@ export const enUS = {
     relations: {
       emptyTitle: "No relations found",
       emptyDetail: "Codex spawn edges or process relations will appear here when indexed.",
+      filteredEmptyTitle: "No matching relations",
+      filteredEmptyDetail: "Adjust relation type, confidence, or search text to show matching graph edges.",
       subtitle_one: "{{count}} session/process graph edge",
       subtitle_other: "{{count}} session/process graph edges",
       filter: {
@@ -496,6 +498,8 @@ export const enUS = {
     control: "Safe Control",
     indexMetadata: "Index Metadata",
     relations: "Relations",
+    relationDetail: "Relation Detail",
+    endpoints: "Endpoints",
     evidence: "Evidence",
     searchHit: "Search Hit",
     activity: "Activity",
@@ -541,6 +545,8 @@ export const enUS = {
       parentAgentPid: "Agent parent",
       roleEvidence: "Role evidence",
       session: "Session",
+      source: "Source",
+      target: "Target",
       confidence: "Confidence",
       status: "Status",
       updated: "Updated",

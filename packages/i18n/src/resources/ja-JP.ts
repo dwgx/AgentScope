@@ -228,6 +228,8 @@ export const jaJP = {
     relations: {
       emptyTitle: "関係が見つかりません",
       emptyDetail: "Codex の spawn edge またはプロセス関係が索引されるとここに表示されます。",
+      filteredEmptyTitle: "一致する関係がありません",
+      filteredEmptyDetail: "関係の種類、信頼度、検索語を調整してください。",
       subtitle_one: "{{count}} 件のセッション/プロセスグラフ辺",
       subtitle_other: "{{count}} 件のセッション/プロセスグラフ辺",
       filter: {
@@ -474,6 +476,8 @@ export const jaJP = {
     control: "安全な制御",
     indexMetadata: "索引メタデータ",
     relations: "関係",
+    relationDetail: "関係詳細",
+    endpoints: "端点",
     evidence: "証拠",
     searchHit: "検索ヒット",
     activity: "アクティビティ",
@@ -519,6 +523,8 @@ export const jaJP = {
       parentAgentPid: "Agent parent",
       roleEvidence: "Role evidence",
       session: "セッション",
+      source: "ソース",
+      target: "ターゲット",
       confidence: "信頼度",
       status: "状態",
       updated: "更新",
