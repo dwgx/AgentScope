@@ -2153,8 +2153,7 @@ input {
   text-transform: uppercase;
 }
 
-.codexModeInput,
-.codexModeSelect {
+.codexModeInput {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border-soft);
@@ -2166,8 +2165,20 @@ input {
   outline: none;
 }
 
+.codexModeCombo .fontComboTrigger {
+  min-height: 34px;
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--control) 76%, var(--surface));
+  font-family: var(--font-code);
+  font-size: 12px;
+}
+
+.codexModeCombo .fontComboMenu {
+  font-family: var(--font-code);
+}
+
 .codexModeInput:focus,
-.codexModeSelect:focus {
+.codexModeCombo.open .fontComboTrigger {
   border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
 }

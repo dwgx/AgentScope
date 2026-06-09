@@ -55,7 +55,7 @@ const editableConfigItems = new Map<
       detail: "Top-level Codex model used when CLI/app/profile/project settings do not override it.",
       valueKind: "string",
       options: recommendedModels,
-      risk: "low",
+      risk: "medium",
       source: "official_docs"
     }
   ],
@@ -68,7 +68,7 @@ const editableConfigItems = new Map<
       detail: "Optional model override for Codex review workflows.",
       valueKind: "string",
       options: recommendedModels,
-      risk: "low",
+      risk: "medium",
       source: "official_docs"
     }
   ],
@@ -81,7 +81,7 @@ const editableConfigItems = new Map<
       detail: "Reasoning effort for the default mode.",
       valueKind: "select",
       options: reasoningEffortValues,
-      risk: "low",
+      risk: "medium",
       source: "official_docs"
     }
   ],
@@ -94,7 +94,7 @@ const editableConfigItems = new Map<
       detail: "Plan mode reasoning override; model still inherits the default model.",
       valueKind: "select",
       options: planReasoningEffortValues,
-      risk: "low",
+      risk: "medium",
       source: "official_docs"
     }
   ],

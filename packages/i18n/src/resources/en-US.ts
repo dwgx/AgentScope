@@ -19,6 +19,7 @@ export const enUS = {
       revealJournal: "Reveal journal",
       repair: "Repair",
       advice: "Advice",
+      retry: "Retry",
       restart: "Restart",
       show: "Show",
       hide: "Hide"
@@ -239,6 +240,8 @@ export const enUS = {
       recycle: {
         title: "Recycle bin",
         subtitle: "{{count}} quarantined, {{restorable}} restorable",
+        loading: "Scanning quarantine entries...",
+        error: "Quarantine scan failed",
         empty: "No quarantined sessions.",
         restore: "Restore",
         restoreTitle: "Restore this quarantined session from its validated backup.",
@@ -601,9 +604,174 @@ export const enUS = {
         present: "protected auth present",
         missing: "no file auth"
       },
+      warning: {
+        authMetadataOnly:
+          "auth.json contains credential material. AgentScope shows metadata only and never opens, edits, or displays token fields.",
+        rawConfigBlocked:
+          "Raw config editing is blocked so high-risk keys cannot bypass structured confirmation.",
+        sensitiveKeysBlocked: "Sensitive key names were detected. Raw config editing is blocked.",
+        systemSkillsReadOnly: "System or plugin-provided skills are read-only.",
+        pluginWorkflowOnly: "Use Codex plugin workflows for install/remove; AgentScope shows evidence only.",
+        sensitiveConfigBlocked: "Sensitive config keys were detected; raw editing is blocked.",
+        highRiskConfirm: "High-risk setting; execution requires explicit confirmation.",
+        archivedCountUnreadable: "Could not read archived thread count from state_5.sqlite.",
+        sqliteMetadataUnreadable: "Could not open this SQLite database read-only for metadata."
+      },
       overview: {
         codexHome: "Official CODEX_HOME root. AgentScope inventories metadata only.",
         sqliteHome: "SQLite state root after config/env resolution."
+      },
+      items: {
+        model: {
+          label: "Default model",
+          detail: "Top-level Codex model used when CLI, app, profile, or project settings do not override it."
+        },
+        review_model: {
+          label: "Review model",
+          detail: "Optional model override for Codex review workflows."
+        },
+        model_reasoning_effort: {
+          label: "Default reasoning",
+          detail: "Reasoning effort for the default mode."
+        },
+        plan_mode_reasoning_effort: {
+          label: "Plan reasoning",
+          detail: "Plan mode reasoning override; model still inherits the default model."
+        },
+        approval_policy: {
+          label: "Approval policy",
+          detail: "Controls when Codex asks before running higher-risk operations."
+        },
+        approvals_reviewer: {
+          label: "Approval reviewer",
+          detail: "Routes eligible approval prompts through the user or auto-review."
+        },
+        sandbox_mode: {
+          label: "Sandbox mode",
+          detail: "Controls local filesystem and network isolation for shell work."
+        },
+        web_search: {
+          label: "Web search",
+          detail: "Cached, live, or disabled web search behavior for Codex."
+        },
+        hide_agent_reasoning: {
+          label: "Hide reasoning",
+          detail: "Display policy only; AgentScope still does not read hidden vendor reasoning."
+        },
+        show_raw_agent_reasoning: {
+          label: "Show raw reasoning",
+          detail: "High-risk display setting. AgentScope never displays hidden vendor reasoning regardless of this value."
+        },
+        service_tier: {
+          label: "Service tier",
+          detail: "Optional OpenAI service tier selection when supported by the account/model."
+        },
+        windows_sandbox: {
+          label: "Windows sandbox",
+          detail: "Windows-specific sandbox implementation preference."
+        },
+        features_multi_agent: {
+          label: "Multi-agent feature",
+          detail: "Feature flag for Codex multi-agent/subagent support when present in this Codex build."
+        },
+        memories_generate_memories: {
+          label: "Generate memories",
+          detail: "Controls whether Codex generates memory records. AgentScope does not read memory bodies."
+        },
+        memories_use_memories: {
+          label: "Use memories",
+          detail: "Controls whether Codex injects saved memories. AgentScope does not display memory bodies."
+        }
+      },
+      surfaceText: {
+        config_global: {
+          label: "config.toml",
+          detail: "Codex user configuration shared by CLI, IDE, and desktop. Use the structured controls above for safe edits."
+        },
+        agents_global: {
+          label: "AGENTS.md",
+          detail: "Personal Codex instructions. Codex Desktop personalization writes here."
+        },
+        mcp_summary: {
+          label: "MCP servers",
+          detail: "MCP server tables from config.toml. Edit the config document to change them."
+        },
+        archive_summary: {
+          label: "Archived threads",
+          detail: "Archived thread count only; AgentScope does not display archived conversation bodies here."
+        },
+        memory_summary: {
+          label: "Memories",
+          detail: "Memory database presence only. AgentScope does not read or edit memory content."
+        },
+        database_state: {
+          label: "state_5.sqlite",
+          detail: "Codex state database schema and row-count summary only. Transcript bodies are not read here."
+        },
+        database_goals: {
+          label: "goals_1.sqlite",
+          detail: "Codex goals database schema and row-count summary only."
+        },
+        database_memories: {
+          label: "memories_1.sqlite",
+          detail: "Codex memories database schema and row-count summary only; memory content is not read."
+        },
+        database_logs: {
+          label: "logs_2.sqlite",
+          detail: "Codex logs database schema and row-count summary only. Log body text is not restored or displayed."
+        },
+        database_dev: {
+          label: "sqlite/codex-dev.db",
+          detail: "Codex Desktop automation database schema and row-count summary only."
+        },
+        browser_state: {
+          label: "Browser integration",
+          detail: "Browser profile/cache presence only. AgentScope does not read browsing data."
+        },
+        browser_output: {
+          label: "Browser automation output",
+          detail: "Playwright console/page artifacts counted by extension only; AgentScope does not read page snapshots or console bodies."
+        },
+        computer_use_state: {
+          label: "Computer Use integration",
+          detail: "Computer Use local state presence only. AgentScope does not launch desktop control."
+        },
+        mcp_node_runtime: {
+          label: "MCP node runtime",
+          detail: "Installed MCP Node runtime metadata. AgentScope does not execute package scripts or inspect package source bodies."
+        },
+        node_repl_runtime: {
+          label: "Node REPL runtime",
+          detail: "Node REPL runtime presence and entry count only; active exec bodies stay unread."
+        },
+        tmp_arg0: {
+          label: "Codex arg temp files",
+          detail: "Temporary command argument folders counted only. AgentScope does not open generated command files here."
+        },
+        vendor_imports_cache: {
+          label: "Vendor imports cache",
+          detail: "Vendor import cache presence only; cached marketplace bodies stay unread."
+        },
+        pets_state: {
+          label: "Pets state",
+          detail: "Codex Desktop local state presence only."
+        },
+        plugins_summary: {
+          label: "Plugins",
+          detail: "Installed plugin cache and config summary. AgentScope does not edit plugin cache bytes directly."
+        },
+        rules: {
+          label: "Rule file",
+          detail: "Codex command approval rules in the user config layer."
+        },
+        skill: {
+          label: "User skill",
+          detail: "User skill authoring surface. AgentScope edits only SKILL.md and backs it up first."
+        },
+        skillReadOnly: {
+          label: "Read-only skill",
+          detail: "Bundled/system skill surface. AgentScope keeps it read-only."
+        }
       },
       mcpTitle: "MCP servers from config.toml",
       noMcp: "No MCP server table was found in the current config.toml.",

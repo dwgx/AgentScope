@@ -18,6 +18,7 @@ export const koKR = {
       revealJournal: "journal 표시",
       repair: "수리",
       advice: "조언",
+      retry: "다시 시도",
       restart: "다시 시작",
       show: "표시",
       hide: "숨기기"
@@ -222,6 +223,8 @@ export const koKR = {
       noCwd: "No cwd",
       recycle: {
         title: "휴지통",
+        loading: "격리 항목 스캔 중...",
+        error: "격리 스캔 실패",
         subtitle: "{{count}}개 격리, {{restorable}}개 복원 가능",
         empty: "격리된 세션이 없습니다.",
         restore: "복원",
@@ -378,6 +381,173 @@ export const koKR = {
     clearCache: {
       label: "앱 캐시 지우기",
       detail: "AgentScope 앱 데이터 아래 Electron 렌더러 캐시를 지웁니다."
+    },
+    codexControl: {
+      ...enUS.settings.codexControl,
+      items: {
+        model: {
+          label: "기본 모델",
+          detail: "CLI, 앱, profile 또는 project 설정이 덮어쓰지 않을 때 쓰는 Codex 최상위 모델입니다."
+        },
+        review_model: {
+          label: "Review 모델",
+          detail: "Codex review 워크플로용 선택적 모델 override입니다."
+        },
+        model_reasoning_effort: {
+          label: "기본 추론 강도",
+          detail: "Default 모드의 reasoning effort입니다."
+        },
+        plan_mode_reasoning_effort: {
+          label: "Plan 추론 강도",
+          detail: "Plan 모드 reasoning override입니다. 모델은 여전히 기본 모델을 상속합니다."
+        },
+        approval_policy: {
+          label: "승인 정책",
+          detail: "고위험 작업 전에 Codex가 언제 확인을 요청할지 제어합니다."
+        },
+        approvals_reviewer: {
+          label: "승인 검토자",
+          detail: "대상 승인 프롬프트를 사용자 또는 자동 검토로 보냅니다."
+        },
+        sandbox_mode: {
+          label: "샌드박스 모드",
+          detail: "shell 작업의 로컬 파일 시스템 및 네트워크 격리를 제어합니다."
+        },
+        web_search: {
+          label: "웹 검색",
+          detail: "Codex 웹 검색 동작을 cached, live, disabled로 제어합니다."
+        },
+        hide_agent_reasoning: {
+          label: "reasoning 숨기기",
+          detail: "표시 정책만 제어합니다. AgentScope는 hidden vendor reasoning을 읽지 않습니다."
+        },
+        show_raw_agent_reasoning: {
+          label: "raw reasoning 표시",
+          detail: "고위험 표시 설정입니다. 이 값과 관계없이 AgentScope는 hidden vendor reasoning을 표시하지 않습니다."
+        },
+        service_tier: {
+          label: "서비스 tier",
+          detail: "계정/모델이 지원할 때 선택하는 OpenAI service tier입니다."
+        },
+        windows_sandbox: {
+          label: "Windows 샌드박스",
+          detail: "Windows 전용 샌드박스 구현 선호 설정입니다."
+        },
+        features_multi_agent: {
+          label: "Multi-agent 기능",
+          detail: "현재 Codex build에 multi-agent/subagent 지원이 있을 때 쓰는 feature flag입니다."
+        },
+        memories_generate_memories: {
+          label: "기억 생성",
+          detail: "Codex가 memory record를 생성할지 제어합니다. AgentScope는 memory 본문을 읽지 않습니다."
+        },
+        memories_use_memories: {
+          label: "기억 사용",
+          detail: "Codex가 저장된 memory를 주입할지 제어합니다. AgentScope는 memory 본문을 표시하지 않습니다."
+        }
+      },
+      surfaceText: {
+        config_global: {
+          label: "config.toml",
+          detail: "CLI, IDE, desktop이 공유하는 Codex 사용자 설정입니다. 안전 편집은 위 구조화 컨트롤을 사용합니다."
+        },
+        agents_global: {
+          label: "AGENTS.md",
+          detail: "개인 Codex 지시문입니다. Codex Desktop personalization이 여기에 씁니다."
+        },
+        mcp_summary: {
+          label: "MCP 서버",
+          detail: "config.toml의 MCP server table입니다. 변경하려면 config document를 편집합니다."
+        },
+        archive_summary: {
+          label: "보관된 threads",
+          detail: "보관 thread 수만 표시합니다. AgentScope는 여기서 보관 대화 본문을 표시하지 않습니다."
+        },
+        memory_summary: {
+          label: "기억",
+          detail: "memory database 존재만 표시합니다. AgentScope는 memory content를 읽거나 편집하지 않습니다."
+        },
+        database_state: {
+          label: "state_5.sqlite",
+          detail: "Codex state database schema와 행 수 summary만 표시합니다. transcript 본문은 읽지 않습니다."
+        },
+        database_goals: {
+          label: "goals_1.sqlite",
+          detail: "Codex goals database schema와 행 수 summary만 표시합니다."
+        },
+        database_memories: {
+          label: "memories_1.sqlite",
+          detail: "Codex memories database schema와 행 수 summary만 표시합니다. memory content는 읽지 않습니다."
+        },
+        database_logs: {
+          label: "logs_2.sqlite",
+          detail: "Codex logs database schema와 행 수 summary만 표시합니다. log body text는 복원하거나 표시하지 않습니다."
+        },
+        database_dev: {
+          label: "sqlite/codex-dev.db",
+          detail: "Codex Desktop automation database schema와 행 수 summary만 표시합니다."
+        },
+        browser_state: {
+          label: "Browser 통합",
+          detail: "browser profile/cache 존재만 표시합니다. AgentScope는 browsing data를 읽지 않습니다."
+        },
+        browser_output: {
+          label: "Browser automation 출력",
+          detail: "Playwright console/page artifacts를 확장자별로 세기만 합니다. page snapshots나 console 본문은 읽지 않습니다."
+        },
+        computer_use_state: {
+          label: "Computer Use 통합",
+          detail: "Computer Use local state 존재만 표시합니다. AgentScope는 desktop control을 실행하지 않습니다."
+        },
+        mcp_node_runtime: {
+          label: "MCP Node runtime",
+          detail: "설치된 MCP Node runtime metadata입니다. package scripts 실행이나 source bodies 검사는 하지 않습니다."
+        },
+        node_repl_runtime: {
+          label: "Node REPL runtime",
+          detail: "Node REPL runtime 존재와 entry count만 표시합니다. active exec bodies는 읽지 않습니다."
+        },
+        tmp_arg0: {
+          label: "Codex 인수 임시 파일",
+          detail: "temporary command argument folders만 셉니다. 생성된 command files는 열지 않습니다."
+        },
+        vendor_imports_cache: {
+          label: "Vendor imports cache",
+          detail: "vendor import cache 존재만 표시합니다. cached marketplace bodies는 읽지 않습니다."
+        },
+        pets_state: {
+          label: "Pets state",
+          detail: "Codex Desktop local state 존재만 표시합니다."
+        },
+        plugins_summary: {
+          label: "Plugins",
+          detail: "installed plugin cache와 config summary입니다. AgentScope는 plugin cache bytes를 직접 편집하지 않습니다."
+        },
+        rules: {
+          label: "Rule file",
+          detail: "사용자 config layer의 Codex command approval rules입니다."
+        },
+        skill: {
+          label: "User skill",
+          detail: "사용자 skill authoring surface입니다. AgentScope는 SKILL.md만 편집하고 먼저 백업합니다."
+        },
+        skillReadOnly: {
+          label: "Read-only skill",
+          detail: "bundled/system skill surface입니다. AgentScope는 읽기 전용으로 유지합니다."
+        }
+      },
+      warning: {
+        authMetadataOnly:
+          "auth.json에는 자격 증명 자료가 포함됩니다. AgentScope는 메타데이터만 표시하며 token 필드를 열거나 편집하거나 표시하지 않습니다.",
+        rawConfigBlocked: "고위험 키가 구조화된 확인을 우회하지 못하도록 raw config 편집을 차단합니다.",
+        sensitiveKeysBlocked: "민감한 키 이름이 감지되었습니다. raw config 편집을 차단합니다.",
+        systemSkillsReadOnly: "시스템 또는 플러그인 제공 skills는 읽기 전용입니다.",
+        pluginWorkflowOnly: "install/remove에는 Codex plugin 워크플로를 사용하세요. AgentScope는 증거만 표시합니다.",
+        sensitiveConfigBlocked: "민감한 config 키가 감지되었습니다. raw 편집을 차단합니다.",
+        highRiskConfirm: "고위험 설정입니다. 실행하려면 명시적 확인이 필요합니다.",
+        archivedCountUnreadable: "state_5.sqlite에서 보관된 thread 수를 읽지 못했습니다.",
+        sqliteMetadataUnreadable: "이 SQLite 데이터베이스를 메타데이터용 읽기 전용으로 열지 못했습니다."
+      }
     },
     theme: {
       label: "테마",

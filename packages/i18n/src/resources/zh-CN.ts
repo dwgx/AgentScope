@@ -8,6 +8,7 @@ export const zhCN = {
     ...enUS.common,
     agent: { codex: "codex", claude: "claude", unknown: "unknown" },
     action: {
+      retry: "重试",
       open: "打开",
       refresh: "刷新",
       reset: "重置",
@@ -222,6 +223,8 @@ export const zhCN = {
       noCwd: "没有 cwd",
       recycle: {
         title: "回收站",
+        loading: "正在扫描隔离项...",
+        error: "隔离区扫描失败",
         subtitle: "{{count}} 个隔离项，{{restorable}} 个可恢复",
         empty: "没有隔离会话。",
         restore: "恢复",
@@ -454,6 +457,169 @@ export const zhCN = {
       overview: {
         codexHome: "官方 CODEX_HOME 根目录。AgentScope 只盘点元数据。",
         sqliteHome: "解析 config/env 后的 SQLite 状态根目录。"
+      },
+      items: {
+        model: {
+          label: "默认模型",
+          detail: "CLI、应用、profile 或项目设置未覆盖时使用的顶层 Codex 模型。"
+        },
+        review_model: {
+          label: "Review 模型",
+          detail: "Codex review 工作流的可选模型覆盖。"
+        },
+        model_reasoning_effort: {
+          label: "默认推理强度",
+          detail: "Default 模式使用的 reasoning effort。"
+        },
+        plan_mode_reasoning_effort: {
+          label: "Plan 推理强度",
+          detail: "Plan 模式的 reasoning 覆盖；模型仍继承默认模型。"
+        },
+        approval_policy: {
+          label: "审批策略",
+          detail: "控制 Codex 在运行较高风险操作前何时请求确认。"
+        },
+        approvals_reviewer: {
+          label: "审批审核者",
+          detail: "把符合条件的审批提示交给用户或自动审核。"
+        },
+        sandbox_mode: {
+          label: "沙箱模式",
+          detail: "控制 shell 工作时的本地文件系统和网络隔离。"
+        },
+        web_search: {
+          label: "联网搜索",
+          detail: "控制 Codex 使用缓存、实时或禁用联网搜索。"
+        },
+        hide_agent_reasoning: {
+          label: "隐藏 reasoning",
+          detail: "仅是显示策略；AgentScope 仍不会读取供应商隐藏 reasoning。"
+        },
+        show_raw_agent_reasoning: {
+          label: "显示原始 reasoning",
+          detail: "高风险显示设置。无论该值如何，AgentScope 都不会展示供应商隐藏 reasoning。"
+        },
+        service_tier: {
+          label: "服务层级",
+          detail: "账号/模型支持时使用的可选 OpenAI service tier。"
+        },
+        windows_sandbox: {
+          label: "Windows 沙箱",
+          detail: "Windows 专用沙箱实现偏好。"
+        },
+        features_multi_agent: {
+          label: "多 Agent 功能",
+          detail: "当前 Codex 构建支持时，用于 multi-agent/subagent 的功能开关。"
+        },
+        memories_generate_memories: {
+          label: "生成记忆",
+          detail: "控制 Codex 是否生成 memory 记录。AgentScope 不读取 memory 正文。"
+        },
+        memories_use_memories: {
+          label: "使用记忆",
+          detail: "控制 Codex 是否注入已保存 memory。AgentScope 不展示 memory 正文。"
+        }
+      },
+      surfaceText: {
+        config_global: {
+          label: "config.toml",
+          detail: "CLI、IDE 和桌面共用的 Codex 用户配置。安全编辑请使用上方结构化控件。"
+        },
+        agents_global: {
+          label: "AGENTS.md",
+          detail: "个人 Codex 指令。Codex Desktop 个性化内容会写入这里。"
+        },
+        mcp_summary: {
+          label: "MCP 服务器",
+          detail: "config.toml 中的 MCP server 表。需要修改时请编辑配置文档。"
+        },
+        archive_summary: {
+          label: "已归档线程",
+          detail: "只统计归档线程数量；AgentScope 不在这里展示归档对话正文。"
+        },
+        memory_summary: {
+          label: "记忆",
+          detail: "只展示 memory 数据库是否存在。AgentScope 不读取或编辑 memory 内容。"
+        },
+        database_state: {
+          label: "state_5.sqlite",
+          detail: "只展示 Codex state 数据库 schema 和行数摘要，不读取转录正文。"
+        },
+        database_goals: {
+          label: "goals_1.sqlite",
+          detail: "只展示 Codex goals 数据库 schema 和行数摘要。"
+        },
+        database_memories: {
+          label: "memories_1.sqlite",
+          detail: "只展示 Codex memories 数据库 schema 和行数摘要；不读取 memory 内容。"
+        },
+        database_logs: {
+          label: "logs_2.sqlite",
+          detail: "只展示 Codex logs 数据库 schema 和行数摘要；不恢复或展示 log 正文。"
+        },
+        database_dev: {
+          label: "sqlite/codex-dev.db",
+          detail: "只展示 Codex Desktop automation 数据库 schema 和行数摘要。"
+        },
+        browser_state: {
+          label: "浏览器集成",
+          detail: "只检查浏览器 profile/cache 是否存在。AgentScope 不读取浏览数据。"
+        },
+        browser_output: {
+          label: "浏览器自动化输出",
+          detail: "只按扩展名统计 Playwright console/page 产物；不读取页面快照或 console 正文。"
+        },
+        computer_use_state: {
+          label: "Computer Use 集成",
+          detail: "只检查 Computer Use 本地状态是否存在。AgentScope 不启动桌面控制。"
+        },
+        mcp_node_runtime: {
+          label: "MCP Node 运行时",
+          detail: "已安装 MCP Node runtime 元数据。AgentScope 不执行 package scripts，也不检查源码正文。"
+        },
+        node_repl_runtime: {
+          label: "Node REPL 运行时",
+          detail: "只展示 Node REPL runtime 是否存在和条目数量；active exec 正文保持不读。"
+        },
+        tmp_arg0: {
+          label: "Codex 参数临时文件",
+          detail: "只统计临时命令参数目录。AgentScope 不打开这里生成的命令文件。"
+        },
+        vendor_imports_cache: {
+          label: "供应商导入缓存",
+          detail: "只检查 vendor import cache 是否存在；缓存 marketplace 正文保持不读。"
+        },
+        pets_state: {
+          label: "Pets 状态",
+          detail: "只检查 Codex Desktop 本地状态是否存在。"
+        },
+        plugins_summary: {
+          label: "插件",
+          detail: "已安装插件缓存和配置摘要。AgentScope 不直接编辑插件缓存字节。"
+        },
+        rules: {
+          label: "规则文件",
+          detail: "用户配置层中的 Codex 命令审批规则。"
+        },
+        skill: {
+          label: "用户 skill",
+          detail: "用户 skill 编写面。AgentScope 只编辑 SKILL.md，并且先备份。"
+        },
+        skillReadOnly: {
+          label: "只读 skill",
+          detail: "内置/系统 skill 面。AgentScope 保持只读。"
+        }
+      },
+      warning: {
+        authMetadataOnly: "auth.json 包含凭据材料。AgentScope 只显示元数据，绝不打开、编辑或展示 token 字段。",
+        rawConfigBlocked: "已阻止原始配置编辑，避免高风险键绕过结构化确认。",
+        sensitiveKeysBlocked: "检测到敏感键名。已阻止原始配置编辑。",
+        systemSkillsReadOnly: "系统或插件提供的 skills 为只读。",
+        pluginWorkflowOnly: "安装/移除请使用 Codex plugin 工作流；AgentScope 只展示证据。",
+        sensitiveConfigBlocked: "检测到敏感 config 键；已阻止原始编辑。",
+        highRiskConfirm: "高风险设置；执行前需要显式确认。",
+        archivedCountUnreadable: "无法从 state_5.sqlite 读取归档线程数量。",
+        sqliteMetadataUnreadable: "无法以只读方式打开此 SQLite 数据库读取元数据。"
       },
       mcpTitle: "config.toml 中的 MCP 服务器",
       noMcp: "当前 config.toml 没有找到 MCP server 表。",

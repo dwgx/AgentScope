@@ -295,6 +295,9 @@ function App() {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [installedFonts, setInstalledFonts] = useState<string[]>([]);
   const [quarantinedSessions, setQuarantinedSessions] = useState<QuarantinedSession[]>([]);
+  const [quarantineLoading, setQuarantineLoading] = useState(false);
+  const [quarantineError, setQuarantineError] = useState<string | undefined>();
+  const [quarantineLoaded, setQuarantineLoaded] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | undefined>();
   const [doctorLoading, setDoctorLoading] = useState(true);
   const [doctorError, setDoctorError] = useState<string | undefined>();
@@ -390,7 +393,8 @@ function App() {
       const nextSnapshot = await withTimeout(window.agentscope.getSnapshot(), 30000, "snapshot:get");
       setSnapshot(nextSnapshot);
       setSelectionKey((current) => current ?? firstSelectionKey(nextSnapshot));
-      void refreshSecondaryState();
+      void refreshDoctorState();
+      if (view === "sessions") void refreshQuarantineState();
     } catch (error) {
       const message = errorMessage(error);
       setSnapshotError(message);
@@ -400,7 +404,7 @@ function App() {
     }
   }
 
-  function refreshSecondaryState() {
+  function refreshDoctorState() {
     setDoctorLoading(true);
     setDoctorError(undefined);
     withTimeout(window.agentscope.getDoctor(), 20000, "doctor:get")
@@ -414,11 +418,20 @@ function App() {
         showNotice({ message: t("toast.operationFailed", { message }) });
       })
       .finally(() => setDoctorLoading(false));
-    withTimeout(window.agentscope.listQuarantinedSessions(), 20000, "session:listQuarantine")
-      .then(setQuarantinedSessions)
+  }
+
+  function refreshQuarantineState() {
+    setQuarantineLoading(true);
+    setQuarantineError(undefined);
+    withTimeout(window.agentscope.listQuarantinedSessions(), 45000, "session:listQuarantine")
+      .then((items) => {
+        setQuarantinedSessions(items);
+        setQuarantineLoaded(true);
+      })
       .catch((error: unknown) => {
-        showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
-      });
+        setQuarantineError(errorMessage(error));
+      })
+      .finally(() => setQuarantineLoading(false));
   }
 
   useEffect(() => {
@@ -426,6 +439,12 @@ function App() {
     void window.agentscope.getAppInfo().then(setAppInfo);
     void window.agentscope.listFonts().then((fonts) => setInstalledFonts(fonts));
   }, []);
+
+  useEffect(() => {
+    if (view === "sessions" && !quarantineLoaded && !quarantineLoading && !quarantineError) {
+      void refreshQuarantineState();
+    }
+  }, [quarantineError, quarantineLoaded, quarantineLoading, view]);
 
   useEffect(() => {
     syncControlMode(settings.controlMode);
@@ -850,6 +869,7 @@ function App() {
       const result = await window.agentscope.restoreQuarantinedSession(item.quarantineDir);
       showImportOrRestoreNotice(result);
       await refresh();
+      void refreshQuarantineState();
     } catch (error) {
       showNotice({
         message: t("toast.operationFailed", { message: errorMessage(error) }),
@@ -857,6 +877,7 @@ function App() {
         ttlMs: 30000
       });
       await refresh();
+      void refreshQuarantineState();
     }
   }
 
@@ -1123,12 +1144,15 @@ function App() {
               <SessionList
                 sessions={sessions}
                 quarantinedSessions={quarantinedSessions}
+                quarantineLoading={quarantineLoading}
+                quarantineError={quarantineError}
                 selectedKey={selected?.type === "session" ? sessionKey(selected.value) : undefined}
                 loading={initialLoading}
                 loadError={snapshotError}
                 highlightTarget={highlightTarget}
                 onImportSession={() => void chooseImportSession()}
                 onRestoreQuarantinedSession={(item) => void restoreQuarantinedSession(item)}
+                onRefreshQuarantine={() => void refreshQuarantineState()}
                 onRevealPath={(targetPath) => void revealPath(targetPath)}
                 onOpenPath={(targetPath) => void openPath(targetPath)}
                 onSelect={(session) =>
@@ -2033,12 +2057,15 @@ function ToolbarControl(props: { label: string; children: ReactNode }) {
 function SessionList(props: {
   sessions: AgentSession[];
   quarantinedSessions: QuarantinedSession[];
+  quarantineLoading: boolean;
+  quarantineError?: string | undefined;
   selectedKey?: string | undefined;
   loading: boolean;
   loadError?: string | undefined;
   highlightTarget: SearchResultRecord | null;
   onImportSession: () => void;
   onRestoreQuarantinedSession: (item: QuarantinedSession) => void;
+  onRefreshQuarantine: () => void;
   onRevealPath: (targetPath: string) => void;
   onOpenPath: (targetPath: string) => void;
   onSelect: (session: AgentSession) => void;
@@ -2145,7 +2172,10 @@ function SessionList(props: {
       <RecycleBinPanel
         open={recycleOpen}
         items={props.quarantinedSessions}
+        loading={props.quarantineLoading}
+        error={props.quarantineError}
         onToggle={() => setRecycleOpen((current) => !current)}
+        onRefresh={props.onRefreshQuarantine}
         onRestore={props.onRestoreQuarantinedSession}
         onRevealPath={props.onRevealPath}
         onOpenPath={props.onOpenPath}
@@ -2256,7 +2286,10 @@ function SessionList(props: {
 function RecycleBinPanel(props: {
   open: boolean;
   items: QuarantinedSession[];
+  loading: boolean;
+  error?: string | undefined;
   onToggle: () => void;
+  onRefresh: () => void;
   onRestore: (item: QuarantinedSession) => void;
   onRevealPath: (targetPath: string) => void;
   onOpenPath: (targetPath: string) => void;
@@ -2270,11 +2303,24 @@ function RecycleBinPanel(props: {
         <ChevronRight size={15} className={props.open ? "open" : ""} />
         <div>
           <strong>{t("views.sessions.recycle.title")}</strong>
-          <span>{t("views.sessions.recycle.subtitle", { count: props.items.length, restorable })}</span>
+          <span>
+            {props.loading
+              ? t("views.sessions.recycle.loading")
+              : props.error
+                ? t("views.sessions.recycle.error")
+                : t("views.sessions.recycle.subtitle", { count: props.items.length, restorable })}
+          </span>
         </div>
       </button>
       <div className="recycleBody">
-        {visible.length ? (
+        {props.error ? (
+          <div className="recycleEmpty">
+            <span>{props.error}</span>
+            <ActionButton label={t("common.action.retry")} onClick={props.onRefresh} />
+          </div>
+        ) : props.loading ? (
+          <div className="recycleEmpty">{t("views.sessions.recycle.loading")}</div>
+        ) : visible.length ? (
           <div className="recycleRows">
             {visible.map((item) => (
               <div className={`recycleRow ${item.restorePossible ? "" : "blocked"}`} key={`${item.agent}:${item.sessionId}:${item.deletedAt}`}>
@@ -3803,7 +3849,7 @@ function CodexControlCenterPanel(props: {
       {props.snapshot?.warnings.length ? (
         <div className="codexControlWarnings">
           {props.snapshot.warnings.slice(0, 6).map((warning) => (
-            <span key={warning}>{warning}</span>
+            <span key={warning}>{localizedCodexControlWarning(warning, (key) => String(t(key)))}</span>
           ))}
         </div>
       ) : null}
@@ -3832,8 +3878,8 @@ function CodexControlCenterPanel(props: {
               disabled={!item.targetPath}
             >
               <span>
-                <strong>{item.label}</strong>
-                <em>{item.detail}</em>
+                <strong>{localizedCodexControlItemLabel(item, (key) => String(t(key)))}</strong>
+                <em>{localizedCodexControlItemDetail(item, (key) => String(t(key)))}</em>
               </span>
               <Badge text={item.status} tone={item.status === "ok" ? "ok" : "warn"} />
             </button>
@@ -3884,11 +3930,11 @@ function CodexControlItemRow(props: {
   return (
     <div className={`codexControlItem risk-${props.item.risk}`}>
       <div className="codexControlItemMeta">
-        <strong>{props.item.label}</strong>
-        <span>{props.item.detail}</span>
+        <strong>{localizedCodexControlItemLabel(props.item, (key) => String(t(key)))}</strong>
+        <span>{localizedCodexControlItemDetail(props.item, (key) => String(t(key)))}</span>
         <code className="mono">{props.item.keyPath}</code>
         {props.item.warnings.length > 0 && (
-          <em>{props.item.warnings.slice(0, 2).join(" ")}</em>
+          <em>{props.item.warnings.slice(0, 2).map((warning) => localizedCodexControlWarning(warning, (key) => String(t(key)))).join(" ")}</em>
         )}
       </div>
       <div className="codexControlItemControl">
@@ -3899,19 +3945,16 @@ function CodexControlItemRow(props: {
             onChange={(next) => props.onChange(next)}
           />
         ) : props.item.options?.length ? (
-          <select
-            className="codexModeSelect"
+          <SearchableComboBox
+            className="codexModeCombo"
             value={String(value)}
+            options={props.item.options}
             disabled={props.disabled}
-            onChange={(event) => props.onChange(event.target.value || undefined)}
-          >
-            <option value="">{t("settings.codexControl.inheritDefault")}</option>
-            {props.item.options.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+            allowCustom={false}
+            allowEmpty
+            emptyLabel={t("settings.codexControl.inheritDefault")}
+            onChange={(next) => props.onChange(next || undefined)}
+          />
         ) : (
           <input
             className="codexModeInput mono"
@@ -3996,13 +4039,8 @@ function CodexModeConfigPanel(props: {
         </div>
       </div>
       {props.snapshot?.warnings.map((warning) => (
-        <p className="inlineError" key={warning}>{warning}</p>
+        <p className="inlineError" key={warning}>{localizedCodexControlWarning(warning, (key) => String(t(key)))}</p>
       ))}
-      <datalist id="codex-model-suggestions">
-        {modelOptions.map((option) => (
-          <option key={option} value={option} />
-        ))}
-      </datalist>
       <div className="codexModeGrid">
         <CodexModeCard
           title={t("settings.codexControl.mode.default")}
@@ -4108,7 +4146,7 @@ function CodexModelField(props: {
   label: string;
   value: string;
   options: string[];
-  placeholder: string;
+  placeholder?: string | undefined;
   disabled?: boolean | undefined;
   allowUnset?: boolean | undefined;
   unsetLabel?: string | undefined;
@@ -4117,13 +4155,15 @@ function CodexModelField(props: {
   return (
     <label className="codexModeField">
       <span>{props.label}</span>
-      <input
-        className="codexModeInput mono"
-        list="codex-model-suggestions"
+      <SearchableComboBox
+        className="codexModeCombo"
         value={props.value}
-        placeholder={props.allowUnset ? props.unsetLabel : props.placeholder}
+        options={props.options}
         disabled={props.disabled}
-        onChange={(event) => props.onChange(event.target.value)}
+        allowCustom
+        allowEmpty={props.allowUnset}
+        emptyLabel={props.allowUnset ? props.unsetLabel : props.placeholder}
+        onChange={props.onChange}
       />
     </label>
   );
@@ -4141,19 +4181,16 @@ function CodexReasoningField(props: {
   return (
     <label className="codexModeField">
       <span>{props.label}</span>
-      <select
-        className="codexModeSelect"
+      <SearchableComboBox
+        className="codexModeCombo"
         value={props.value}
+        options={props.options}
         disabled={props.disabled}
-        onChange={(event) => props.onChange(event.target.value)}
-      >
-        {props.allowUnset && <option value="">{props.unsetLabel ?? ""}</option>}
-        {props.options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+        allowCustom={false}
+        allowEmpty={props.allowUnset}
+        emptyLabel={props.unsetLabel}
+        onChange={props.onChange}
+      />
     </label>
   );
 }
@@ -4202,12 +4239,14 @@ function CodexControlDetail(props: {
   }
   const summaryEntries = Object.entries(props.surface.summary ?? {});
   const revealPath = revealableCodexSurfacePath(props.surface);
+  const surfaceLabel = localizedCodexSurfaceLabel(props.surface, (key) => String(t(key)));
+  const surfaceDetail = localizedCodexSurfaceDetail(props.surface, (key) => String(t(key)));
   return (
     <div className="codexControlDetail">
       <div className="codexControlMeta">
         <div>
-          <strong>{props.surface.label}</strong>
-          <span>{props.surface.detail}</span>
+          <strong>{surfaceLabel}</strong>
+          <span>{surfaceDetail}</span>
           {props.surface.path && <code className="mono">{compactPath(props.surface.path)}</code>}
         </div>
         <div className="settingInlineActions">
@@ -4237,7 +4276,7 @@ function CodexControlDetail(props: {
       {props.surface.warnings.length > 0 && (
         <div className="codexControlWarnings">
           {props.surface.warnings.map((warning) => (
-            <span key={warning}>{warning}</span>
+            <span key={warning}>{localizedCodexControlWarning(warning, (key) => String(t(key)))}</span>
           ))}
         </div>
       )}
@@ -4369,17 +4408,41 @@ function FontComboBox(props: {
   fonts: string[];
   onChange: (value: string) => void;
 }) {
+  return (
+    <SearchableComboBox
+      value={props.value}
+      options={fontOptions(props.fonts, props.value)}
+      onChange={props.onChange}
+      allowCustom
+      renderOption={(font) => <span style={{ fontFamily: fontStack(font, ["sans-serif"]) }}>{font}</span>}
+      renderValue={(font) => <span style={{ fontFamily: fontStack(font, ["sans-serif"]) }}>{font}</span>}
+    />
+  );
+}
+
+function SearchableComboBox(props: {
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+  allowCustom?: boolean | undefined;
+  allowEmpty?: boolean | undefined;
+  emptyLabel?: string | undefined;
+  disabled?: boolean | undefined;
+  className?: string | undefined;
+  renderOption?: ((value: string) => ReactNode) | undefined;
+  renderValue?: ((value: string) => ReactNode) | undefined;
+}) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const comboRef = useRef<HTMLDivElement | null>(null);
   const options = useMemo(() => {
     const query = filter.trim().toLowerCase();
-    const all = fontOptions(props.fonts, props.value);
+    const all = comboOptions(props.options, props.value, props.allowEmpty ? props.emptyLabel ?? "" : undefined);
     const filtered = all.filter((font) => !query || font.toLowerCase().includes(query));
     if (query || filtered.includes(props.value)) return filtered.slice(0, 18);
     return [props.value, ...filtered.filter((font) => font !== props.value).slice(0, 17)];
-  }, [filter, props.fonts, props.value]);
+  }, [filter, props.allowEmpty, props.emptyLabel, props.options, props.value]);
 
   useEffect(() => {
     const currentIndex = options.findIndex((font) => font === props.value);
@@ -4398,15 +4461,16 @@ function FontComboBox(props: {
 
   const commit = (value: string) => {
     const next = value.trim();
-    if (next) props.onChange(next);
+    if (next || props.allowEmpty) props.onChange(optionValueFromLabel(next, props.emptyLabel));
     setFilter("");
   };
 
   return (
-    <div className={`fontCombo ${open ? "open" : ""}`} ref={comboRef}>
+    <div className={`fontCombo ${props.className ?? ""} ${open ? "open" : ""}`} ref={comboRef}>
       <button
         type="button"
         className="fontComboTrigger"
+        disabled={props.disabled}
         onClick={() => setOpen((value) => !value)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
@@ -4416,7 +4480,7 @@ function FontComboBox(props: {
           if (event.key === "Escape") setOpen(false);
         }}
       >
-        <span style={{ fontFamily: fontStack(props.value, ["sans-serif"]) }}>{props.value}</span>
+        {props.renderValue ? props.renderValue(displayComboValue(props.value, props.emptyLabel)) : <span>{displayComboValue(props.value, props.emptyLabel)}</span>}
         <ChevronRight size={15} className={open ? "open" : ""} />
       </button>
       {open && (
@@ -4441,8 +4505,14 @@ function FontComboBox(props: {
               }
               if (event.key === "Enter") {
                 event.preventDefault();
-                commit(options[highlightedIndex] ?? filter);
-                setOpen(false);
+                const selected = options[highlightedIndex];
+                if (selected !== undefined) {
+                  commit(selected);
+                  setOpen(false);
+                } else if (props.allowCustom) {
+                  commit(filter);
+                  setOpen(false);
+                }
               }
             }}
             spellCheck={false}
@@ -4451,24 +4521,151 @@ function FontComboBox(props: {
             <button
               type="button"
               key={font}
-              className={`${font === props.value ? "active" : ""} ${
+              className={`${optionValueFromLabel(font, props.emptyLabel) === props.value ? "active" : ""} ${
                 index === highlightedIndex ? "highlighted" : ""
               }`}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                props.onChange(font);
+                props.onChange(optionValueFromLabel(font, props.emptyLabel));
                 setFilter("");
                 setOpen(false);
               }}
             >
-              <span style={{ fontFamily: fontStack(font, ["sans-serif"]) }}>{font}</span>
+              {props.renderOption ? props.renderOption(font) : <span>{font}</span>}
             </button>
           ))}
-          {!options.length && <span className="fontComboEmpty">{filter}</span>}
+          {!options.length && (
+            props.allowCustom ? (
+              <button
+                type="button"
+                className="highlighted"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  commit(filter);
+                  setOpen(false);
+                }}
+              >
+                <span>{filter}</span>
+              </button>
+            ) : (
+              <span className="fontComboEmpty">{filter}</span>
+            )
+          )}
         </div>
       )}
     </div>
   );
+}
+
+function comboOptions(options: string[], current: string, emptyLabel?: string | undefined): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string | undefined) => {
+    const next = value?.trim();
+    if (!next) return;
+    const key = next.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(next);
+  };
+  if (emptyLabel !== undefined) add(emptyLabel);
+  add(current);
+  for (const option of options) add(option);
+  return out;
+}
+
+function optionValueFromLabel(value: string, emptyLabel?: string | undefined): string {
+  return emptyLabel !== undefined && value === emptyLabel ? "" : value;
+}
+
+function displayComboValue(value: string, emptyLabel?: string | undefined): string {
+  return value || emptyLabel || "";
+}
+
+function localizedCodexControlWarning(warning: string, translate: (key: string) => string): string {
+  const key = codexControlWarningKey(warning);
+  return key ? translate(key) : warning;
+}
+
+function localizedCodexControlItemLabel(item: CodexControlCenterItem, translate: (key: string) => string): string {
+  const key = codexControlItemTextKey(item, "label");
+  return key ? translate(key) : item.label;
+}
+
+function localizedCodexControlItemDetail(item: CodexControlCenterItem, translate: (key: string) => string): string {
+  const key = codexControlItemTextKey(item, "detail");
+  return key ? translate(key) : item.detail;
+}
+
+function localizedCodexSurfaceLabel(surface: CodexControlSurface, translate: (key: string) => string): string {
+  const key = codexSurfaceTextKey(surface, "label");
+  return key ? translate(key) : surface.label;
+}
+
+function localizedCodexSurfaceDetail(surface: CodexControlSurface, translate: (key: string) => string): string {
+  const key = codexSurfaceTextKey(surface, "detail");
+  return key ? translate(key) : surface.detail;
+}
+
+function codexControlItemTextKey(item: CodexControlCenterItem, field: "label" | "detail"): string | undefined {
+  const configKey = item.id.startsWith("config.") ? item.id.slice("config.".length).replace(/\./g, "_") : undefined;
+  if (configKey) return `settings.codexControl.items.${configKey}.${field}`;
+  if (item.id.startsWith("surface.")) {
+    const surfaceId = item.id.slice("surface.".length);
+    const key = codexSurfaceIdTextKey(surfaceId, field);
+    if (key) return key;
+  }
+  return undefined;
+}
+
+function codexSurfaceTextKey(surface: CodexControlSurface, field: "label" | "detail"): string | undefined {
+  return codexSurfaceIdTextKey(surface.id, field);
+}
+
+function codexSurfaceIdTextKey(id: string, field: "label" | "detail"): string | undefined {
+  const exact = new Set([
+    "config.global",
+    "agents.global",
+    "mcp.summary",
+    "archive.summary",
+    "memory.summary",
+    "database.state",
+    "database.goals",
+    "database.memories",
+    "database.logs",
+    "database.dev",
+    "browser.state",
+    "browser.output",
+    "computer-use.state",
+    "mcp-node.runtime",
+    "node-repl.runtime",
+    "tmp.arg0",
+    "vendor-imports.cache",
+    "pets.state",
+    "plugins.summary"
+  ]);
+  if (exact.has(id)) return `settings.codexControl.surfaceText.${id.replace(/[-.]/g, "_")}.${field}`;
+  if (id.startsWith("rules:")) return `settings.codexControl.surfaceText.rules.${field}`;
+  if (id.startsWith("skill:")) return `settings.codexControl.surfaceText.skill.${field}`;
+  if (id.startsWith("skill-readonly:")) return `settings.codexControl.surfaceText.skillReadOnly.${field}`;
+  return undefined;
+}
+
+function codexControlWarningKey(warning: string): string | undefined {
+  if (/auth\.json is credential material/i.test(warning)) return "settings.codexControl.warning.authMetadataOnly";
+  if (/Raw config editing is blocked so high-risk keys cannot bypass structured confirmation/i.test(warning)) {
+    return "settings.codexControl.warning.rawConfigBlocked";
+  }
+  if (/Sensitive key names were detected\. Raw config editing is blocked/i.test(warning)) {
+    return "settings.codexControl.warning.sensitiveKeysBlocked";
+  }
+  if (/System or plugin-provided skills are read-only/i.test(warning)) return "settings.codexControl.warning.systemSkillsReadOnly";
+  if (/Use Codex plugin workflows for install\/remove/i.test(warning)) return "settings.codexControl.warning.pluginWorkflowOnly";
+  if (/Sensitive config keys detected; raw editing is blocked/i.test(warning)) return "settings.codexControl.warning.sensitiveConfigBlocked";
+  if (/High-risk setting; execution requires explicit confirmation/i.test(warning)) return "settings.codexControl.warning.highRiskConfirm";
+  if (/Could not read archived thread count/i.test(warning)) return "settings.codexControl.warning.archivedCountUnreadable";
+  if (/Could not open this SQLite database read-only/i.test(warning)) return "settings.codexControl.warning.sqliteMetadataUnreadable";
+  return undefined;
 }
 
 function TypographyPreviewClean(props: { settings: AppSettings }) {

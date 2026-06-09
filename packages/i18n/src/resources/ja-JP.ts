@@ -18,6 +18,7 @@ export const jaJP = {
       revealJournal: "journal を表示",
       repair: "修復",
       advice: "助言",
+      retry: "再試行",
       restart: "再起動",
       show: "表示",
       hide: "非表示"
@@ -223,6 +224,8 @@ export const jaJP = {
       noCwd: "No cwd",
       recycle: {
         title: "ごみ箱",
+        loading: "隔離エントリをスキャン中...",
+        error: "隔離スキャンに失敗しました",
         subtitle: "{{count}} 件隔離、{{restorable}} 件復元可能",
         empty: "隔離されたセッションはありません。",
         restore: "復元",
@@ -381,6 +384,173 @@ export const jaJP = {
     clearCache: {
       label: "アプリキャッシュを消去",
       detail: "AgentScope アプリデータ内の Electron レンダラーキャッシュを消去します。"
+    },
+    codexControl: {
+      ...enUS.settings.codexControl,
+      items: {
+        model: {
+          label: "デフォルトモデル",
+          detail: "CLI、アプリ、profile、project 設定で上書きされない場合に使う Codex のトップレベルモデル。"
+        },
+        review_model: {
+          label: "Review モデル",
+          detail: "Codex review ワークフロー用の任意のモデル上書き。"
+        },
+        model_reasoning_effort: {
+          label: "デフォルト推論強度",
+          detail: "Default モードの reasoning effort。"
+        },
+        plan_mode_reasoning_effort: {
+          label: "Plan 推論強度",
+          detail: "Plan モードの reasoning 上書き。モデルはデフォルトモデルを継承します。"
+        },
+        approval_policy: {
+          label: "承認ポリシー",
+          detail: "高リスク操作の前に Codex がいつ確認を求めるかを制御します。"
+        },
+        approvals_reviewer: {
+          label: "承認レビュー担当",
+          detail: "対象の承認プロンプトをユーザーまたは自動レビューへ送ります。"
+        },
+        sandbox_mode: {
+          label: "サンドボックスモード",
+          detail: "shell 作業のローカルファイルシステムとネットワーク隔離を制御します。"
+        },
+        web_search: {
+          label: "Web 検索",
+          detail: "Codex の Web 検索を cached、live、disabled で制御します。"
+        },
+        hide_agent_reasoning: {
+          label: "reasoning を隠す",
+          detail: "表示ポリシーのみです。AgentScope は hidden vendor reasoning を読みません。"
+        },
+        show_raw_agent_reasoning: {
+          label: "raw reasoning を表示",
+          detail: "高リスク表示設定です。この値に関係なく AgentScope は hidden vendor reasoning を表示しません。"
+        },
+        service_tier: {
+          label: "サービス tier",
+          detail: "アカウント/モデルが対応する場合の OpenAI service tier 選択。"
+        },
+        windows_sandbox: {
+          label: "Windows サンドボックス",
+          detail: "Windows 固有のサンドボックス実装設定。"
+        },
+        features_multi_agent: {
+          label: "Multi-agent 機能",
+          detail: "この Codex build に multi-agent/subagent サポートがある場合の feature flag。"
+        },
+        memories_generate_memories: {
+          label: "記憶を生成",
+          detail: "Codex が memory record を生成するかを制御します。AgentScope は memory 本文を読みません。"
+        },
+        memories_use_memories: {
+          label: "記憶を使用",
+          detail: "Codex が保存済み memory を注入するかを制御します。AgentScope は memory 本文を表示しません。"
+        }
+      },
+      surfaceText: {
+        config_global: {
+          label: "config.toml",
+          detail: "CLI、IDE、desktop で共有される Codex ユーザー設定。安全な編集には上の構造化コントロールを使います。"
+        },
+        agents_global: {
+          label: "AGENTS.md",
+          detail: "個人用 Codex 指示。Codex Desktop の personalization はここへ書き込みます。"
+        },
+        mcp_summary: {
+          label: "MCP サーバー",
+          detail: "config.toml の MCP server table。変更する場合は config document を編集します。"
+        },
+        archive_summary: {
+          label: "アーカイブ済みスレッド",
+          detail: "アーカイブ数のみ。AgentScope はここでアーカイブ会話本文を表示しません。"
+        },
+        memory_summary: {
+          label: "記憶",
+          detail: "memory database の存在のみ。AgentScope は memory content を読んだり編集したりしません。"
+        },
+        database_state: {
+          label: "state_5.sqlite",
+          detail: "Codex state database の schema と行数 summary のみ。transcript 本文は読みません。"
+        },
+        database_goals: {
+          label: "goals_1.sqlite",
+          detail: "Codex goals database の schema と行数 summary のみ。"
+        },
+        database_memories: {
+          label: "memories_1.sqlite",
+          detail: "Codex memories database の schema と行数 summary のみ。memory content は読みません。"
+        },
+        database_logs: {
+          label: "logs_2.sqlite",
+          detail: "Codex logs database の schema と行数 summary のみ。log body text は復元または表示しません。"
+        },
+        database_dev: {
+          label: "sqlite/codex-dev.db",
+          detail: "Codex Desktop automation database の schema と行数 summary のみ。"
+        },
+        browser_state: {
+          label: "Browser 連携",
+          detail: "browser profile/cache の存在のみ。AgentScope は browsing data を読みません。"
+        },
+        browser_output: {
+          label: "Browser automation 出力",
+          detail: "Playwright console/page artifacts を拡張子別に数えるだけです。page snapshots や console 本文は読みません。"
+        },
+        computer_use_state: {
+          label: "Computer Use 連携",
+          detail: "Computer Use local state の存在のみ。AgentScope は desktop control を起動しません。"
+        },
+        mcp_node_runtime: {
+          label: "MCP Node runtime",
+          detail: "インストール済み MCP Node runtime metadata。package scripts の実行や source bodies の検査はしません。"
+        },
+        node_repl_runtime: {
+          label: "Node REPL runtime",
+          detail: "Node REPL runtime の存在と entry count のみ。active exec bodies は読みません。"
+        },
+        tmp_arg0: {
+          label: "Codex 引数一時ファイル",
+          detail: "temporary command argument folders を数えるだけです。生成された command files は開きません。"
+        },
+        vendor_imports_cache: {
+          label: "Vendor imports cache",
+          detail: "vendor import cache の存在のみ。cached marketplace bodies は読みません。"
+        },
+        pets_state: {
+          label: "Pets state",
+          detail: "Codex Desktop local state の存在のみ。"
+        },
+        plugins_summary: {
+          label: "Plugins",
+          detail: "installed plugin cache と config summary。AgentScope は plugin cache bytes を直接編集しません。"
+        },
+        rules: {
+          label: "Rule file",
+          detail: "ユーザー config layer の Codex command approval rules。"
+        },
+        skill: {
+          label: "User skill",
+          detail: "ユーザー skill authoring surface。AgentScope は SKILL.md のみ編集し、先にバックアップします。"
+        },
+        skillReadOnly: {
+          label: "Read-only skill",
+          detail: "bundled/system skill surface。AgentScope は読み取り専用にします。"
+        }
+      },
+      warning: {
+        authMetadataOnly:
+          "auth.json には認証情報が含まれます。AgentScope はメタデータのみを表示し、token フィールドを開く、編集する、表示することはありません。",
+        rawConfigBlocked: "高リスクキーが構造化確認を迂回しないよう、raw config 編集はブロックされています。",
+        sensitiveKeysBlocked: "機密キー名を検出しました。raw config 編集はブロックされています。",
+        systemSkillsReadOnly: "システムまたはプラグイン提供の skills は読み取り専用です。",
+        pluginWorkflowOnly: "install/remove には Codex plugin ワークフローを使用してください。AgentScope は証拠のみを表示します。",
+        sensitiveConfigBlocked: "機密 config キーを検出しました。raw 編集はブロックされています。",
+        highRiskConfirm: "高リスク設定です。実行には明示的な確認が必要です。",
+        archivedCountUnreadable: "state_5.sqlite からアーカイブ済みスレッド数を読み取れませんでした。",
+        sqliteMetadataUnreadable: "この SQLite データベースをメタデータ用に読み取り専用で開けませんでした。"
+      }
     },
     theme: {
       label: "テーマ",
