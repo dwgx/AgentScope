@@ -60,7 +60,7 @@ import claudeLogoUrl from "./assets/claude-color.svg";
 import codexLogoUrl from "./assets/codex-color.svg";
 import "./styles.css";
 
-type View = "processes" | "sessions" | "graph" | "doctor" | "settings";
+type View = "processes" | "sessions" | "graph" | "doctor" | "codexControl" | "settings";
 type SettingsSection = "general" | "appearance" | "indexing" | "runtime" | "codexControl" | "diagnostics";
 type ThemeName = "graphite" | "blueprint" | "contrast" | "midnight";
 type DensityName = "compact" | "comfortable" | "spacious";
@@ -85,6 +85,7 @@ type CodexModeDraft = {
   reviewModel: string;
 };
 type CodexControlDraftMap = Record<string, string | number | boolean | undefined>;
+type DiagnosticNoticeAction = "repair" | "advice";
 type NoticePathRole =
   | "text"
   | "journal"
@@ -191,7 +192,7 @@ interface AppSettings {
   runtimeWin32Enabled: boolean;
   runtimeWindowTitlesEnabled: boolean;
   runtimeCandidatesEnabled: boolean;
-  defaultView: Exclude<View, "settings">;
+  defaultView: Exclude<View, "settings" | "codexControl">;
   controlMode: ControlMode;
   inspector: "right" | "hidden";
   fontScale: "small" | "normal" | "large";
@@ -213,6 +214,7 @@ interface AppSettings {
 }
 
 const settingsKey = "agentscope.settings.v2";
+const seenDiagnosticKey = "agentscope.seenDiagnostics.v1";
 const defaultSettings: AppSettings = {
   language: "system",
   theme: "graphite",
@@ -294,6 +296,9 @@ function App() {
   const [installedFonts, setInstalledFonts] = useState<string[]>([]);
   const [quarantinedSessions, setQuarantinedSessions] = useState<QuarantinedSession[]>([]);
   const [snapshotError, setSnapshotError] = useState<string | undefined>();
+  const [doctorLoading, setDoctorLoading] = useState(true);
+  const [doctorError, setDoctorError] = useState<string | undefined>();
+  const [seenDiagnostics, setSeenDiagnostics] = useState<Set<string>>(() => loadSeenDiagnostics());
 
   function syncControlMode(mode: ControlMode) {
     void window.agentscope
@@ -396,11 +401,19 @@ function App() {
   }
 
   function refreshSecondaryState() {
+    setDoctorLoading(true);
+    setDoctorError(undefined);
     withTimeout(window.agentscope.getDoctor(), 20000, "doctor:get")
-      .then(setDoctor)
+      .then((checks) => {
+        setDoctor(checks);
+        setDoctorError(undefined);
+      })
       .catch((error: unknown) => {
-        showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
-      });
+        const message = errorMessage(error);
+        setDoctorError(message);
+        showNotice({ message: t("toast.operationFailed", { message }) });
+      })
+      .finally(() => setDoctorLoading(false));
     withTimeout(window.agentscope.listQuarantinedSessions(), 20000, "session:listQuarantine")
       .then(setQuarantinedSessions)
       .catch((error: unknown) => {
@@ -480,6 +493,7 @@ function App() {
     setQuery("");
     setResults([]);
     setHighlightTarget(null);
+    setSearchOpen(false);
   }
 
   async function exportCurrentSnapshot() {
@@ -953,6 +967,31 @@ function App() {
     setNotice({ id: Date.now(), ...rest, ttlMs: ttlMs ?? settings.notificationTtlMs });
   }
 
+  function markDiagnosticSeen(key: string) {
+    setSeenDiagnostics((current) => {
+      if (current.has(key)) return current;
+      const next = new Set(current);
+      next.add(key);
+      saveSeenDiagnostics(next);
+      return next;
+    });
+  }
+
+  function showDiagnosticAdvice(check: Diagnostic, action: DiagnosticNoticeAction = "advice") {
+    const pathValue = firstPathInText(check.detail);
+    const detail = diagnosticHelp(check.name, check.detail, (key, options) => String(options ? t(key, options) : t(key)));
+    showNotice({
+      message: action === "repair" ? t("toast.diagnosticRepairComplete") : t("toast.diagnosticAdvice"),
+      items: [
+        { label: t("common.status.diagnostic"), value: check.name, tone: "warn" as const },
+        { label: t("common.action.advice"), value: detail, tone: "warn" as const },
+        ...(pathValue ? [{ label: t("common.path.evidence"), value: pathValue, path: pathValue, tone: "ok" as const }] : [])
+      ],
+      actions: pathValue ? noticePathActions(pathValue, "directory") : [],
+      ttlMs: 30000
+    });
+  }
+
   const sessions = snapshot?.sessions ?? [];
   const rawProcesses = snapshot?.processes ?? [];
   const processes = useMemo(
@@ -977,9 +1016,9 @@ function App() {
       codex: sessions.filter((item) => item.agent === "codex").length,
       claude: sessions.filter((item) => item.agent === "claude").length,
       matched: matchedProcesses,
-      warnings: doctor.filter((item) => item.status === "warn").length
+      warnings: unreadDiagnosticCount(doctor, seenDiagnostics)
     }),
-    [sessions, processes, matchedProcesses, doctor]
+    [sessions, processes, matchedProcesses, doctor, seenDiagnostics]
   );
   const resetSettings = () => {
     updateSettings(defaultSettings);
@@ -1121,10 +1160,38 @@ function App() {
             {view === "doctor" && (
               <DoctorPanel
                 checks={doctor}
-                loading={initialLoading}
-                loadError={snapshotError}
+                loading={initialLoading || doctorLoading}
+                loadError={snapshotError ?? doctorError}
                 onRepair={(name) => void repairDiagnostic(name)}
+                seenDiagnostics={seenDiagnostics}
+                onSeenDiagnostic={markDiagnosticSeen}
+                onShowAdvice={(check) => showDiagnosticAdvice(check)}
                 onRevealPath={(targetPath) => void revealPath(targetPath)}
+              />
+            )}
+            {view === "codexControl" && (
+              <SettingsPanel
+                appInfo={appInfo}
+                settings={settings}
+                standaloneSection="codexControl"
+                updateSettings={updateSettings}
+                resetSettings={resetSettings}
+                resetAppearance={resetAppearanceSettings}
+                clearCache={() => void clearAppCache()}
+                doctor={doctor}
+                seenDiagnostics={seenDiagnostics}
+                onSeenDiagnostic={markDiagnosticSeen}
+                processes={rawProcesses}
+                sessions={sessions}
+                installedFonts={installedFonts}
+                onOpenPath={(targetPath) => void openPath(targetPath)}
+                onRevealPath={(targetPath) => void revealPath(targetPath)}
+                onRepairDiagnostic={(name) => void repairDiagnostic(name)}
+                onShowDiagnosticAdvice={(check) => showDiagnosticAdvice(check)}
+                onOpenExternal={(url) => void openExternal(url)}
+                onNotice={showNotice}
+                onConfirm={setConfirmDialog}
+                noticePathActions={noticePathActions}
               />
             )}
             {view === "settings" && (
@@ -1137,12 +1204,15 @@ function App() {
                 resetAppearance={resetAppearanceSettings}
                 clearCache={() => void clearAppCache()}
                 doctor={doctor}
+                seenDiagnostics={seenDiagnostics}
+                onSeenDiagnostic={markDiagnosticSeen}
                 processes={rawProcesses}
                 sessions={sessions}
                 installedFonts={installedFonts}
                 onOpenPath={(targetPath) => void openPath(targetPath)}
                 onRevealPath={(targetPath) => void revealPath(targetPath)}
                 onRepairDiagnostic={(name) => void repairDiagnostic(name)}
+                onShowDiagnosticAdvice={(check) => showDiagnosticAdvice(check)}
                 onOpenExternal={(url) => void openExternal(url)}
                 onNotice={showNotice}
                 onConfirm={setConfirmDialog}
@@ -1245,6 +1315,12 @@ function Sidebar(props: {
       </nav>
       <div className="navSection">{t("nav.system")}</div>
       <nav className="nav">
+        <NavButton
+          active={props.view === "codexControl"}
+          icon={<Code2 size={17} />}
+          label={t("nav.codexControl")}
+          onClick={() => props.setView("codexControl")}
+        />
         <NavButton
           active={props.view === "settings"}
           icon={<Settings size={17} />}
@@ -1466,6 +1542,12 @@ function TopMenus(props: {
           label={t("nav.doctor")}
           active={props.currentView === "doctor"}
           onClick={() => run(() => props.onSetView("doctor"))}
+        />
+        <MenuItem
+          icon={<Code2 size={15} />}
+          label={t("nav.codexControl")}
+          active={props.currentView === "codexControl"}
+          onClick={() => run(() => props.onSetView("codexControl"))}
         />
         <MenuItem
           icon={<Settings size={15} />}
@@ -2572,11 +2654,12 @@ function DoctorPanel(props: {
   loading: boolean;
   loadError?: string | undefined;
   onRepair: (name: string) => void;
+  seenDiagnostics: Set<string>;
+  onSeenDiagnostic: (key: string) => void;
+  onShowAdvice: (check: Diagnostic) => void;
   onRevealPath: (targetPath: string) => void;
 }) {
   const { t } = useTranslation();
-  const translateDiagnosticHelp = (key: string, options?: Record<string, unknown>) =>
-    String(options ? t(key, options) : t(key));
   if (props.loadError) return <LoadErrorState message={props.loadError} />;
   if (props.loading) return <LoadingState />;
   if (!props.checks.length) {
@@ -2596,34 +2679,86 @@ function DoctorPanel(props: {
       />
       <div className="doctorList">
         {props.checks.map((check) => (
-          <div className="doctorItem" key={check.name}>
-            {check.status === "ok" ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
-            <div>
-              <strong>{check.name}</strong>
-              <span>{check.detail}</span>
-              {check.status === "warn" && (
-                <em className="doctorFixHint">
-                  {diagnosticHelp(check.name, check.detail, translateDiagnosticHelp)}
-                </em>
-              )}
-            </div>
-            <div className="doctorActions">
-              {check.status === "warn" && repairableDiagnostic(check.name) && (
-                <button type="button" onClick={() => props.onRepair(check.name)}>
-                  {t("common.action.repair")}
-                </button>
-              )}
-              {firstPathInText(check.detail) && (
-                <button type="button" onClick={() => props.onRevealPath(firstPathInText(check.detail)!)}>
-                  {t("common.action.reveal")}
-                </button>
-              )}
-              <Badge text={check.status} tone={check.status === "ok" ? "ok" : "warn"} />
-            </div>
-          </div>
+          <DoctorItem
+            key={check.name}
+            check={check}
+            seen={props.seenDiagnostics.has(diagnosticKey(check))}
+            onSeen={() => props.onSeenDiagnostic(diagnosticKey(check))}
+            onRepair={() => props.onRepair(check.name)}
+            onShowAdvice={() => props.onShowAdvice(check)}
+            onRevealPath={props.onRevealPath}
+          />
         ))}
       </div>
     </>
+  );
+}
+
+function DoctorItem(props: {
+  check: Diagnostic;
+  seen: boolean;
+  onSeen: () => void;
+  onRepair: () => void;
+  onShowAdvice: () => void;
+  onRevealPath: (targetPath: string) => void;
+}) {
+  const { t } = useTranslation();
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const translateDiagnosticHelp = (key: string, options?: Record<string, unknown>) =>
+    String(options ? t(key, options) : t(key));
+  const pathValue = firstPathInText(props.check.detail);
+  useEffect(() => {
+    if (props.check.status !== "warn" || props.seen) return undefined;
+    const node = rowRef.current;
+    if (!node) return undefined;
+    let timer: number | undefined;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        window.clearTimeout(timer);
+        if (entry?.isIntersecting) {
+          timer = window.setTimeout(props.onSeen, 500);
+        }
+      },
+      { threshold: 0.6 }
+    );
+    observer.observe(node);
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [props.check.status, props.onSeen, props.seen]);
+  return (
+    <div className="doctorItem" ref={rowRef}>
+      {props.check.status === "ok" ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
+      <div>
+        <strong>{props.check.name}</strong>
+        <span>{props.check.detail}</span>
+        {props.check.status === "warn" && (
+          <em className="doctorFixHint">
+            {diagnosticHelp(props.check.name, props.check.detail, translateDiagnosticHelp)}
+          </em>
+        )}
+      </div>
+      <div className="doctorActions">
+        {props.check.status === "warn" && (
+          repairableDiagnostic(props.check.name) ? (
+            <button type="button" onClick={props.onRepair}>
+              {t("common.action.repair")}
+            </button>
+          ) : (
+            <button type="button" onClick={props.onShowAdvice}>
+              {t("common.action.advice")}
+            </button>
+          )
+        )}
+        {pathValue && (
+          <button type="button" onClick={() => props.onRevealPath(pathValue)}>
+            {t("common.action.reveal")}
+          </button>
+        )}
+        <Badge text={props.check.status} tone={props.check.status === "ok" ? "ok" : "warn"} />
+      </div>
+    </div>
   );
 }
 
@@ -2631,24 +2766,30 @@ function SettingsPanel(props: {
   appInfo: AppInfo | null;
   settings: AppSettings;
   initialSection?: SettingsSection | undefined;
+  standaloneSection?: SettingsSection | undefined;
   updateSettings: (patch: Partial<AppSettings>) => void;
   resetSettings: () => void;
   resetAppearance: () => void;
   clearCache: () => void;
   doctor: Diagnostic[];
+  seenDiagnostics: Set<string>;
+  onSeenDiagnostic: (key: string) => void;
   processes: AgentProcess[];
   sessions: AgentSession[];
   installedFonts: string[];
   onOpenPath: (targetPath?: string) => void;
   onRevealPath: (targetPath?: string) => void;
   onRepairDiagnostic: (name: string) => void;
+  onShowDiagnosticAdvice: (check: Diagnostic) => void;
   onOpenExternal: (url: string) => void;
   onNotice: (notice: Omit<NoticeState, "id">) => void;
   onConfirm: (confirm: ConfirmState) => void;
   noticePathActions: (targetPath?: string, role?: NoticePathRole) => NoticeAction[];
 }) {
   const { t } = useTranslation();
-  const [section, setSection] = useState<SettingsSection>(props.initialSection ?? "general");
+  const [section, setSection] = useState<SettingsSection>(
+    props.standaloneSection ?? props.initialSection ?? "general"
+  );
   const [codexControl, setCodexControl] = useState<CodexControlSnapshot | null>(null);
   const [codexCenter, setCodexCenter] = useState<CodexControlCenterSnapshot | null>(null);
   const [codexControlLoading, setCodexControlLoading] = useState(false);
@@ -2673,6 +2814,15 @@ function SettingsPanel(props: {
   const warnings = props.doctor.filter((item) => item.status === "warn").length;
   const translateDiagnosticHelp = (key: string, options?: Record<string, unknown>) =>
     String(options ? t(key, options) : t(key));
+  useEffect(() => {
+    if (props.standaloneSection) setSection(props.standaloneSection);
+  }, [props.standaloneSection]);
+  useEffect(() => {
+    if (section !== "diagnostics") return;
+    for (const check of props.doctor) {
+      if (check.status === "warn") props.onSeenDiagnostic(diagnosticKey(check));
+    }
+  }, [props.doctor, props.onSeenDiagnostic, section]);
   const refreshCodexControl = () => {
     setCodexControlLoading(true);
     setCodexControlError(undefined);
@@ -2879,46 +3029,45 @@ function SettingsPanel(props: {
   };
   return (
     <>
-      <PaneHeader title={t("settings.title")} subtitle={t("settings.subtitle")} />
-      <div className="settingsShell">
-        <aside className="settingsNav">
-          <SettingsNavItem
-            active={section === "general"}
-            icon={<SlidersHorizontal size={16} />}
-            label={t("settings.sections.general")}
-            onClick={() => setSection("general")}
-          />
-          <SettingsNavItem
-            active={section === "appearance"}
-            icon={<Palette size={16} />}
-            label={t("settings.sections.appearance")}
-            onClick={() => setSection("appearance")}
-          />
-          <SettingsNavItem
-            active={section === "indexing"}
-            icon={<Database size={16} />}
-            label={t("settings.sections.indexing")}
-            onClick={() => setSection("indexing")}
-          />
-          <SettingsNavItem
-            active={section === "runtime"}
-            icon={<Cpu size={16} />}
-            label={t("settings.sections.runtime")}
-            onClick={() => setSection("runtime")}
-          />
-          <SettingsNavItem
-            active={section === "codexControl"}
-            icon={<Code2 size={16} />}
-            label={t("settings.sections.codexControl")}
-            onClick={() => setSection("codexControl")}
-          />
-          <SettingsNavItem
-            active={section === "diagnostics"}
-            icon={<Stethoscope size={16} />}
-            label={t("settings.sections.diagnostics")}
-            onClick={() => setSection("diagnostics")}
-          />
-        </aside>
+      <PaneHeader
+        title={props.standaloneSection === "codexControl" ? t("nav.codexControl") : t("settings.title")}
+        subtitle={props.standaloneSection === "codexControl" ? t("settings.codexControl.detail") : t("settings.subtitle")}
+      />
+      <div className={`settingsShell ${props.standaloneSection ? "standalone" : ""}`}>
+        {!props.standaloneSection && (
+          <aside className="settingsNav">
+            <SettingsNavItem
+              active={section === "general"}
+              icon={<SlidersHorizontal size={16} />}
+              label={t("settings.sections.general")}
+              onClick={() => setSection("general")}
+            />
+            <SettingsNavItem
+              active={section === "appearance"}
+              icon={<Palette size={16} />}
+              label={t("settings.sections.appearance")}
+              onClick={() => setSection("appearance")}
+            />
+            <SettingsNavItem
+              active={section === "indexing"}
+              icon={<Database size={16} />}
+              label={t("settings.sections.indexing")}
+              onClick={() => setSection("indexing")}
+            />
+            <SettingsNavItem
+              active={section === "runtime"}
+              icon={<Cpu size={16} />}
+              label={t("settings.sections.runtime")}
+              onClick={() => setSection("runtime")}
+            />
+            <SettingsNavItem
+              active={section === "diagnostics"}
+              icon={<Stethoscope size={16} />}
+              label={t("settings.sections.diagnostics")}
+              onClick={() => setSection("diagnostics")}
+            />
+          </aside>
+        )}
         <section className="settingsRows animatedPane" key={section}>
           {section === "general" && (
             <>
@@ -3547,8 +3696,12 @@ function SettingsPanel(props: {
                         {diagnosticHelp(check.name, check.detail, translateDiagnosticHelp)}
                       </span>
                     )}
-                    {check.status === "warn" && repairableDiagnostic(check.name) && (
-                      <ActionButton label={t("common.action.repair")} onClick={() => props.onRepairDiagnostic(check.name)} />
+                    {check.status === "warn" && (
+                      repairableDiagnostic(check.name) ? (
+                        <ActionButton label={t("common.action.repair")} onClick={() => props.onRepairDiagnostic(check.name)} />
+                      ) : (
+                        <ActionButton label={t("common.action.advice")} onClick={() => props.onShowDiagnosticAdvice(check)} />
+                      )
                     )}
                     <Badge text={check.status} tone={check.status === "ok" ? "ok" : "warn"} />
                   </div>
@@ -5376,6 +5529,9 @@ function CommandPalette(props: {
           <button onClick={() => runQuick(() => props.setView("graph"))}>
             {t("nav.relations")}
           </button>
+          <button onClick={() => runQuick(() => props.setView("codexControl"))}>
+            {t("nav.codexControl")}
+          </button>
           <button onClick={() => runQuick(props.refresh)}>{t("nav.refreshIndex")}</button>
         </div>
         <div className="paletteBody">
@@ -6137,6 +6293,10 @@ function buildSearchSuggestions(
   if (view !== "processes") add({ label: t("nav.processes"), detail: t("command.suggestion.processes"), targetView: "processes" });
   if (view !== "sessions") add({ label: t("nav.sessions"), detail: t("command.suggestion.sessions"), targetView: "sessions" });
   if (view !== "graph") add({ label: t("nav.relations"), detail: t("command.suggestion.relations"), targetView: "graph" });
+  if (view !== "doctor") add({ label: t("nav.doctor"), detail: t("command.suggestion.doctor"), targetView: "doctor" });
+  if (view !== "codexControl") {
+    add({ label: t("nav.codexControl"), detail: t("command.suggestion.codexControl"), targetView: "codexControl" });
+  }
   if (view !== "settings") add({ label: t("nav.settings"), detail: t("command.suggestion.settings"), targetView: "settings" });
 
   if (selected?.type === "process") {
@@ -6265,6 +6425,37 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function diagnosticKey(check: Diagnostic): string {
+  return `${check.name}:${stableHash(check.detail)}`;
+}
+
+function unreadDiagnosticCount(checks: Diagnostic[], seen: Set<string>): number {
+  return checks.filter((check) => check.status === "warn" && !seen.has(diagnosticKey(check))).length;
+}
+
+function loadSeenDiagnostics(): Set<string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(seenDiagnosticKey) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((item): item is string => typeof item === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSeenDiagnostics(values: Set<string>): void {
+  localStorage.setItem(seenDiagnosticKey, JSON.stringify([...values].slice(-500)));
+}
+
+function stableHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => {
@@ -6306,11 +6497,11 @@ function smokeModeEnabled(): boolean {
 }
 
 function isView(value: string): value is View {
-  return ["processes", "sessions", "graph", "doctor", "settings"].includes(value);
+  return ["processes", "sessions", "graph", "doctor", "codexControl", "settings"].includes(value);
 }
 
 function isSettingsSection(value: string): value is SettingsSection {
-  return ["general", "appearance", "indexing", "runtime", "codexControl", "diagnostics"].includes(value);
+  return ["general", "appearance", "indexing", "runtime", "diagnostics"].includes(value);
 }
 
 function isCodexControlTab(value: string): value is CodexControlTab {

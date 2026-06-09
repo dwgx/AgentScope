@@ -20,7 +20,11 @@ export async function runDoctor(home = userHome()): Promise<Diagnostic[]> {
     check("codex.sqlite_home", fs.existsSync(codexSqlite), codexSqlite),
     check("codex.sqlite", fs.existsSync(path.join(codexSqlite, "state_5.sqlite")), path.join(codexSqlite, "state_5.sqlite")),
     check("codex.sessions", fs.existsSync(path.join(codex, "sessions")), path.join(codex, "sessions")),
-    checkOptionalDir("codex.archived_sessions", path.join(codex, "archived_sessions")),
+    checkOptionalDir(
+      "codex.archived_sessions",
+      path.join(codex, "archived_sessions"),
+      "optional; Codex Desktop or archived conversation workflows create this directory when used"
+    ),
     check("claude.sessions", fs.existsSync(path.join(claude, "sessions")), path.join(claude, "sessions")),
     check("claude.projects", fs.existsSync(path.join(claude, "projects")), path.join(claude, "projects")),
     checkOptionalFile("codex.logs.sqlite", path.join(codexSqlite, "logs_2.sqlite")),
@@ -53,8 +57,14 @@ function checkOptionalFile(name: string, filePath: string): Diagnostic {
   return check(name, true, size === undefined ? filePath : `${filePath} (${size} bytes)`);
 }
 
-function checkOptionalDir(name: string, dirPath: string): Diagnostic {
-  if (!fs.existsSync(dirPath)) return check(name, false, `not found: ${dirPath}`);
+function checkOptionalDir(name: string, dirPath: string, missingDetail?: string): Diagnostic {
+  if (!fs.existsSync(dirPath)) {
+    return check(
+      name,
+      Boolean(missingDetail),
+      `${missingDetail ?? "optional directory not found"}: ${dirPath}`
+    );
+  }
   return check(name, true, `${countEntries(dirPath)} entries: ${dirPath}`);
 }
 

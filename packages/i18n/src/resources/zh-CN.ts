@@ -17,6 +17,7 @@ export const zhCN = {
       openJournal: "打开 journal",
       revealJournal: "定位 journal",
       repair: "修复",
+      advice: "建议",
       restart: "重启",
       show: "显示",
       hide: "隐藏"
@@ -34,6 +35,7 @@ export const zhCN = {
       on: "开启",
       scored: "已评分",
       evidence: "证据",
+      diagnostic: "诊断",
       readOnly: "只读"
     },
     confidence: { exact: "精确", indexed: "已索引", heuristic: "推测", unknown: "未知" },
@@ -44,6 +46,7 @@ export const zhCN = {
       noPath: "没有路径",
       loading: "正在加载路径",
       path: "路径",
+      evidence: "证据路径",
       directory: "目录",
       file: "文件",
       notAllowed: "路径不在 AgentScope 本地追踪允许列表内"
@@ -54,6 +57,7 @@ export const zhCN = {
     sessions: "会话",
     relations: "关系",
     doctor: "诊断",
+    codexControl: "Codex 控制",
     settings: "设置",
     system: "系统",
     refreshIndex: "刷新索引"
@@ -128,6 +132,8 @@ export const zhCN = {
       processes: "检查运行中的 Win32 进程",
       sessions: "浏览已索引会话",
       relations: "查看进程和会话关系图",
+      doctor: "查看诊断和修复建议",
+      codexControl: "编辑 Codex 配置控制面",
       settings: "调整工作区行为",
       query: "搜索 {{kind}}"
     }
@@ -717,6 +723,7 @@ export const zhCN = {
     settingsReset: "设置已重置",
     cacheCleared: "软件缓存已清理",
     diagnosticRepairComplete: "诊断修复已完成",
+    diagnosticAdvice: "诊断修复建议",
     operationFailed: "操作失败：{{message}}"
   },
   confirm: {

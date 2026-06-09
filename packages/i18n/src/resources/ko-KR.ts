@@ -17,6 +17,7 @@ export const koKR = {
       openJournal: "journal 열기",
       revealJournal: "journal 표시",
       repair: "수리",
+      advice: "조언",
       restart: "다시 시작",
       show: "표시",
       hide: "숨기기"
@@ -34,6 +35,7 @@ export const koKR = {
       on: "켜짐",
       scored: "점수화됨",
       evidence: "증거",
+      diagnostic: "진단",
       readOnly: "읽기 전용"
     },
     confidence: { exact: "정확", indexed: "색인됨", heuristic: "추정", unknown: "알 수 없음" },
@@ -44,6 +46,7 @@ export const koKR = {
       noPath: "경로 없음",
       loading: "경로 로드 중",
       path: "경로",
+      evidence: "증거 경로",
       directory: "디렉터리",
       file: "파일",
       notAllowed: "경로가 AgentScope 로컬 추적 허용 목록에 없습니다"
@@ -54,6 +57,7 @@ export const koKR = {
     sessions: "세션",
     relations: "관계",
     doctor: "진단",
+    codexControl: "Codex 제어",
     settings: "설정",
     system: "시스템",
     refreshIndex: "색인 새로 고침"
@@ -128,6 +132,8 @@ export const koKR = {
       processes: "실행 중인 Win32 프로세스 확인",
       sessions: "색인된 세션 탐색",
       relations: "프로세스와 세션 관계 보기",
+      doctor: "진단과 수리 조언 확인",
+      codexControl: "Codex 설정 표면 편집",
       settings: "작업 영역 동작 조정",
       query: "{{kind}} 검색"
     }
@@ -628,6 +634,7 @@ export const koKR = {
     settingsReset: "설정 초기화됨",
     cacheCleared: "앱 캐시 지움",
     diagnosticRepairComplete: "진단 수리 완료",
+    diagnosticAdvice: "진단 수리 조언",
     operationFailed: "작업 실패: {{message}}"
   },
   confirm: {

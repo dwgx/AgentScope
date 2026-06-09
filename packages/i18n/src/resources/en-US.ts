@@ -18,6 +18,7 @@ export const enUS = {
       openJournal: "Open journal",
       revealJournal: "Reveal journal",
       repair: "Repair",
+      advice: "Advice",
       restart: "Restart",
       show: "Show",
       hide: "Hide"
@@ -34,6 +35,7 @@ export const enUS = {
       on: "on",
       scored: "scored",
       evidence: "evidence",
+      diagnostic: "diagnostic",
       pid: "PID",
       protected: "protected",
       unknown: "unknown",
@@ -55,6 +57,7 @@ export const enUS = {
       noPath: "No path",
       loading: "Loading path",
       path: "Path",
+      evidence: "Evidence path",
       directory: "Directory",
       file: "File",
       notAllowed: "Path is not in AgentScope's local trace allowlist"
@@ -65,6 +68,7 @@ export const enUS = {
     sessions: "Sessions",
     relations: "Relations",
     doctor: "Doctor",
+    codexControl: "Codex Control",
     settings: "Settings",
     system: "System",
     refreshIndex: "Refresh index"
@@ -144,6 +148,8 @@ export const enUS = {
       processes: "Inspect live Win32 processes",
       sessions: "Browse indexed sessions",
       relations: "Review process and session graph",
+      doctor: "Inspect diagnostics and repair guidance",
+      codexControl: "Edit Codex configuration surfaces",
       settings: "Tune workspace behavior",
       query: "Search {{kind}}"
     }
@@ -750,6 +756,7 @@ export const enUS = {
     settingsReset: "Settings reset",
     cacheCleared: "Application cache cleared",
     diagnosticRepairComplete: "Diagnostic repair completed",
+    diagnosticAdvice: "Diagnostic repair advice",
     operationFailed: "Operation failed: {{message}}"
   },
   confirm: {

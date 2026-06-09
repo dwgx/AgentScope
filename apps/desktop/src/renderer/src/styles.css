@@ -1760,6 +1760,10 @@ input {
   overflow: hidden;
 }
 
+.settingsShell.standalone {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .settingsNav {
   display: flex;
   flex-direction: column;

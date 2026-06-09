@@ -17,6 +17,7 @@ export const jaJP = {
       openJournal: "journal を開く",
       revealJournal: "journal を表示",
       repair: "修復",
+      advice: "助言",
       restart: "再起動",
       show: "表示",
       hide: "非表示"
@@ -34,6 +35,7 @@ export const jaJP = {
       on: "オン",
       scored: "採点済み",
       evidence: "証拠",
+      diagnostic: "診断",
       readOnly: "読み取り専用"
     },
     confidence: { exact: "一致", indexed: "索引済み", heuristic: "推定", unknown: "不明" },
@@ -44,6 +46,7 @@ export const jaJP = {
       noPath: "パスなし",
       loading: "パスを読み込み中",
       path: "パス",
+      evidence: "証拠パス",
       directory: "ディレクトリ",
       file: "ファイル",
       notAllowed: "パスは AgentScope のローカルトレース許可リストにありません"
@@ -54,6 +57,7 @@ export const jaJP = {
     sessions: "セッション",
     relations: "関係",
     doctor: "診断",
+    codexControl: "Codex 制御",
     settings: "設定",
     system: "システム",
     refreshIndex: "索引を更新"
@@ -128,6 +132,8 @@ export const jaJP = {
       processes: "実行中の Win32 プロセスを確認",
       sessions: "索引済みセッションを閲覧",
       relations: "プロセスとセッションの関係を見る",
+      doctor: "診断と修復助言を確認",
+      codexControl: "Codex 設定サーフェスを編集",
       settings: "ワークスペース動作を調整",
       query: "{{kind}} を検索"
     }
@@ -631,6 +637,7 @@ export const jaJP = {
     settingsReset: "設定をリセットしました",
     cacheCleared: "アプリキャッシュを消去しました",
     diagnosticRepairComplete: "診断修復が完了しました",
+    diagnosticAdvice: "診断修復の助言",
     operationFailed: "操作に失敗しました: {{message}}"
   },
   confirm: {
