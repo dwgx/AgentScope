@@ -9,12 +9,15 @@ contextBridge.exposeInMainWorld("agentscope", {
   setControlMode: (mode) => ipcRenderer.invoke("app:setControlMode", mode),
   listFonts: () => ipcRenderer.invoke("fonts:list"),
   listCodexControl: () => ipcRenderer.invoke("codexControl:list"),
+  getCodexControlCenter: () => ipcRenderer.invoke("codexControl:center"),
   readCodexControlDocument: (id) => ipcRenderer.invoke("codexControl:read", id),
   saveCodexControlDocument: (id, content, expectedSha256) =>
     ipcRenderer.invoke("codexControl:save", id, content, expectedSha256),
   readCodexModeConfig: () => ipcRenderer.invoke("codexControl:readModes"),
   saveCodexModeConfig: (patch, expectedSha256) =>
     ipcRenderer.invoke("codexControl:saveModes", patch, expectedSha256),
+  planCodexControlMutation: (request) => ipcRenderer.invoke("codexControl:planMutation", request),
+  executeCodexControlMutation: (request) => ipcRenderer.invoke("codexControl:executeMutation", request),
   reloadApp: () => ipcRenderer.invoke("app:reload"),
   clearCache: () => ipcRenderer.invoke("app:clearCache"),
   quitApp: () => ipcRenderer.invoke("app:quit"),

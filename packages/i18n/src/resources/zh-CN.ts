@@ -378,11 +378,22 @@ export const zhCN = {
       loading: "正在加载 Codex 控制面...",
       editable: "可编辑",
       readOnly: "只读",
+      noChanges: "没有需要保存的 Codex 控制改动",
+      dirty: "Codex 控制有未保存改动",
+      clean: "没有待保存的 Codex 控制改动",
+      emptyTab: "这个页签没有发现结构化控制项。",
+      changedKeys: "改动键",
+      savedWithJournal: "已保存。Journal：{{path}}",
+      highRiskTitle: "高风险 Codex 设置",
+      highRiskConfirm:
+        "保存这些高风险 Codex 设置？\n\n{{keys}}\n\n{{warnings}}\n\nAgentScope 会先写入备份和 journal。",
+      confirmSave: "仍然保存",
       readOnlyDetail:
         "这个面只作为证据展示。它是状态、缓存、供应商管理或承载正文内容，AgentScope 不会修改。",
       emptyTitle: "没有选中控制面",
       emptyDetail: "选择一个 Codex 配置面查看证据，或编辑会先备份的文档。",
       save: "保存",
+      controlSaved: "Codex 控制已保存",
       saved: "已保存。原文件不存在，无需备份。",
       savedWithBackup: "已保存。备份：{{path}}",
       backupBeforeSave: "保存前会校验 sha256，并先写入 ~/.agentscope 备份。",
@@ -410,6 +421,31 @@ export const zhCN = {
         config: "配置",
         inherits_default: "继承",
         unset: "未设置"
+      },
+      tabs: {
+        overview: "概览",
+        models: "模型",
+        safety: "安全",
+        runtime: "运行",
+        mcp: "MCP",
+        skills: "技能",
+        storage: "存储",
+        advanced: "高级",
+        files: "文件"
+      },
+      risk: {
+        low: "低",
+        medium: "中",
+        high: "高",
+        blocked: "阻止"
+      },
+      auth: {
+        present: "auth 已受保护",
+        missing: "没有文件 auth"
+      },
+      overview: {
+        codexHome: "官方 CODEX_HOME 根目录。AgentScope 只盘点元数据。",
+        sqliteHome: "解析 config/env 后的 SQLite 状态根目录。"
       },
       mcpTitle: "config.toml 中的 MCP 服务器",
       noMcp: "当前 config.toml 没有找到 MCP server 表。",

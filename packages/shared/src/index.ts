@@ -342,6 +342,83 @@ export interface CodexControlSnapshot {
   evidence: Evidence[];
 }
 
+export type CodexControlCenterSection =
+  | "overview"
+  | "models"
+  | "safety"
+  | "runtime"
+  | "mcp"
+  | "skills"
+  | "storage"
+  | "advanced";
+
+export type CodexControlValueKind = "string" | "boolean" | "number" | "select" | "path" | "summary";
+
+export type CodexControlRisk = "low" | "medium" | "high" | "blocked";
+
+export interface CodexControlCenterItem {
+  id: string;
+  section: CodexControlCenterSection;
+  label: string;
+  detail: string;
+  keyPath?: string | undefined;
+  value?: string | number | boolean | undefined;
+  valueKind: CodexControlValueKind;
+  options?: string[] | undefined;
+  editable: boolean;
+  risk: CodexControlRisk;
+  targetPath?: string | undefined;
+  source: "official_docs" | "local_file" | "local_inventory" | "current_code";
+  status: CodexControlSurfaceStatus;
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexControlCenterSnapshot {
+  codexHome: string;
+  sqliteHome: string;
+  configPath: string;
+  configSha256: string;
+  auth: {
+    path: string;
+    exists: boolean;
+    bytes?: number | undefined;
+    updatedAt?: string | undefined;
+    sha256?: string | undefined;
+    storageMode?: "file" | "keyring" | "auto" | "ephemeral" | "unknown" | undefined;
+    warnings: string[];
+    evidence: Evidence[];
+  };
+  items: CodexControlCenterItem[];
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexControlMutation {
+  itemId: string;
+  keyPath: string;
+  value: string | number | boolean | null;
+}
+
+export interface CodexControlMutationRequest {
+  expectedSha256: string;
+  mutations: CodexControlMutation[];
+  confirmedHighRisk?: boolean | undefined;
+}
+
+export interface CodexControlMutationPlan {
+  configPath: string;
+  expectedSha256: string;
+  mutations: CodexControlMutation[];
+  changedKeys: string[];
+  blockers: string[];
+  warnings: string[];
+  highRisk: boolean;
+  backupPath?: string | undefined;
+  journalPath?: string | undefined;
+  evidence: Evidence[];
+}
+
 export interface CodexControlDocument {
   id: string;
   kind: CodexControlSurfaceKind;
@@ -361,6 +438,8 @@ export interface CodexControlSaveResult {
   id: string;
   path: string;
   backupPath?: string | undefined;
+  journalPath?: string | undefined;
+  changedKeys?: string[] | undefined;
   sha256: string;
   bytes: number;
   evidence: Evidence[];

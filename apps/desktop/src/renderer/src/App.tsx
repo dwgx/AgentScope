@@ -45,6 +45,10 @@ import type {
   ScopeSnapshot,
   SessionCandidate,
   CodexControlDocument,
+  CodexControlCenterItem,
+  CodexControlCenterSection,
+  CodexControlCenterSnapshot,
+  CodexControlMutationRequest,
   CodexControlSnapshot,
   CodexControlSurface,
   CodexModeConfigPatch,
@@ -73,12 +77,14 @@ type SessionKindFilter = "all" | "root" | "child" | "subagent";
 type RelationKindFilter = "all" | Relation["kind"];
 type RelationConfidenceFilter = "all" | Relation["confidence"];
 type RelationSpawnStatusFilter = "all" | "open" | "closed" | "unknown";
+type CodexControlTab = CodexControlCenterSection | "files";
 type CodexModeDraft = {
   defaultModel: string;
   defaultReasoningEffort: string;
   planReasoningEffort: string;
   reviewModel: string;
 };
+type CodexControlDraftMap = Record<string, string | number | boolean | undefined>;
 type NoticePathRole =
   | "text"
   | "journal"
@@ -1120,6 +1126,9 @@ function App() {
                 onRevealPath={(targetPath) => void revealPath(targetPath)}
                 onRepairDiagnostic={(name) => void repairDiagnostic(name)}
                 onOpenExternal={(url) => void openExternal(url)}
+                onNotice={showNotice}
+                onConfirm={setConfirmDialog}
+                noticePathActions={noticePathActions}
               />
             )}
           </section>
@@ -2606,12 +2615,19 @@ function SettingsPanel(props: {
   onRevealPath: (targetPath?: string) => void;
   onRepairDiagnostic: (name: string) => void;
   onOpenExternal: (url: string) => void;
+  onNotice: (notice: Omit<NoticeState, "id">) => void;
+  onConfirm: (confirm: ConfirmState) => void;
+  noticePathActions: (targetPath?: string, role?: NoticePathRole) => NoticeAction[];
 }) {
   const { t } = useTranslation();
   const [section, setSection] = useState<SettingsSection>(props.initialSection ?? "general");
   const [codexControl, setCodexControl] = useState<CodexControlSnapshot | null>(null);
+  const [codexCenter, setCodexCenter] = useState<CodexControlCenterSnapshot | null>(null);
   const [codexControlLoading, setCodexControlLoading] = useState(false);
   const [codexControlError, setCodexControlError] = useState<string | undefined>();
+  const [codexControlTab, setCodexControlTab] = useState<CodexControlTab>(smokeInitialCodexControlTab() ?? "overview");
+  const [codexCenterDraft, setCodexCenterDraft] = useState<CodexControlDraftMap>({});
+  const [codexCenterStatus, setCodexCenterStatus] = useState<string | undefined>();
   const [selectedCodexSurfaceId, setSelectedCodexSurfaceId] = useState<string | undefined>();
   const [codexDocument, setCodexDocument] = useState<CodexControlDocument | null>(null);
   const [codexDraft, setCodexDraft] = useState("");
@@ -2632,10 +2648,12 @@ function SettingsPanel(props: {
   const refreshCodexControl = () => {
     setCodexControlLoading(true);
     setCodexControlError(undefined);
-    void window.agentscope
-      .listCodexControl()
-      .then((snapshot) => {
+    setCodexCenterStatus(undefined);
+    void Promise.all([window.agentscope.listCodexControl(), window.agentscope.getCodexControlCenter()])
+      .then(([snapshot, center]) => {
         setCodexControl(snapshot);
+        setCodexCenter(center);
+        setCodexCenterDraft(codexControlDraftFromCenter(center));
         setSelectedCodexSurfaceId((current) => current ?? firstEditableSurface(snapshot)?.id ?? snapshot.surfaces[0]?.id);
       })
       .catch((error: unknown) => setCodexControlError(errorMessage(error)))
@@ -2729,9 +2747,28 @@ function SettingsPanel(props: {
         codexModes.sha256
       )
       .then((result) => {
+        props.onNotice({
+          message: t("settings.codexControl.controlSaved"),
+          items: [
+            { label: "Config", value: compactPath(result.path) ?? result.path, tone: "ok" },
+            ...(result.backupPath
+              ? [{ label: "Backup", value: result.backupPath, path: result.backupPath, tone: "ok" as const }]
+              : []),
+            ...(result.journalPath
+              ? [{ label: "Journal", value: result.journalPath, path: result.journalPath, tone: "ok" as const }]
+              : [])
+          ],
+          actions: [
+            ...(result.journalPath ? props.noticePathActions(result.journalPath, "journal") : []),
+            ...(result.backupPath ? props.noticePathActions(result.backupPath, "backup") : [])
+          ],
+          ttlMs: 30000
+        });
         setCodexModeStatus(
-          result.backupPath
-            ? t("settings.codexControl.savedWithBackup", { path: result.backupPath })
+          result.journalPath
+            ? t("settings.codexControl.savedWithJournal", { path: result.journalPath })
+            : result.backupPath
+              ? t("settings.codexControl.savedWithBackup", { path: result.backupPath })
             : t("settings.codexControl.saved")
         );
         return window.agentscope.readCodexModeConfig();
@@ -2742,6 +2779,75 @@ function SettingsPanel(props: {
       })
       .catch((error: unknown) => setCodexModeStatus(errorMessage(error)))
       .finally(() => setCodexModeLoading(false));
+  };
+  const saveCodexCenter = (confirmedHighRisk = false) => {
+    if (!codexCenter) return;
+    if (readOnlyMode) {
+      setCodexCenterStatus(t("settings.controlMode.readOnlyBlocked"));
+      return;
+    }
+    const mutations = codexControlMutationsFromDraft(codexCenterDraft, codexCenter);
+    if (!mutations.length) {
+      setCodexCenterStatus(t("settings.codexControl.noChanges"));
+      return;
+    }
+    const request: CodexControlMutationRequest = {
+      expectedSha256: codexCenter.configSha256,
+      confirmedHighRisk,
+      mutations
+    };
+    setCodexControlLoading(true);
+    setCodexCenterStatus(undefined);
+    window.agentscope
+      .planCodexControlMutation(request)
+      .then((plan) => {
+        if (plan.blockers.length > 0) {
+          if (plan.highRisk && !confirmedHighRisk && plan.blockers.some((blocker) => /confirmation/i.test(blocker))) {
+            props.onConfirm({
+              title: t("settings.codexControl.highRiskTitle"),
+              detail: t("settings.codexControl.highRiskConfirm", {
+                keys: plan.changedKeys.join(", "),
+                warnings: plan.warnings.join("\n")
+              }),
+              confirmLabel: t("settings.codexControl.confirmSave"),
+              danger: true,
+              onConfirm: () => saveCodexCenter(true)
+            });
+            return undefined;
+          }
+          throw new Error(plan.blockers.join("; "));
+        }
+        return window.agentscope.executeCodexControlMutation(request);
+      })
+      .then((result) => {
+        if (!result) return;
+        props.onNotice({
+          message: t("settings.codexControl.controlSaved"),
+          items: [
+            { label: t("settings.codexControl.changedKeys"), value: (result.changedKeys ?? []).join(", "), tone: "ok" },
+            { label: "Config", value: compactPath(result.path) ?? result.path, tone: "ok" },
+            ...(result.backupPath
+              ? [{ label: "Backup", value: result.backupPath, path: result.backupPath, tone: "ok" as const }]
+              : []),
+            ...(result.journalPath
+              ? [{ label: "Journal", value: result.journalPath, path: result.journalPath, tone: "ok" as const }]
+              : [])
+          ],
+          actions: [
+            ...(result.journalPath ? props.noticePathActions(result.journalPath, "journal") : []),
+            ...(result.backupPath ? props.noticePathActions(result.backupPath, "backup") : [])
+          ],
+          ttlMs: 30000
+        });
+        setCodexCenterStatus(
+          result.journalPath
+            ? t("settings.codexControl.savedWithJournal", { path: result.journalPath })
+            : t("settings.codexControl.saved")
+        );
+        refreshCodexControl();
+      })
+      .catch((error: unknown) => setCodexCenterStatus(errorMessage(error)))
+      .finally(() => setCodexControlLoading(false));
   };
   return (
     <>
@@ -3289,7 +3395,7 @@ function SettingsPanel(props: {
                   <div>
                     <strong>{t("settings.codexControl.title")}</strong>
                     <span>{t("settings.codexControl.detail")}</span>
-                    <code className="mono">{codexControl?.codexHome ?? props.appInfo?.codexHome ?? ""}</code>
+                    <code className="mono">{compactPath(codexCenter?.codexHome ?? codexControl?.codexHome ?? props.appInfo?.codexHome)}</code>
                   </div>
                   <div className="settingInlineActions">
                     <ActionButton
@@ -3305,57 +3411,74 @@ function SettingsPanel(props: {
                   </div>
                 </div>
                 {codexControlError && <p className="inlineError">{codexControlError}</p>}
-                <CodexModeConfigPanel
-                  snapshot={codexModes}
-                  draft={codexModeDraft}
-                  loading={codexModeLoading}
-                  status={codexModeStatus}
+                <CodexControlCenterPanel
+                  snapshot={codexCenter}
+                  draft={codexCenterDraft}
+                  tab={codexControlTab}
+                  loading={codexControlLoading}
+                  status={codexCenterStatus}
                   readOnlyMode={readOnlyMode}
-                  onDraftChange={setCodexModeDraft}
-                  onRefresh={refreshCodexModes}
-                  onSave={saveCodexModes}
+                  onTabChange={setCodexControlTab}
+                  onDraftChange={setCodexCenterDraft}
+                  onRefresh={refreshCodexControl}
+                  onSave={() => saveCodexCenter(false)}
+                  onRevealPath={props.onRevealPath}
                 />
-                <div className="codexControlLayout">
-                  <div className="codexSurfaceList" aria-label={t("settings.codexControl.surfaces")}>
-                    {(codexControl?.surfaces ?? []).map((surface) => (
-                      <button
-                        key={surface.id}
-                        type="button"
-                        className={`codexSurfaceCard ${selectedCodexSurfaceId === surface.id ? "active" : ""}`}
-                        onClick={() => setSelectedCodexSurfaceId(surface.id)}
-                      >
-                        <span>
-                          <strong>{surface.label}</strong>
-                          <em>{t(`settings.codexControl.kind.${surface.kind}`)}</em>
-                        </span>
-                        <Badge
-                          text={
-                            surface.editable
-                              ? t("settings.codexControl.editable")
-                              : t("settings.codexControl.readOnly")
-                          }
-                          tone={surface.status === "warn" || surface.status === "blocked" ? "warn" : "ok"}
-                        />
-                        <small>{surface.detail}</small>
-                      </button>
-                    ))}
-                    {codexControlLoading && <p className="inlineHint">{t("settings.codexControl.loading")}</p>}
-                  </div>
-                  <CodexControlDetail
-                    surface={selectedCodexSurface}
-                    document={codexDocument}
-                    draft={codexDraft}
-                    loading={codexDocumentLoading}
-                    saveStatus={codexSaveStatus}
-                    onDraftChange={setCodexDraft}
-                    onSave={saveCodexDocument}
-                    onRevealPath={(targetPath) => props.onRevealPath(targetPath)}
-                    dirty={!!codexDocument && codexDraft !== codexDocument.content}
+                {codexControlTab === "models" && (
+                  <CodexModeConfigPanel
+                    snapshot={codexModes}
+                    draft={codexModeDraft}
+                    loading={codexModeLoading}
+                    status={codexModeStatus}
                     readOnlyMode={readOnlyMode}
+                    onDraftChange={setCodexModeDraft}
+                    onRefresh={refreshCodexModes}
+                    onSave={saveCodexModes}
                   />
-                </div>
+                )}
+                {codexControlTab === "files" && (
+                  <div className="codexControlLayout">
+                    <div className="codexSurfaceList" aria-label={t("settings.codexControl.surfaces")}>
+                      {(codexControl?.surfaces ?? []).map((surface) => (
+                        <button
+                          key={surface.id}
+                          type="button"
+                          className={`codexSurfaceCard ${selectedCodexSurfaceId === surface.id ? "active" : ""}`}
+                          onClick={() => setSelectedCodexSurfaceId(surface.id)}
+                        >
+                          <span>
+                            <strong>{surface.label}</strong>
+                            <em>{t(`settings.codexControl.kind.${surface.kind}`)}</em>
+                          </span>
+                          <Badge
+                            text={
+                              surface.editable
+                                ? t("settings.codexControl.editable")
+                                : t("settings.codexControl.readOnly")
+                            }
+                            tone={surface.status === "warn" || surface.status === "blocked" ? "warn" : "ok"}
+                          />
+                          <small>{surface.detail}</small>
+                        </button>
+                      ))}
+                      {codexControlLoading && <p className="inlineHint">{t("settings.codexControl.loading")}</p>}
+                    </div>
+                    <CodexControlDetail
+                      surface={selectedCodexSurface}
+                      document={codexDocument}
+                      draft={codexDraft}
+                      loading={codexDocumentLoading}
+                      saveStatus={codexSaveStatus}
+                      onDraftChange={setCodexDraft}
+                      onSave={saveCodexDocument}
+                      onRevealPath={(targetPath) => props.onRevealPath(targetPath)}
+                      dirty={!!codexDocument && codexDraft !== codexDocument.content}
+                      readOnlyMode={readOnlyMode}
+                    />
+                  </div>
+                )}
               </SettingGroup>
-              <SettingGroup title={t("settings.codexControl.mcpTitle")}>
+              {codexControlTab === "mcp" && <SettingGroup title={t("settings.codexControl.mcpTitle")}>
                 {codexControl?.mcpServers.length ? (
                   <div className="codexMcpGrid">
                     {codexControl.mcpServers.map((server) => (
@@ -3374,7 +3497,7 @@ function SettingsPanel(props: {
                 ) : (
                   <p className="inlineHint">{t("settings.codexControl.noMcp")}</p>
                 )}
-              </SettingGroup>
+              </SettingGroup>}
             </>
           )}
           {section === "diagnostics" && (
@@ -3422,6 +3545,210 @@ function SettingsNavItem(props: {
       {props.icon}
       <span>{props.label}</span>
     </button>
+  );
+}
+
+function CodexControlCenterPanel(props: {
+  snapshot: CodexControlCenterSnapshot | null;
+  draft: CodexControlDraftMap;
+  tab: CodexControlTab;
+  loading: boolean;
+  status?: string | undefined;
+  readOnlyMode: boolean;
+  onTabChange: (tab: CodexControlTab) => void;
+  onDraftChange: (draft: CodexControlDraftMap) => void;
+  onRefresh: () => void;
+  onSave: () => void;
+  onRevealPath: (targetPath?: string) => void;
+}) {
+  const { t } = useTranslation();
+  const tabs: CodexControlTab[] = ["overview", "models", "safety", "runtime", "mcp", "skills", "storage", "files"];
+  const dirty = props.snapshot ? codexControlMutationsFromDraft(props.draft, props.snapshot).length > 0 : false;
+  const editableItems = props.snapshot?.items.filter((item) => item.section === props.tab && item.keyPath) ?? [];
+  const summaryItems = props.snapshot?.items.filter((item) => item.section === props.tab && !item.keyPath) ?? [];
+  const setValue = (item: CodexControlCenterItem, value: string | number | boolean | undefined) =>
+    props.onDraftChange({ ...props.draft, [item.id]: value });
+  return (
+    <section className="codexCenterPanel">
+      <div className="codexCenterTabs">
+        <MiniSegmentedControl
+          value={props.tab}
+          values={tabs}
+          label={(tab) => t(`settings.codexControl.tabs.${tab}`)}
+          onChange={props.onTabChange}
+        />
+        <div className="settingInlineActions">
+          <ActionButton label={t("common.action.refresh")} onClick={props.onRefresh} disabled={props.loading} />
+          <ActionButton
+            label={t("settings.codexControl.save")}
+            onClick={props.onSave}
+            disabled={props.loading || props.readOnlyMode || !dirty}
+          />
+        </div>
+      </div>
+      {props.tab === "overview" && (
+        <div className="codexOverviewGrid">
+          <CodexOverviewCard
+            label="CODEX_HOME"
+            value={compactPath(props.snapshot?.codexHome)}
+            detail={t("settings.codexControl.overview.codexHome")}
+            onReveal={() => props.onRevealPath(props.snapshot?.codexHome)}
+          />
+          <CodexOverviewCard
+            label="CODEX_SQLITE_HOME"
+            value={compactPath(props.snapshot?.sqliteHome)}
+            detail={t("settings.codexControl.overview.sqliteHome")}
+            onReveal={() => props.onRevealPath(props.snapshot?.sqliteHome)}
+          />
+          <CodexOverviewCard
+            label="config.toml"
+            value={compactPath(props.snapshot?.configPath)}
+            detail={props.snapshot?.configSha256 ? shortHash(props.snapshot.configSha256) : t("common.status.unknown")}
+            tone="warn"
+          />
+          <CodexOverviewCard
+            label="auth.json"
+            value={props.snapshot?.auth.exists ? t("settings.codexControl.auth.present") : t("settings.codexControl.auth.missing")}
+            detail={[
+              props.snapshot?.auth.storageMode ? `store=${props.snapshot.auth.storageMode}` : undefined,
+              props.snapshot?.auth.bytes !== undefined ? formatBytes(props.snapshot.auth.bytes) : undefined
+            ]
+              .filter(Boolean)
+              .join(" / ")}
+            tone="warn"
+          />
+        </div>
+      )}
+      {props.snapshot?.warnings.length ? (
+        <div className="codexControlWarnings">
+          {props.snapshot.warnings.slice(0, 6).map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+      {editableItems.length > 0 && (
+        <div className="codexControlItems">
+          {editableItems.map((item) => (
+            <CodexControlItemRow
+              key={item.id}
+              item={item}
+              value={props.draft[item.id]}
+              disabled={props.loading || props.readOnlyMode || !item.editable}
+              onChange={(value) => setValue(item, value)}
+              onRevealPath={props.onRevealPath}
+            />
+          ))}
+        </div>
+      )}
+      {summaryItems.length > 0 && props.tab !== "overview" && (
+        <div className="codexSummaryGrid">
+          {summaryItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="codexSummaryCard"
+              onClick={() => props.onRevealPath(item.targetPath)}
+              disabled={!item.targetPath}
+            >
+              <span>
+                <strong>{item.label}</strong>
+                <em>{item.detail}</em>
+              </span>
+              <Badge text={item.status} tone={item.status === "ok" ? "ok" : "warn"} />
+            </button>
+          ))}
+        </div>
+      )}
+      {!editableItems.length && !summaryItems.length && props.tab !== "overview" && props.tab !== "files" && (
+        <p className="inlineHint">{props.loading ? t("settings.codexControl.loading") : t("settings.codexControl.emptyTab")}</p>
+      )}
+      <div className="codexModeFooter">
+        <span className="inlineHint">
+          {dirty ? t("settings.codexControl.dirty") : t("settings.codexControl.clean")}
+        </span>
+        {props.status && <span className="inlineHint">{props.status}</span>}
+        {props.loading && <span className="inlineHint">{t("settings.codexControl.loading")}</span>}
+      </div>
+    </section>
+  );
+}
+
+function CodexOverviewCard(props: {
+  label: string;
+  value?: string | undefined;
+  detail?: string | undefined;
+  tone?: "ok" | "warn" | undefined;
+  onReveal?: (() => void) | undefined;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button type="button" className="codexOverviewCard" onClick={props.onReveal} disabled={!props.onReveal}>
+      <span>{props.label}</span>
+      <strong className="mono">{props.value || t("common.status.unknown")}</strong>
+      {props.detail && <em>{props.detail}</em>}
+      <Badge text={props.tone === "warn" ? t("common.status.protected") : t("common.status.local")} tone={props.tone ?? "ok"} />
+    </button>
+  );
+}
+
+function CodexControlItemRow(props: {
+  item: CodexControlCenterItem;
+  value: string | number | boolean | undefined;
+  disabled: boolean;
+  onChange: (value: string | number | boolean | undefined) => void;
+  onRevealPath: (targetPath?: string) => void;
+}) {
+  const { t } = useTranslation();
+  const value = props.value ?? "";
+  return (
+    <div className={`codexControlItem risk-${props.item.risk}`}>
+      <div className="codexControlItemMeta">
+        <strong>{props.item.label}</strong>
+        <span>{props.item.detail}</span>
+        <code className="mono">{props.item.keyPath}</code>
+        {props.item.warnings.length > 0 && (
+          <em>{props.item.warnings.slice(0, 2).join(" ")}</em>
+        )}
+      </div>
+      <div className="codexControlItemControl">
+        {props.item.valueKind === "boolean" ? (
+          <SwitchControl
+            checked={props.value === true}
+            disabled={props.disabled}
+            onChange={(next) => props.onChange(next)}
+          />
+        ) : props.item.options?.length ? (
+          <select
+            className="codexModeSelect"
+            value={String(value)}
+            disabled={props.disabled}
+            onChange={(event) => props.onChange(event.target.value || undefined)}
+          >
+            <option value="">{t("settings.codexControl.inheritDefault")}</option>
+            {props.item.options.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            className="codexModeInput mono"
+            value={String(value)}
+            disabled={props.disabled}
+            onChange={(event) => props.onChange(event.target.value || undefined)}
+          />
+        )}
+        <div className="settingInlineActions">
+          <Badge text={t(`settings.codexControl.risk.${props.item.risk}`)} tone={props.item.risk === "high" ? "warn" : undefined} />
+          <ActionButton
+            label={t("common.action.reveal")}
+            onClick={() => props.onRevealPath(props.item.targetPath)}
+            disabled={!props.item.targetPath}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3693,13 +4020,14 @@ function CodexControlDetail(props: {
     );
   }
   const summaryEntries = Object.entries(props.surface.summary ?? {});
+  const revealPath = revealableCodexSurfacePath(props.surface);
   return (
     <div className="codexControlDetail">
       <div className="codexControlMeta">
         <div>
           <strong>{props.surface.label}</strong>
           <span>{props.surface.detail}</span>
-          {props.surface.path && <code className="mono">{props.surface.path}</code>}
+          {props.surface.path && <code className="mono">{compactPath(props.surface.path)}</code>}
         </div>
         <div className="settingInlineActions">
           <Badge
@@ -3708,8 +4036,8 @@ function CodexControlDetail(props: {
           />
           <ActionButton
             label={t("common.action.reveal")}
-            onClick={() => props.onRevealPath(props.surface?.path)}
-            disabled={!props.surface.path}
+            onClick={() => props.onRevealPath(revealPath)}
+            disabled={!revealPath}
           />
         </div>
       </div>
@@ -5247,11 +5575,12 @@ function RelationMetadataChips(props: { relation: Relation }) {
   );
 }
 
-function SwitchControl(props: { checked: boolean; onChange: (checked: boolean) => void }) {
+function SwitchControl(props: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean | undefined }) {
   return (
     <button
       className={`switchControl ${props.checked ? "checked" : ""}`}
       aria-pressed={props.checked}
+      disabled={props.disabled}
       onClick={() => props.onChange(!props.checked)}
     >
       <span />
@@ -5891,6 +6220,12 @@ function smokeInitialSettingsSection(): SettingsSection | undefined {
   return isSettingsSection(value) ? value : undefined;
 }
 
+function smokeInitialCodexControlTab(): CodexControlTab | undefined {
+  if (!smokeModeEnabled()) return undefined;
+  const value = new URLSearchParams(window.location.search).get("codexControlTab")?.trim() ?? "";
+  return isCodexControlTab(value) ? value : undefined;
+}
+
 function smokeModeEnabled(): boolean {
   return new URLSearchParams(window.location.search).get("agentscopeSmoke") === "1";
 }
@@ -5901,6 +6236,10 @@ function isView(value: string): value is View {
 
 function isSettingsSection(value: string): value is SettingsSection {
   return ["general", "appearance", "indexing", "runtime", "codexControl", "diagnostics"].includes(value);
+}
+
+function isCodexControlTab(value: string): value is CodexControlTab {
+  return ["overview", "models", "safety", "runtime", "mcp", "skills", "storage", "advanced", "files"].includes(value);
 }
 
 function journalPathFromError(message: string): string | undefined {
@@ -6035,6 +6374,24 @@ function basename(value?: string): string | undefined {
   return parts.at(-1);
 }
 
+function compactPath(value?: string): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.replace(/\//g, "\\");
+  const parts = normalized.split("\\").filter(Boolean);
+  if (parts.length <= 3) return normalized;
+  const root = normalized.startsWith("\\\\") ? `\\\\${parts.slice(0, 2).join("\\")}` : parts[0]!;
+  return `${root}\\...\\${parts.slice(-2).join("\\")}`;
+}
+
+function revealableCodexSurfacePath(surface: CodexControlSurface): string | undefined {
+  if (!surface.path) return undefined;
+  if (surface.id === "config.global" || surface.id === "plugins.summary") return undefined;
+  if (surface.id.startsWith("skill:") || surface.id.startsWith("skill-readonly:")) return undefined;
+  if (surface.id.startsWith("rules:")) return undefined;
+  if (surface.kind === "plugin" || surface.kind === "skill" || surface.kind === "rules") return undefined;
+  return surface.path;
+}
+
 function cleanTitle(value: string): string {
   return value.replaceAll("_", " ").replace(/\s+/g, " ").trim();
 }
@@ -6076,6 +6433,30 @@ function codexModeDraftEqualsSnapshot(draft: CodexModeDraft, snapshot: CodexMode
     draft.planReasoningEffort.trim() === current.planReasoningEffort &&
     draft.reviewModel.trim() === current.reviewModel
   );
+}
+
+function codexControlDraftFromCenter(snapshot: CodexControlCenterSnapshot): CodexControlDraftMap {
+  return Object.fromEntries(snapshot.items.filter((item) => item.keyPath).map((item) => [item.id, item.value])) as CodexControlDraftMap;
+}
+
+function codexControlMutationsFromDraft(
+  draft: CodexControlDraftMap,
+  snapshot: CodexControlCenterSnapshot
+): CodexControlMutationRequest["mutations"] {
+  const mutations: CodexControlMutationRequest["mutations"] = [];
+  for (const item of snapshot.items) {
+    if (!item.keyPath || !item.editable) continue;
+    const next = draft[item.id];
+    const normalizedNext = next === "" || next === undefined ? null : next;
+    const current = item.value === undefined ? null : item.value;
+    if (normalizedNext === current) continue;
+    mutations.push({ itemId: item.id, keyPath: item.keyPath, value: normalizedNext });
+  }
+  return mutations;
+}
+
+function shortHash(value: string): string {
+  return value.length > 16 ? `${value.slice(0, 8)}...${value.slice(-8)}` : value;
 }
 
 function Notification(props: { notice: NoticeState; onClose: () => void; onRevealPath: (targetPath: string) => void }) {

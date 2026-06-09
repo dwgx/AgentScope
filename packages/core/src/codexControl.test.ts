@@ -5,7 +5,10 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  executeCodexControlMutation,
+  getCodexControlCenterSnapshot,
   listCodexControlSurfaces,
+  planCodexControlMutation,
   readCodexModeConfig,
   readCodexControlDocument,
   saveCodexControlDocument,
@@ -59,7 +62,7 @@ describe("Codex control surfaces", () => {
     const snapshot = await listCodexControlSurfaces(home);
 
     expect(snapshot.mcpServers.map((server) => server.name)).toContain("playwright");
-    expect(snapshot.surfaces.find((surface) => surface.id === "config.global")?.editable).toBe(true);
+    expect(snapshot.surfaces.find((surface) => surface.id === "config.global")?.editable).toBe(false);
     expect(snapshot.surfaces.find((surface) => surface.id === "agents.global")?.editable).toBe(true);
     expect(snapshot.surfaces.find((surface) => surface.id === "rules:default.rules")?.editable).toBe(true);
     expect(snapshot.surfaces.find((surface) => surface.id === "skill:review-helper")?.editable).toBe(true);
@@ -119,38 +122,21 @@ describe("Codex control surfaces", () => {
     await expect(readCodexControlDocument("skill:..", home)).rejects.toThrow(/Invalid Codex skill/);
   });
 
-  it("redacts and blocks config documents with sensitive-looking keys", async () => {
+  it("keeps raw config.toml read-only so it cannot bypass structured controls", async () => {
     const home = await tempHome();
     await writeFile(
       path.join(home, ".codex", "config.toml"),
-      'api_key = "secret"\nmodel = "gpt-5.5"\nhttp_headers = { Authorization = "bearer value" }\n'
+      'model = "gpt-5.5"\napproval_policy = "on-request"\n'
     );
 
     const snapshot = await listCodexControlSurfaces(home);
     const configSurface = snapshot.surfaces.find((surface) => surface.id === "config.global");
     expect(configSurface?.editable).toBe(false);
     expect(configSurface?.status).toBe("warn");
-
-    const doc = await readCodexControlDocument("config.global", home);
-    expect(doc.redacted).toBe(true);
-    expect(doc.editable).toBe(false);
-    expect(doc.content).not.toContain("secret");
-    expect(doc.content).not.toContain("bearer value");
-    await expect(saveCodexControlDocument("config.global", doc.content, doc.sha256, home)).rejects.toThrow(
-      /sensitive-looking/
-    );
-  });
-
-  it("rejects obviously invalid config.toml edits before writing", async () => {
-    const home = await tempHome();
-    const configPath = path.join(home, ".codex", "config.toml");
-    await writeFile(configPath, 'model = "gpt-5.5"\n');
-    const doc = await readCodexControlDocument("config.global", home);
-
-    await expect(saveCodexControlDocument("config.global", 'model = "unterminated\n', doc.sha256, home)).rejects.toThrow(
-      /validation failed/
-    );
-    expect(await readFile(configPath, "utf8")).toBe('model = "gpt-5.5"\n');
+    await expect(readCodexControlDocument("config.global", home)).rejects.toThrow(/Raw config\.toml editing is disabled/);
+    await expect(
+      saveCodexControlDocument("config.global", 'sandbox_mode = "danger-full-access"\n', "0".repeat(64), home)
+    ).rejects.toThrow(/Raw config\.toml saving is disabled/);
   });
 
   it("can create missing default rules without touching credentials paths", async () => {
@@ -207,14 +193,55 @@ describe("Codex control surfaces", () => {
       home
     );
     const saved = await readFile(configPath, "utf8");
+    const journal = await readFile(result.journalPath!, "utf8");
 
     expect(result.backupPath).toBeDefined();
+    expect(result.journalPath).toBeDefined();
     expect(saved).toContain('model = "gpt-5.5"');
     expect(saved).toContain('model_reasoning_effort = "xhigh"');
     expect(saved).toContain('plan_mode_reasoning_effort = "medium"');
     expect(saved).toContain('review_model = "gpt-5.5"');
     expect(saved).toContain("[mcp_servers.playwright]");
     expect(result.modes.plan.reasoningEffort).toBe("medium");
+    expect(journal).toContain("codex-mode-config-save");
+    expect(journal).toContain("model_reasoning_effort");
+    expect(journal).not.toContain("secret");
+  });
+
+  it("replaces existing Codex mode keys instead of duplicating them", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(
+      configPath,
+      [
+        'model = "gpt-5.4-mini"',
+        'review_model = "gpt-5.4-mini"',
+        'model_reasoning_effort = "medium"',
+        'plan_mode_reasoning_effort = "low"',
+        "",
+        "[mcp_servers.playwright]",
+        'command = "npx"'
+      ].join("\n")
+    );
+    const snapshot = await readCodexModeConfig(home);
+
+    await saveCodexModeConfig(
+      {
+        defaultModel: "gpt-5.5",
+        defaultReasoningEffort: "xhigh",
+        planReasoningEffort: "high",
+        reviewModel: "gpt-5.5"
+      },
+      snapshot.sha256,
+      home
+    );
+    const saved = await readFile(configPath, "utf8");
+
+    expect(saved.match(/^model\s*=/gm)).toHaveLength(1);
+    expect(saved.match(/^review_model\s*=/gm)).toHaveLength(1);
+    expect(saved.match(/^model_reasoning_effort\s*=/gm)).toHaveLength(1);
+    expect(saved.match(/^plan_mode_reasoning_effort\s*=/gm)).toHaveLength(1);
+    expect(saved).toContain("[mcp_servers.playwright]");
   });
 
   it("allows plan mode reasoning none but not default reasoning none", async () => {
@@ -275,5 +302,109 @@ describe("Codex control surfaces", () => {
     await expect(saveCodexModeConfig({ planReasoningEffort: "medium" }, snapshot.sha256, home)).rejects.toThrow(
       /changed on disk/
     );
+  });
+
+  it("returns a structured control center snapshot without exposing auth content", async () => {
+    const home = await tempHome();
+    await writeFile(
+      path.join(home, ".codex", "config.toml"),
+      ['model = "gpt-5.5"', 'cli_auth_credentials_store = "file"', "", "[windows]", 'sandbox = "unelevated"'].join("\n")
+    );
+    await writeFile(path.join(home, ".codex", "auth.json"), '{"tokens":"secret-token-value"}\n');
+
+    const snapshot = await getCodexControlCenterSnapshot(home);
+
+    expect(snapshot.auth.exists).toBe(true);
+    expect(snapshot.auth.storageMode).toBe("file");
+    expect(snapshot.auth.sha256).toBeUndefined();
+    expect(JSON.stringify(snapshot)).not.toContain("secret-token-value");
+    expect(snapshot.items.find((item) => item.id === "config.model")?.value).toBe("gpt-5.5");
+    expect(snapshot.items.find((item) => item.id === "config.windows.sandbox")?.value).toBe("unelevated");
+  });
+
+  it("does not echo sensitive-looking config values in structured controls", async () => {
+    const home = await tempHome();
+    await writeFile(
+      path.join(home, ".codex", "config.toml"),
+      ['model = "sk-secret-model-token"', 'sandbox_mode = "workspace-write"'].join("\n")
+    );
+
+    const snapshot = await getCodexControlCenterSnapshot(home);
+    const modelItem = snapshot.items.find((item) => item.id === "config.model");
+
+    expect(modelItem?.value).toBeUndefined();
+    expect(modelItem?.editable).toBe(false);
+    expect(JSON.stringify(snapshot)).not.toContain("sk-secret-model-token");
+  });
+
+  it("plans and executes allowlisted structured Codex config mutations with journal evidence", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(configPath, ['model = "gpt-5.4-mini"', "", "[windows]", 'sandbox = "unelevated"'].join("\n"));
+    const snapshot = await getCodexControlCenterSnapshot(home);
+
+    const blocked = await planCodexControlMutation(
+      {
+        expectedSha256: snapshot.configSha256,
+        mutations: [{ itemId: "config.sandbox_mode", keyPath: "sandbox_mode", value: "danger-full-access" }]
+      },
+      home
+    );
+    expect(blocked.highRisk).toBe(true);
+    expect(blocked.blockers.join("\n")).toContain("explicit confirmation");
+
+    const result = await executeCodexControlMutation(
+      {
+        expectedSha256: snapshot.configSha256,
+        confirmedHighRisk: true,
+        mutations: [
+          { itemId: "config.model", keyPath: "model", value: "gpt-5.5" },
+          { itemId: "config.windows.sandbox", keyPath: "windows.sandbox", value: "elevated" },
+          { itemId: "config.memories.use_memories", keyPath: "memories.use_memories", value: true }
+        ]
+      },
+      home
+    );
+    const saved = await readFile(configPath, "utf8");
+    const journal = await readFile(result.journalPath!, "utf8");
+
+    expect(result.backupPath).toBeDefined();
+    expect(result.journalPath).toBeDefined();
+    expect(saved.match(/^model\s*=/gm)).toHaveLength(1);
+    expect(saved).toContain('model = "gpt-5.5"');
+    expect(saved).toContain("[windows]");
+    expect(saved).toContain('sandbox = "elevated"');
+    expect(saved).toContain("[memories]");
+    expect(saved).toContain("use_memories = true");
+    expect(journal).toContain("codex-control-mutation");
+    expect(journal).toContain("model");
+    expect(journal).not.toContain("secret");
+  });
+
+  it("rejects unsupported structured mutations and stale config writes", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(configPath, 'model = "gpt-5.5"\n');
+    const snapshot = await getCodexControlCenterSnapshot(home);
+
+    const unsupported = await planCodexControlMutation(
+      {
+        expectedSha256: snapshot.configSha256,
+        mutations: [{ itemId: "config.auth", keyPath: "auth.json", value: "not allowed" }]
+      },
+      home
+    );
+    expect(unsupported.blockers.join("\n")).toContain("Unsupported");
+
+    await writeFile(configPath, 'model = "gpt-5.4-mini"\n');
+    await expect(
+      executeCodexControlMutation(
+        {
+          expectedSha256: snapshot.configSha256,
+          mutations: [{ itemId: "config.model", keyPath: "model", value: "gpt-5.5" }]
+        },
+        home
+      )
+    ).rejects.toThrow(/changed on disk/);
   });
 });

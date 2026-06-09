@@ -11,6 +11,9 @@ import type {
   SessionLaunchContext,
   SessionLaunchResult,
   CodexControlDocument,
+  CodexControlCenterSnapshot,
+  CodexControlMutationPlan,
+  CodexControlMutationRequest,
   CodexControlSaveResult,
   CodexControlSnapshot,
   CodexModeConfigPatch,
@@ -40,6 +43,7 @@ export interface AgentScopeApi {
   setControlMode(mode: "safe" | "readOnly"): Promise<{ controlMode: "safe" | "readOnly" }>;
   listFonts(): Promise<string[]>;
   listCodexControl(): Promise<CodexControlSnapshot>;
+  getCodexControlCenter(): Promise<CodexControlCenterSnapshot>;
   readCodexControlDocument(id: string): Promise<CodexControlDocument>;
   saveCodexControlDocument(
     id: string,
@@ -51,6 +55,8 @@ export interface AgentScopeApi {
     patch: CodexModeConfigPatch,
     expectedSha256: string
   ): Promise<CodexModeConfigSaveResult>;
+  planCodexControlMutation(request: CodexControlMutationRequest): Promise<CodexControlMutationPlan>;
+  executeCodexControlMutation(request: CodexControlMutationRequest): Promise<CodexControlSaveResult>;
   reloadApp(): Promise<boolean>;
   clearCache(): Promise<{ ok: boolean; directories: string[]; files: string[] }>;
   quitApp(): Promise<boolean>;

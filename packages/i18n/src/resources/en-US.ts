@@ -35,6 +35,8 @@ export const enUS = {
       scored: "scored",
       evidence: "evidence",
       pid: "PID",
+      protected: "protected",
+      unknown: "unknown",
       readOnly: "read-only"
     },
     confidence: {
@@ -526,11 +528,22 @@ export const enUS = {
       loading: "Loading Codex control surfaces...",
       editable: "editable",
       readOnly: "read-only",
+      noChanges: "No Codex control changes to save.",
+      dirty: "Unsaved Codex control changes",
+      clean: "No pending Codex control changes",
+      emptyTab: "No structured controls were found for this tab.",
+      changedKeys: "Changed keys",
+      savedWithJournal: "Saved. Journal: {{path}}",
+      highRiskTitle: "High-risk Codex setting",
+      highRiskConfirm:
+        "Save these high-risk Codex settings?\n\n{{keys}}\n\n{{warnings}}\n\nAgentScope will write a backup and journal first.",
+      confirmSave: "Save anyway",
       readOnlyDetail:
         "This surface is shown as evidence only. AgentScope does not modify it because it is state, cache, vendor-managed, or content-bearing.",
       emptyTitle: "No surface selected",
       emptyDetail: "Choose a Codex config surface to inspect evidence or edit a backed-up document.",
       save: "Save",
+      controlSaved: "Codex control saved",
       saved: "Saved. No prior file existed, so no backup was needed.",
       savedWithBackup: "Saved. Backup: {{path}}",
       backupBeforeSave: "Saving checks the sha256 and writes a backup under ~/.agentscope first.",
@@ -558,6 +571,31 @@ export const enUS = {
         config: "config",
         inherits_default: "inherits",
         unset: "unset"
+      },
+      tabs: {
+        overview: "Overview",
+        models: "Models",
+        safety: "Safety",
+        runtime: "Runtime",
+        mcp: "MCP",
+        skills: "Skills",
+        storage: "Storage",
+        advanced: "Advanced",
+        files: "Files"
+      },
+      risk: {
+        low: "low",
+        medium: "medium",
+        high: "high",
+        blocked: "blocked"
+      },
+      auth: {
+        present: "protected auth present",
+        missing: "no file auth"
+      },
+      overview: {
+        codexHome: "Official CODEX_HOME root. AgentScope inventories metadata only.",
+        sqliteHome: "SQLite state root after config/env resolution."
       },
       mcpTitle: "MCP servers from config.toml",
       noMcp: "No MCP server table was found in the current config.toml.",

@@ -1922,6 +1922,146 @@ input {
   padding: 12px 14px 14px;
 }
 
+.codexCenterPanel {
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px;
+}
+
+.codexCenterTabs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.codexOverviewGrid,
+.codexSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.codexOverviewCard,
+.codexSummaryCard {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 54%, transparent);
+  color: var(--text);
+  padding: 10px;
+  text-align: left;
+}
+
+.codexOverviewCard {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.codexOverviewCard:hover,
+.codexSummaryCard:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface2));
+}
+
+.codexOverviewCard:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.codexOverviewCard:disabled:hover {
+  border-color: var(--border-soft);
+  background: var(--surface2);
+}
+
+.codexOverviewCard span,
+.codexOverviewCard strong,
+.codexOverviewCard em,
+.codexSummaryCard strong,
+.codexSummaryCard em {
+  min-width: 0;
+}
+
+.codexOverviewCard span,
+.codexOverviewCard em,
+.codexSummaryCard em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.codexOverviewCard strong {
+  grid-column: 1;
+  display: block;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.codexOverviewCard .badge {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.codexControlItems {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.codexControlItem {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 45%, transparent);
+  padding: 10px;
+}
+
+.codexControlItem.risk-high {
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--border-soft));
+}
+
+.codexControlItemMeta,
+.codexControlItemControl {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.codexControlItemMeta strong,
+.codexControlItemMeta span,
+.codexControlItemMeta code,
+.codexControlItemMeta em {
+  display: block;
+  min-width: 0;
+}
+
+.codexControlItemMeta strong {
+  font-size: 12px;
+}
+
+.codexControlItemMeta span,
+.codexControlItemMeta em {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.codexControlItemMeta code {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.codexControlItemControl .settingInlineActions {
+  justify-content: flex-start;
+}
+
 .codexModePanel {
   border-top: 1px solid var(--border-soft);
   padding: 12px 14px;
@@ -2269,6 +2409,23 @@ input {
     max-height: 620px;
     display: flex;
     flex-direction: column;
+  }
+}
+
+@container (max-width: 759px) {
+  .codexCenterTabs,
+  .codexControlItem,
+  .codexControlHeader,
+  .codexModeHeader,
+  .codexControlMeta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .codexControlItemControl .settingInlineActions,
+  .codexControlHeader .settingInlineActions,
+  .codexModeHeader .settingInlineActions,
+  .codexControlMeta .settingInlineActions {
+    justify-content: flex-start;
   }
 }
 

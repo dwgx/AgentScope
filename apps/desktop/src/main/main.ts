@@ -16,12 +16,13 @@ import {
   type SessionLaunchContext,
   type SessionLaunchResult
 } from "@agentscope/shared";
-import type { CodexModeConfigPatch, Evidence, ScopeSnapshot } from "@agentscope/shared";
+import type { CodexControlMutationRequest, CodexModeConfigPatch, Evidence, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === "development" || process.env.VITE_DEV_SERVER_URL;
 const isSmoke = process.env.AGENTSCOPE_SMOKE === "1" || process.argv.includes("--agentscope-smoke");
+const isVisibleSmoke = isSmoke && process.env.AGENTSCOPE_SMOKE_VISIBLE === "1";
 const execFileAsync = promisify(execFile);
 
 let mainWindow: BrowserWindow | undefined;
@@ -38,19 +39,19 @@ async function createWindow(): Promise<void> {
     title: "AgentScope",
     autoHideMenuBar: true,
     backgroundColor: "#f7f5f0",
-    show: !isSmoke,
+    show: !isSmoke || isVisibleSmoke,
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      offscreen: isSmoke
+      offscreen: isSmoke && !isVisibleSmoke
     }
   });
   log("browser window created");
   mainWindow.setMenuBarVisibility(false);
 
   const showWindow = (): void => {
-    if (isSmoke) return;
+    if (isSmoke && !isVisibleSmoke) return;
     mainWindow?.show();
     mainWindow?.focus();
   };
@@ -63,6 +64,7 @@ async function createWindow(): Promise<void> {
   mainWindow.webContents.on("did-finish-load", () => {
     log("renderer did-finish-load");
     showWindow();
+    queueSmokeScreenshot();
   });
 
   setTimeout(showWindow, 1500);
@@ -94,12 +96,36 @@ async function createWindow(): Promise<void> {
             query: {
               agentscopeSmoke: "1",
               view: process.env.AGENTSCOPE_SMOKE_VIEW ?? "",
-              settingsSection: process.env.AGENTSCOPE_SMOKE_SETTINGS_SECTION ?? ""
+              settingsSection: process.env.AGENTSCOPE_SMOKE_SETTINGS_SECTION ?? "",
+              codexControlTab: process.env.AGENTSCOPE_SMOKE_CODEX_CONTROL_TAB ?? ""
             }
           }
         : undefined
     );
   }
+}
+
+function queueSmokeScreenshot(): void {
+  const screenshotPath = process.env.AGENTSCOPE_SMOKE_SCREENSHOT;
+  if (!isSmoke || !screenshotPath || !mainWindow) return;
+  const delayMs = Math.max(500, Number(process.env.AGENTSCOPE_SMOKE_SCREENSHOT_DELAY_MS ?? 5000));
+  setTimeout(() => {
+    const windowRef = mainWindow;
+    if (!windowRef || windowRef.isDestroyed()) return;
+    void windowRef.webContents
+      .capturePage()
+      .then(async (image) => {
+        await fs.promises.mkdir(path.dirname(screenshotPath), { recursive: true });
+        await fs.promises.writeFile(screenshotPath, image.toPNG());
+        log(`smoke screenshot saved ${screenshotPath}`);
+      })
+      .catch((error: unknown) => {
+        log(`smoke screenshot failed ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      })
+      .finally(() => {
+        if (process.env.AGENTSCOPE_SMOKE_QUIT_AFTER_SCREENSHOT === "1") app.quit();
+      });
+  }, delayMs);
 }
 
 ipcMain.handle("snapshot:get", async () => buildSnapshot());
@@ -124,6 +150,10 @@ ipcMain.handle("codexControl:list", async () => {
   const core = await loadCore();
   return core.listCodexControlSurfaces();
 });
+ipcMain.handle("codexControl:center", async () => {
+  const core = await loadCore();
+  return core.getCodexControlCenterSnapshot();
+});
 ipcMain.handle("codexControl:read", async (_event, id: string) => {
   const core = await loadCore();
   return core.readCodexControlDocument(id);
@@ -141,6 +171,15 @@ ipcMain.handle("codexControl:saveModes", async (_event, patch: CodexModeConfigPa
   assertWriteControlAllowed("Codex mode save");
   const core = await loadCore();
   return core.saveCodexModeConfig(patch, expectedSha256);
+});
+ipcMain.handle("codexControl:planMutation", async (_event, request: CodexControlMutationRequest) => {
+  const core = await loadCore();
+  return core.planCodexControlMutation(validateCodexControlMutationRequest(request));
+});
+ipcMain.handle("codexControl:executeMutation", async (_event, request: CodexControlMutationRequest) => {
+  assertWriteControlAllowed("Codex control mutation");
+  const core = await loadCore();
+  return core.executeCodexControlMutation(validateCodexControlMutationRequest(request));
 });
 ipcMain.handle("app:reload", async () => {
   mainWindow?.reload();
@@ -472,6 +511,7 @@ async function allowedLocalPaths(): Promise<string[]> {
   const paths = new Set<string>();
   addAllowedPath(paths, info.userData);
   addAllowedPath(paths, path.join(os.homedir(), ".agentscope"));
+  addAllowedPath(paths, info.codexHome);
   addAllowedPath(paths, path.join(info.codexHome, "state_5.sqlite"));
 
   const snapshot = await buildSnapshot();
@@ -857,6 +897,46 @@ async function execNpm(args: string[], cwd: string, timeout: number): Promise<vo
 
 function asAgent(value: string): "codex" | "claude" | undefined {
   return value === "codex" || value === "claude" ? value : undefined;
+}
+
+function validateCodexControlMutationRequest(value: unknown): CodexControlMutationRequest {
+  if (!value || typeof value !== "object") throw new Error("Invalid Codex control mutation request.");
+  const request = value as Partial<CodexControlMutationRequest>;
+  if (typeof request.expectedSha256 !== "string" || !/^[a-f0-9]{64}$/i.test(request.expectedSha256)) {
+    throw new Error("Invalid Codex control expected sha256.");
+  }
+  if (!Array.isArray(request.mutations) || request.mutations.length < 1 || request.mutations.length > 32) {
+    throw new Error("Invalid Codex control mutation count.");
+  }
+  const mutations = request.mutations.map((mutation) => {
+    if (!mutation || typeof mutation !== "object") throw new Error("Invalid Codex control mutation.");
+    const item = mutation as unknown as Record<string, unknown>;
+    const itemId = typeof item.itemId === "string" ? item.itemId : "";
+    const keyPath = typeof item.keyPath === "string" ? item.keyPath : "";
+    if (!/^[A-Za-z0-9_.:-]{1,120}$/.test(itemId)) throw new Error("Invalid Codex control mutation item id.");
+    if (!/^[A-Za-z0-9_.-]{1,120}$/.test(keyPath)) throw new Error("Invalid Codex control mutation key path.");
+    const rawValue = item.value;
+    if (
+      rawValue !== null &&
+      typeof rawValue !== "string" &&
+      typeof rawValue !== "number" &&
+      typeof rawValue !== "boolean"
+    ) {
+      throw new Error("Invalid Codex control mutation value.");
+    }
+    if (typeof rawValue === "string" && rawValue.length > 200) {
+      throw new Error("Codex control mutation value is too long.");
+    }
+    if (typeof rawValue === "number" && !Number.isFinite(rawValue)) {
+      throw new Error("Codex control mutation number must be finite.");
+    }
+    return { itemId, keyPath, value: rawValue };
+  });
+  return {
+    expectedSha256: request.expectedSha256,
+    confirmedHighRisk: request.confirmedHighRisk === true,
+    mutations
+  };
 }
 
 function assertWriteControlAllowed(action: string): void {
