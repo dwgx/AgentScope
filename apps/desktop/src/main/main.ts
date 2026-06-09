@@ -128,8 +128,8 @@ function queueSmokeScreenshot(): void {
   }, delayMs);
 }
 
-ipcMain.handle("snapshot:get", async () => buildSnapshot());
-ipcMain.handle("doctor:get", async () => runDoctor());
+ipcMain.handle("snapshot:get", async () => timedIpc("snapshot:get", buildSnapshot));
+ipcMain.handle("doctor:get", async () => timedIpc("doctor:get", runDoctor));
 ipcMain.handle("search:run", async (_event, query: string, limit = 50, options?: { includeSqlitePreview?: boolean }) =>
   searchAll(query, undefined, limit, {
     includeSqlitePreview: options?.includeSqlitePreview === true
@@ -267,7 +267,7 @@ ipcMain.handle("session:import", async (_event, backupDir: string) => {
 });
 ipcMain.handle("session:listQuarantine", async () => {
   const core = await loadCore();
-  return core.listQuarantinedSessions();
+  return timedIpc("session:listQuarantine", () => core.listQuarantinedSessions());
 });
 ipcMain.handle("session:restore", async (_event, quarantineDirOrJournalPath: string) => {
   assertWriteControlAllowed("Session restore");
@@ -376,6 +376,30 @@ function rendererIndexPath(): string {
 async function loadCore(): Promise<typeof AgentScopeCore> {
   corePromise ??= import("@agentscope/core");
   return corePromise;
+}
+
+async function timedIpc<T>(name: string, action: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  log(`${name} start`);
+  try {
+    const result = await action();
+    log(`${name} ok ${Date.now() - startedAt}ms ${ipcResultSummary(result)}`);
+    return result;
+  } catch (error) {
+    log(`${name} failed ${Date.now() - startedAt}ms ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+    throw error;
+  }
+}
+
+function ipcResultSummary(value: unknown): string {
+  if (Array.isArray(value)) return `array=${value.length}`;
+  if (value && typeof value === "object") {
+    const snapshot = value as Partial<ScopeSnapshot>;
+    if (Array.isArray(snapshot.processes) || Array.isArray(snapshot.sessions)) {
+      return `processes=${snapshot.processes?.length ?? 0} sessions=${snapshot.sessions?.length ?? 0} relations=${snapshot.relations?.length ?? 0}`;
+    }
+  }
+  return "";
 }
 
 async function buildSnapshot(): Promise<ScopeSnapshot> {

@@ -283,7 +283,9 @@ export const zhCN = {
     },
     loading: {
       title: "正在读取本机 Agent 状态",
-      detail: "正在枚举 Win32_Process、Codex SQLite/JSONL 和 Claude 会话文件。"
+      detail: "正在枚举 Win32_Process、Codex SQLite/JSONL 和 Claude 会话文件。",
+      errorTitle: "Agent 状态读取失败",
+      errorDetail: "{{message}}。请刷新重试；在新快照加载前 AgentScope 会保持数据只读。"
     }
   },
   settings: {

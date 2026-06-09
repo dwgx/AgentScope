@@ -293,6 +293,7 @@ function App() {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [installedFonts, setInstalledFonts] = useState<string[]>([]);
   const [quarantinedSessions, setQuarantinedSessions] = useState<QuarantinedSession[]>([]);
+  const [snapshotError, setSnapshotError] = useState<string | undefined>();
 
   function syncControlMode(mode: ControlMode) {
     void window.agentscope
@@ -379,19 +380,32 @@ function App() {
 
   async function refresh() {
     setLoading(true);
+    setSnapshotError(undefined);
     try {
-      const [nextSnapshot, nextDoctor, nextQuarantine] = await Promise.all([
-        window.agentscope.getSnapshot(),
-        window.agentscope.getDoctor(),
-        window.agentscope.listQuarantinedSessions()
-      ]);
+      const nextSnapshot = await withTimeout(window.agentscope.getSnapshot(), 30000, "snapshot:get");
       setSnapshot(nextSnapshot);
-      setDoctor(nextDoctor);
-      setQuarantinedSessions(nextQuarantine);
       setSelectionKey((current) => current ?? firstSelectionKey(nextSnapshot));
+      void refreshSecondaryState();
+    } catch (error) {
+      const message = errorMessage(error);
+      setSnapshotError(message);
+      showNotice({ message: t("toast.operationFailed", { message }) });
     } finally {
       setLoading(false);
     }
+  }
+
+  function refreshSecondaryState() {
+    withTimeout(window.agentscope.getDoctor(), 20000, "doctor:get")
+      .then(setDoctor)
+      .catch((error: unknown) => {
+        showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+      });
+    withTimeout(window.agentscope.listQuarantinedSessions(), 20000, "session:listQuarantine")
+      .then(setQuarantinedSessions)
+      .catch((error: unknown) => {
+        showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
+      });
   }
 
   useEffect(() => {
@@ -1054,6 +1068,7 @@ function App() {
                 sessions={sessions}
                 selectedPid={selected?.type === "process" ? selected.value.pid : undefined}
                 loading={initialLoading}
+                loadError={snapshotError}
                 runtimeWin32Enabled={settings.runtimeWin32Enabled}
                 onSelect={(process) => setSelectionKey({ type: "process", pid: process.pid })}
                 onSelectSession={(candidate) =>
@@ -1071,6 +1086,7 @@ function App() {
                 quarantinedSessions={quarantinedSessions}
                 selectedKey={selected?.type === "session" ? sessionKey(selected.value) : undefined}
                 loading={initialLoading}
+                loadError={snapshotError}
                 highlightTarget={highlightTarget}
                 onImportSession={() => void chooseImportSession()}
                 onRestoreQuarantinedSession={(item) => void restoreQuarantinedSession(item)}
@@ -1093,6 +1109,7 @@ function App() {
                 sessions={sessions}
                 selectedKey={relationSelectionKey}
                 loading={initialLoading}
+                loadError={snapshotError}
                 onSelectRelation={setRelationSelectionKey}
                 onSelectSession={(session) => {
                   setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId });
@@ -1105,6 +1122,7 @@ function App() {
               <DoctorPanel
                 checks={doctor}
                 loading={initialLoading}
+                loadError={snapshotError}
                 onRepair={(name) => void repairDiagnostic(name)}
                 onRevealPath={(targetPath) => void revealPath(targetPath)}
               />
@@ -1137,6 +1155,7 @@ function App() {
               <RelationInspector
                 selected={selectedRelation}
                 loading={initialLoading}
+                loadError={snapshotError}
                 onSelectSession={(session) => {
                   setSelectionKey({ type: "session", agent: session.agent, id: session.sessionId });
                   navigateView("sessions");
@@ -1148,6 +1167,7 @@ function App() {
                 selected={selected}
                 relations={relations}
                 loading={initialLoading}
+                loadError={snapshotError}
                 showUnknownCandidates={settings.showUnknownCandidates}
                 transcriptPreviewEnabled={settings.transcriptPreviewEnabled}
                 highlightTarget={highlightTarget}
@@ -1631,6 +1651,7 @@ function ProcessList(props: {
   sessions: AgentSession[];
   selectedPid?: number | undefined;
   loading: boolean;
+  loadError?: string | undefined;
   runtimeWin32Enabled: boolean;
   onSelect: (process: AgentProcess) => void;
   onSelectSession: (candidate: SessionCandidate) => void;
@@ -1664,6 +1685,7 @@ function ProcessList(props: {
     startProcessListTransition(action);
     window.setTimeout(() => setIsReordering(false), 140);
   };
+  if (props.loadError) return <LoadErrorState message={props.loadError} />;
   if (props.loading) return <LoadingState />;
   if (!props.processes.length) {
     return (
@@ -1931,6 +1953,7 @@ function SessionList(props: {
   quarantinedSessions: QuarantinedSession[];
   selectedKey?: string | undefined;
   loading: boolean;
+  loadError?: string | undefined;
   highlightTarget: SearchResultRecord | null;
   onImportSession: () => void;
   onRestoreQuarantinedSession: (item: QuarantinedSession) => void;
@@ -2015,6 +2038,7 @@ function SessionList(props: {
     const selected = visibleSessions.filter((item) => selectedSessionKeys.has(sessionKey(item)));
     return selected.length ? selected : [session];
   };
+  if (props.loadError) return <LoadErrorState message={props.loadError} />;
   if (props.loading) return <LoadingState />;
   if (!props.sessions.length) {
     return (
@@ -2359,6 +2383,7 @@ function RelationList(props: {
   sessions: AgentSession[];
   selectedKey: string | null;
   loading: boolean;
+  loadError?: string | undefined;
   onSelectRelation: (key: string | null) => void;
   onSelectSession: (session: AgentSession) => void;
   onRevealPath: (targetPath: string) => void;
@@ -2383,6 +2408,7 @@ function RelationList(props: {
       props.onSelectRelation(relationKey(filteredRelations[0]!));
     }
   }, [filteredRelations, props.selectedKey, props.onSelectRelation]);
+  if (props.loadError) return <LoadErrorState message={props.loadError} />;
   if (props.loading) return <LoadingState />;
   if (!props.relations.length) {
     return (
@@ -2544,12 +2570,14 @@ function RelationEndpoint(props: {
 function DoctorPanel(props: {
   checks: Diagnostic[];
   loading: boolean;
+  loadError?: string | undefined;
   onRepair: (name: string) => void;
   onRevealPath: (targetPath: string) => void;
 }) {
   const { t } = useTranslation();
   const translateDiagnosticHelp = (key: string, options?: Record<string, unknown>) =>
     String(options ? t(key, options) : t(key));
+  if (props.loadError) return <LoadErrorState message={props.loadError} />;
   if (props.loading) return <LoadingState />;
   if (!props.checks.length) {
     return (
@@ -4574,10 +4602,18 @@ function ActionButton(props: { label: string; onClick: () => void; disabled?: bo
 function RelationInspector(props: {
   selected: RelationSelection;
   loading: boolean;
+  loadError?: string | undefined;
   onSelectSession: (session: AgentSession) => void;
   onRevealPath: (targetPath: string) => void;
 }) {
   const { t } = useTranslation();
+  if (props.loadError) {
+    return (
+      <aside className="inspector">
+        <LoadErrorState message={props.loadError} compact />
+      </aside>
+    );
+  }
   if (props.loading) {
     return (
       <aside className="inspector">
@@ -4668,6 +4704,7 @@ function Inspector(props: {
   selected: Selection;
   relations: Relation[];
   loading: boolean;
+  loadError?: string | undefined;
   showUnknownCandidates: boolean;
   transcriptPreviewEnabled: boolean;
   highlightTarget: SearchResultRecord | null;
@@ -4680,6 +4717,13 @@ function Inspector(props: {
   const { t, i18n: activeI18n } = useTranslation();
   const tr = (key: string) => t(key);
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
+  if (props.loadError) {
+    return (
+      <aside className="inspector">
+        <LoadErrorState message={props.loadError} compact />
+      </aside>
+    );
+  }
   if (props.loading) {
     return (
       <aside className="inspector">
@@ -5449,6 +5493,19 @@ function LoadingState(props: { compact?: boolean }) {
   );
 }
 
+function LoadErrorState(props: { message: string; compact?: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className={`emptyState loadingState ${props.compact ? "compact" : ""}`}>
+      <div>
+        <AlertTriangle size={22} />
+      </div>
+      <h2>{t("views.loading.errorTitle")}</h2>
+      <p>{t("views.loading.errorDetail", { message: props.message })}</p>
+    </div>
+  );
+}
+
 function AgentTile(props: { agent: AgentKind; compact?: boolean | undefined }) {
   const { t } = useTranslation();
   return (
@@ -6206,6 +6263,24 @@ function formatMaybeDate(value: string | undefined, locale?: string) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function smokeInitialView(): View | undefined {

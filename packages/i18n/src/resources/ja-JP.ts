@@ -285,7 +285,9 @@ export const jaJP = {
     },
     loading: {
       title: "ローカル Agent 状態を読み込み中",
-      detail: "Win32_Process、Codex SQLite/JSONL、Claude セッションファイルを確認しています。"
+      detail: "Win32_Process、Codex SQLite/JSONL、Claude セッションファイルを確認しています。",
+      errorTitle: "Agent state load failed",
+      errorDetail: "{{message}}. Refresh to retry; AgentScope will keep data read-only until a fresh snapshot loads."
     }
   },
   settings: {

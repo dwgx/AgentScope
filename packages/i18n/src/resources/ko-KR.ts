@@ -284,7 +284,9 @@ export const koKR = {
     },
     loading: {
       title: "로컬 Agent 상태 읽는 중",
-      detail: "Win32_Process, Codex SQLite/JSONL, Claude 세션 파일을 확인하고 있습니다."
+      detail: "Win32_Process, Codex SQLite/JSONL, Claude 세션 파일을 확인하고 있습니다.",
+      errorTitle: "Agent state load failed",
+      errorDetail: "{{message}}. Refresh to retry; AgentScope will keep data read-only until a fresh snapshot loads."
     }
   },
   settings: {

@@ -300,7 +300,9 @@ export const enUS = {
     },
     loading: {
       title: "Reading local agent state",
-      detail: "Enumerating Win32_Process, Codex SQLite/JSONL, and Claude session files."
+      detail: "Enumerating Win32_Process, Codex SQLite/JSONL, and Claude session files.",
+      errorTitle: "Agent state load failed",
+      errorDetail: "{{message}}. Refresh to retry; AgentScope will keep data read-only until a fresh snapshot loads."
     }
   },
   settings: {
