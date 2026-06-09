@@ -122,6 +122,22 @@ describe("Codex control surfaces", () => {
     await expect(readCodexControlDocument("skill:..", home)).rejects.toThrow(/Invalid Codex skill/);
   });
 
+  it("redacts sensitive allowlisted documents and refuses to save sensitive content", async () => {
+    const home = await tempHome();
+    const agentsPath = path.join(home, ".codex", "AGENTS.md");
+    await writeFile(agentsPath, "Use bearer token fake-redacted-token-for-test\n");
+
+    const doc = await readCodexControlDocument("agents.global", home);
+
+    expect(doc.redacted).toBe(true);
+    expect(doc.editable).toBe(false);
+    expect(doc.content).not.toContain("fake-redacted-token-for-test");
+    expect(doc.warnings.join("\n")).toContain("Sensitive content");
+    await expect(
+      saveCodexControlDocument("rules:default.rules", "Authorization = fake-redacted-token-for-test\n", "0".repeat(64), home)
+    ).rejects.toThrow(/sensitive-looking content/);
+  });
+
   it("keeps raw config.toml read-only so it cannot bypass structured controls", async () => {
     const home = await tempHome();
     await writeFile(

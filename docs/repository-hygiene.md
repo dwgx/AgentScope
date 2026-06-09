@@ -1,0 +1,78 @@
+# Repository Hygiene And Leak Audit
+
+Last updated: 2026-06-09.
+
+This document records repository-level hygiene rules for AgentScope handoff work. It covers repository contents, generated artifacts, screenshots, and accidental sensitive data exposure. It does not replace runtime security checks in Electron main or `packages/core`.
+
+## Current Audit Result
+
+Source: local repository inspection and subagent read-only audit on 2026-06-09.
+
+- No real credential/API key/PAT/JWT leak was found in tracked or untracked non-ignored files, or targeted git-history scans.
+- No tracked `node_modules`, `dist`, `out`, real `.jsonl`, or real `.sqlite` files were found.
+- Ignored `apps/desktop/out/` contains build output and smoke screenshots with local paths, session titles, PIDs, and session IDs. These are local-only and must not be shared or committed.
+- Some tests still use realistic Windows paths and fake tokens as fixtures. They are allowed but should be gradually migrated to clearly synthetic values.
+- Documentation should prefer `%USERPROFILE%` and `%WORKSPACE%` over real user names and project roots.
+
+## Do Not Commit
+
+- `node_modules/`
+- `dist/`
+- `out/`
+- `tmp/`
+- `.codex/`
+- `.claude/`
+- `.agentscope/`
+- real `*.jsonl`
+- real `*.sqlite`, `*.sqlite-wal`, `*.sqlite-shm`
+- credentials, auth files, installation IDs, private plugin caches, screenshots containing real session content
+
+## Required Checks
+
+Run before handoff after code changes:
+
+```powershell
+npm run audit:repo
+npm run typecheck
+npm test
+npm run i18n:check
+npm run package
+git diff --check
+git status --short
+git diff --stat
+```
+
+`npm run audit:repo` checks tracked files and untracked non-ignored files for:
+
+- high-confidence secret patterns such as OpenAI-style `sk-*`, GitHub tokens, OAuth/JWT-like tokens, AWS key IDs, and Slack tokens.
+- tracked generated/local artifact paths.
+- real session/database extensions.
+- hard-coded local user/project paths outside known test fixtures.
+
+## Screenshot Rules
+
+Smoke screenshots are useful for UI review, but they often include local paths and session titles.
+
+- Store screenshots only under ignored paths such as `apps/desktop/out/smoke/`.
+- Do not commit screenshots unless they are sanitized fixtures.
+- Do not use real session screenshots in public docs.
+- If a screenshot is needed for handoff, describe what was verified and keep the file local.
+
+## If A Real Secret Is Found
+
+Do not rewrite git history automatically.
+
+1. Remove or redact the secret from current tracked or untracked non-ignored files.
+2. Tell the user exactly where it was found.
+3. Recommend rotate/revoke of the credential.
+4. Ask before using `git filter-repo`, BFG, force-push, or any history rewrite.
+
+## Runtime Leak Boundaries
+
+Repository hygiene does not prove runtime safety. Keep these code-level boundaries:
+
+- JSONL search must stay safe-field-only and must not return raw transcript excerpts.
+- `auth.json` and `.credentials.json` are metadata-only.
+- Electron `openPath` must not open transcript/history/log bodies, executables, scripts, SQLite/DB files, native modules, credentials, auth, config, plugins, skills, or rules.
+- Snapshot export should be redacted by default.
+- Notifications and inspectors should display compact paths by default and reveal full paths only through explicit allowlisted actions.

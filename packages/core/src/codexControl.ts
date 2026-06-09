@@ -586,19 +586,17 @@ export async function readCodexControlDocument(id: string, home = userHome()): P
     throw new Error(`Codex control document is too large for built-in editing: ${resolved.path}`);
   }
   const content = await fs.promises.readFile(resolved.path, textEncoding);
-  const sensitive = resolved.kind === "config" ? sensitiveLineNumbers(content) : [];
+  const sensitive = sensitiveDocumentLineNumbers(content);
   const redacted = sensitive.length > 0;
   return {
     ...resolved,
-    content: redacted ? redactSensitiveTomlLines(content) : content,
+    content: redacted ? redactSensitiveDocumentLines(content) : content,
     sha256: sha256(content),
     bytes: Buffer.byteLength(content, textEncoding),
     updatedAt: stat.updatedAt,
     editable: resolved.editable && !redacted,
     redacted,
-    warnings: redacted
-      ? ["Sensitive key names were detected; AgentScope redacted this document and will not save edits."]
-      : [],
+    warnings: redacted ? ["Sensitive content was detected; AgentScope redacted this document and will not save edits."] : [],
     evidence: [
       {
         source: "codex.control.document",
@@ -717,6 +715,9 @@ export async function saveCodexControlDocument(
   }
   if (resolved.kind === "config" && sensitiveLineNumbers(content).length > 0) {
     throw new Error("AgentScope refuses to save config.toml with sensitive-looking key names.");
+  }
+  if (sensitiveDocumentLineNumbers(content).length > 0) {
+    throw new Error("AgentScope refuses to save Codex control documents with sensitive-looking content.");
   }
   if (resolved.kind === "config") {
     const validation = validateTomlShape(content);
@@ -1816,12 +1817,21 @@ function sensitiveLineNumbers(content: string): number[] {
   return lines;
 }
 
-function redactSensitiveTomlLines(content: string): string {
+function sensitiveDocumentLineNumbers(content: string): number[] {
+  const lines: number[] = [];
+  content.split(/\r?\n/).forEach((rawLine, index) => {
+    if (isSensitiveDocumentLine(rawLine)) lines.push(index + 1);
+  });
+  return lines;
+}
+
+function redactSensitiveDocumentLines(content: string): string {
   return content
     .split(/\r?\n/)
     .map((line) => {
       const match = /^(\s*[^=]+?=)/.exec(line);
-      return match && isSensitiveTomlLine(line) ? `${match[1]} "*** redacted by AgentScope ***"` : line;
+      if (match && isSensitiveTomlLine(line)) return `${match[1]} "*** redacted by AgentScope ***"`;
+      return isSensitiveDocumentLine(line) ? "*** redacted by AgentScope ***" : line;
     })
     .join("\n");
 }
@@ -1833,6 +1843,16 @@ function isSensitiveTomlLine(rawLine: string): boolean {
   if (key && sensitiveKeyRe.test(key)) return true;
   const [, value = ""] = line.split(/=(.*)/s);
   return sensitiveTokenRe.test(value);
+}
+
+function isSensitiveDocumentLine(rawLine: string): boolean {
+  const line = rawLine.trim();
+  if (!line) return false;
+  if (isSensitiveTomlLine(line)) return true;
+  if (sensitiveTokenRe.test(line)) return true;
+  if (/\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]+)\b/.test(line)) return true;
+  if (/\b(?:api[_-]?key|authorization|bearer|password|refresh[_-]?token|access[_-]?token|id[_-]?token)\b/i.test(line)) return true;
+  return false;
 }
 
 async function readSmallText(filePath: string): Promise<string | undefined> {

@@ -1,6 +1,6 @@
 # Local Agent Store Research Notes
 
-Last updated: 2026-06-08.
+Last updated: 2026-06-09.
 
 This document records what AgentScope currently knows about local Codex and Claude Code stores on Windows. Split each claim into source type: official documentation, local observation, or code implementation.
 
@@ -46,7 +46,7 @@ Claude Code:
 
 ### Local Observation On This Machine
 
-The observed `C:\Users\dwgx1\.codex` contains:
+The observed `%USERPROFILE%\.codex` contains:
 
 - `sessions/`
 - `state_5.sqlite`, `state_5.sqlite-wal`, `state_5.sqlite-shm`
@@ -59,6 +59,8 @@ The observed `C:\Users\dwgx1\.codex` contains:
 - `plugins/`, `skills/`, `rules/`, `memories/`
 - `.sandbox`, `.sandbox-bin`, `.sandbox-secrets`
 - `node_repl/`, `browser/`, `computer-use/`
+- `archived_sessions/` may exist on machines where Codex Desktop has archived
+  conversations. Absence of this directory is not a diagnostic failure.
 
 Do not treat all of these as stable public APIs.
 
@@ -89,6 +91,20 @@ Do not treat all of these as stable public APIs.
 - Writes `quarantine/<id>/journal.json` for delete execution, including backup,
   file move, patch, SQLite backup, and SQLite delete steps.
 
+`packages/core/src/codexControl.ts`:
+
+- Inventories safe Codex control surfaces.
+- Treats `auth.json` as protected metadata only: existence, size, mtime, and
+  configured storage mode. It must not read token content or return a file hash.
+- Keeps raw `config.toml` read-only and exposes structured allowlisted
+  mutations with backup, sha256 conflict check, risk classification, and
+  mutation journal.
+- Shows rules, user AGENTS, and user skills only through allowlisted document
+  IDs. Sensitive-looking content is redacted and cannot be saved.
+- Summarizes archives, memories, browser/computer-use state, plugin/MCP state,
+  and SQLite tables without reading hidden reasoning, memory bodies, browser
+  page bodies, screenshots, or log bodies.
+
 ### Codex Risk Notes
 
 - Codex does not currently expose a reliable PID-to-thread exact map in AgentScope. Most running Codex process matches are heuristic.
@@ -114,7 +130,7 @@ Use those docs for public command/config claims. The local session file layout b
 
 ### Local Observation On This Machine
 
-The observed `C:\Users\dwgx1\.claude` contains:
+The observed `%USERPROFILE%\.claude` contains:
 
 - `sessions/`
 - `projects/`

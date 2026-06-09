@@ -17,6 +17,7 @@
     "test": "vitest run",
     "typecheck": "npm --workspace @agentscope/shared run typecheck && npm --workspace @agentscope/i18n run typecheck && npm --workspace @agentscope/core run typecheck && npm --workspace @agentscope/desktop run typecheck",
     "i18n:check": "npm --workspace @agentscope/i18n run build && npm --workspace @agentscope/i18n run check",
+    "audit:repo": "node scripts/audit-repository.mjs",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
     "electron:repair": "node scripts/repair-electron.mjs",

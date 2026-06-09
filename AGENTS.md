@@ -25,6 +25,7 @@ AgentScope is a Windows-only TypeScript/Electron desktop console for local AI co
 Run these before handoff after code changes:
 
 ```powershell
+npm run audit:repo
 npm run typecheck
 npm test
 npm run i18n:check
@@ -50,6 +51,7 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 - `packages/core/src/claude.ts`: Claude session maps, daemon/jobs, transcript discovery.
 - `packages/core/src/scope.ts`: unified snapshot merge, process/session candidate scoring, confidence and relations.
 - `packages/core/src/search.ts`: Codex SQLite and JSONL search.
+- `packages/core/src/codexControl.ts`: Codex config/control surfaces, structured mutation, protected auth metadata, rules/skills editing, and mutation journal. Treat this file as security-sensitive.
 - `packages/core/src/sessionOps.ts`: backup, delete, import planning/execution. Treat this file as high risk.
 - `apps/desktop/src/main/main.ts`: Electron IPC, shell path allowlists, dialogs.
 - `apps/desktop/src/preload/preload.cjs`: narrow renderer API.
@@ -71,7 +73,8 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 
 - `Ctrl+F` opens search everywhere. `Esc` closes search first, then steps back view history.
 - Search runs as-you-type. Clearing search must cancel stale async results.
-- Notifications appear bottom-center, do not close on body click, and expose explicit actions such as reveal/open path.
+- Notifications appear bottom-center, do not close on body click, and expose explicit role-aware path actions.
+- Only AgentScope journal/manifest/redacted-export text evidence may be opened. Direct transcript, history, vendor log, executable, script, SQLite, DB, native module, credentials, auth, config, plugin, skill, and rule paths must be reveal-only or rejected in Electron main.
 - Session row right-click menu supports focused controls: backup, delete, locate transcript, resume/fork for a single session, and multi-select backup/delete. Keep it compact and row-anchored.
 - The Sessions page owns import backup. Inspector safe control should stay focused on the selected session.
 - Keep icons visually centered in `AgentTile`, buttons, segmented controls, and menus.
@@ -81,6 +84,7 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 
 The next AI should read these before changing the project:
 
+- `README.md`
 - `docs/handoff-next-ai.md`
 - `docs/research-local-agent-stores.md`
-- `README.md`
+- `docs/repository-hygiene.md`

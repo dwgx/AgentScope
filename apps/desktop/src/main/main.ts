@@ -29,6 +29,7 @@ let mainWindow: BrowserWindow | undefined;
 let corePromise: Promise<typeof AgentScopeCore> | undefined;
 let lastCoreError: string | undefined;
 let controlMode: "safe" | "readOnly" = "safe";
+const openedTextArtifacts = new Set<string>();
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -448,7 +449,9 @@ async function exportSnapshot() {
   const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { canceled: true };
   const snapshot = await buildSnapshot();
-  fs.writeFileSync(result.filePath, JSON.stringify(snapshot, null, 2), "utf8");
+  fs.writeFileSync(result.filePath, JSON.stringify(redactSnapshotForExport(snapshot), null, 2), "utf8");
+  const normalized = normalizeFsPath(result.filePath);
+  if (normalized) openedTextArtifacts.add(normalized);
   return { canceled: false, path: result.filePath };
 }
 
@@ -527,7 +530,58 @@ function isAllowedOpenPath(targetPath: string): boolean {
   }
   const ext = path.extname(targetPath).toLowerCase();
   if ([".exe", ".cmd", ".bat", ".ps1", ".msi", ".dll", ".node", ".sqlite", ".db"].includes(ext)) return false;
-  return [".json", ".jsonl", ".txt", ".md", ".log"].includes(ext);
+  if (![".json", ".txt", ".md", ".log"].includes(ext)) return false;
+  return isAgentScopeTextArtifact(targetPath);
+}
+
+function isAgentScopeTextArtifact(targetPath: string): boolean {
+  const normalized = normalizeFsPath(targetPath);
+  if (!normalized) return false;
+  if (openedTextArtifacts.has(normalized)) return true;
+  const agentScopeRoot = normalizeFsPath(path.join(os.homedir(), ".agentscope"));
+  const userDataBackups = normalizeFsPath(path.join(app.getPath("userData"), "backups"));
+  const userDataQuarantine = normalizeFsPath(path.join(app.getPath("userData"), "quarantine"));
+  const operationRoots = [agentScopeRoot, userDataBackups, userDataQuarantine].filter((item): item is string => !!item);
+  if (!operationRoots.some((root) => normalized === root || normalized.startsWith(`${root}${path.sep}`))) return false;
+  const basename = path.basename(normalized).toLowerCase();
+  return basename === "journal.json" || basename === "restore-journal.json" || basename === "manifest.json";
+}
+
+function redactSnapshotForExport(snapshot: ScopeSnapshot): unknown {
+  return redactExportValue(snapshot, "");
+}
+
+function redactExportValue(value: unknown, key: string): unknown {
+  if (Array.isArray(value)) return value.map((item) => redactExportValue(item, key));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [entryKey, redactExportValue(entryValue, entryKey)]));
+  }
+  if (typeof value !== "string") return value;
+  if (/^(commandLine|windowTitle|title|preview)$/i.test(key)) return value ? `[redacted ${key}]` : value;
+  if (/^(path|cwd|cwdHint|transcriptPath|executablePath|runtimeWorkingDir)$/i.test(key)) return redactPathForExport(value);
+  return redactEmbeddedPaths(value);
+}
+
+function redactPathForExport(value: string): string {
+  const normalized = redactEmbeddedPaths(value);
+  if (/^[A-Za-z]:\\/.test(normalized) || normalized.startsWith("\\\\")) return "<local-path>";
+  return normalized;
+}
+
+function redactEmbeddedPaths(value: string): string {
+  const home = normalizeFsPath(os.homedir());
+  let out = value.replace(/\//g, "\\");
+  if (home) {
+    const escapedHome = escapeRegExp(home);
+    out = out.replace(new RegExp(escapedHome, "ig"), "%USERPROFILE%");
+  }
+  out = out.replace(/[A-Za-z]:\\Users\\[^\\\s"]+/gi, (match) => match.replace(/^[A-Za-z]:\\Users\\[^\\]+/i, "%USERPROFILE%"));
+  out = out.replace(/[A-Za-z]:\\(?:Project|work)\\[^\\\s"]+/gi, "<local-path>");
+  return out;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function allowedLocalPaths(): Promise<string[]> {

@@ -1,8 +1,16 @@
 node_modules/
 dist/
 out/
+tmp/
 .vite/
 coverage/
 *.log
 *.tsbuildinfo
 AgentScope-*.exe
+.codex/
+.claude/
+.agentscope/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.jsonl

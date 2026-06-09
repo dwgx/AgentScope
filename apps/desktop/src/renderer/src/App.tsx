@@ -142,6 +142,7 @@ interface NoticeState {
 interface NoticeItem {
   label?: string | undefined;
   value: string;
+  fullValue?: string | undefined;
   path?: string | undefined;
   tone?: "ok" | "warn" | undefined;
   onClick?: (() => void) | undefined;
@@ -541,13 +542,13 @@ function App() {
       result
         ? {
             message: t("toast.openFailed", { message: result }),
-            items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }],
+            items: [noticePathItem(t("common.path.path"), targetPath, "warn")],
             actions: noticePathActions(targetPath, "directory"),
             ttlMs: 30000
           }
         : {
             message: t("toast.pathOpened"),
-            items: [{ label: t("common.path.path"), value: targetPath, path: targetPath }],
+            items: [noticePathItem(t("common.path.path"), targetPath)],
             actions: noticePathActions(targetPath, "text")
           }
     );
@@ -559,7 +560,7 @@ function App() {
     if (result) {
       showNotice({
         message: t("toast.operationFailed", { message: result }),
-        items: [{ label: t("common.path.path"), value: targetPath, path: targetPath, tone: "warn" }],
+        items: [noticePathItem(t("common.path.path"), targetPath, "warn")],
         actions: noticePathActions(targetPath, "directory"),
         ttlMs: 30000
       });
@@ -567,7 +568,7 @@ function App() {
     }
     showNotice({
       message: t("toast.pathRevealed"),
-      items: [{ label: t("common.path.path"), value: targetPath, path: targetPath }],
+      items: [noticePathItem(t("common.path.path"), targetPath)],
       actions: noticePathActions(targetPath, "directory")
     });
   }
@@ -933,7 +934,17 @@ function App() {
 
   function canOpenNoticePath(role: NoticePathRole, targetPath: string): boolean {
     if (role !== "text" && role !== "journal" && role !== "manifest") return false;
-    return /\.(?:json|jsonl|txt|md|log)$/i.test(targetPath);
+    return /\.(?:json|txt|md|log)$/i.test(targetPath);
+  }
+
+  function noticePathItem(label: string, targetPath: string, tone?: NoticeItem["tone"]): NoticeItem {
+    return {
+      label,
+      value: displayPath(targetPath) ?? targetPath,
+      fullValue: targetPath,
+      path: targetPath,
+      ...(tone ? { tone } : {})
+    };
   }
 
   function showImportOrRestoreNotice(result: SessionImportResult | SessionRestoreResult) {
@@ -4675,7 +4686,7 @@ function TypographyPreviewClean(props: { settings: AppSettings }) {
       <div>
         <span>{t("settings.fontPreview.title")}</span>
         <strong>AgentScope trace layer</strong>
-        <p>Windows-native control console | PID 31720 | cwd D:\Project\AgentScope</p>
+        <p>Windows-native control console | PID 31720 | cwd %WORKSPACE%\AgentScope</p>
       </div>
       <div className="fontPreviewGrid">
         <p lang="en">Process evidence, session index, transcript search.</p>
@@ -5031,7 +5042,7 @@ function RelationInspectorEndpoint(props: {
     <div className="relationInspectorEndpoint">
       <span>{props.label}</span>
       <strong>{session ? displayTitle(session) : short(props.fallbackId)}</strong>
-      <em className="mono">{maybePath ?? props.fallbackId}</em>
+      <em className="mono">{maybePath ? displayPath(maybePath) : props.fallbackId}</em>
       <div>
         {session && (
           <button type="button" onClick={() => props.onSelectSession(session)}>
@@ -5042,7 +5053,7 @@ function RelationInspectorEndpoint(props: {
         {maybePath && (
           <button type="button" onClick={() => props.onRevealPath(maybePath)}>
             <FolderOpen size={13} />
-            <span>{maybePath}</span>
+            <span>{displayPath(maybePath)}</span>
           </button>
         )}
       </div>
@@ -5437,7 +5448,7 @@ function TranscriptHitContext(props: { context: TranscriptContext | undefined })
           {props.context.timestamp && <span>{formatMaybeDate(props.context.timestamp)}</span>}
         </div>
         <p className="hitExcerpt mono">{t("inspector.safeSearchHitDetail")}</p>
-        <span className="mono">{props.context.path}</span>
+        <span className="mono">{displayPath(props.context.path)}</span>
       </section>
     </FieldGroup>
   );
@@ -5576,7 +5587,7 @@ function CandidateList(props: { candidates: SessionCandidate[]; showUnknown: boo
           </div>
           <strong>{candidateTitle(candidate)}</strong>
           <span className="mono">
-            {candidate.cwd || candidate.transcriptPath || t("common.path.noPath")}
+            {displayPath(candidate.cwd || candidate.transcriptPath) || t("common.path.noPath")}
           </span>
           <div className="candidateFacts">
             <Field label={t("inspector.fields.session")} value={candidate.sessionId} mono />
@@ -5644,10 +5655,11 @@ function FieldGroup(props: { title: string; children: ReactNode }) {
 
 function Field(props: { label: string; value: ReactNode; mono?: boolean; long?: boolean }) {
   if (props.value === undefined || props.value === null || props.value === "") return null;
+  const value = typeof props.value === "string" && looksLikeLocalPath(props.value) ? displayPath(props.value) ?? props.value : props.value;
   return (
     <div className={`field ${props.long ? "longField" : ""}`}>
       <span>{props.label}</span>
-      <strong className={props.mono ? "mono" : ""}>{props.value}</strong>
+      <strong className={props.mono ? "mono" : ""}>{value}</strong>
     </div>
   );
 }
@@ -5661,7 +5673,7 @@ function EvidenceList(props: { evidence: Evidence[] }) {
           <div className="evidenceItem" key={`${item.source}:${item.path}:${item.field}:${index}`}>
             <strong>{item.source}</strong>
             <p>{item.detail}</p>
-            {item.path && <span className="mono">{item.path}</span>}
+            {item.path && <span className="mono">{displayPath(item.path)}</span>}
             {item.field && <em>{item.field}</em>}
           </div>
         ))
@@ -6846,6 +6858,28 @@ function compactPath(value?: string): string | undefined {
   return `${root}\\...\\${parts.slice(-2).join("\\")}`;
 }
 
+function displayPath(value?: string): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.replace(/\//g, "\\");
+  const userMatch = /^[A-Za-z]:\\Users\\[^\\]+(\\.*)?$/i.exec(normalized);
+  if (userMatch) {
+    const rest = userMatch[1] ?? "";
+    const userPath = `%USERPROFILE%${rest}`;
+    const parts = userPath.split("\\").filter(Boolean);
+    return parts.length > 4 ? `${parts[0]}\\...\\${parts.slice(-2).join("\\")}` : userPath;
+  }
+  return compactPath(normalized);
+}
+
+function looksLikeLocalPath(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\") || value.startsWith("%USERPROFILE%\\");
+}
+
+function displayNoticeItemValue(item: NoticeItem): string {
+  if (item.path) return displayPath(item.path) ?? item.value;
+  return item.value;
+}
+
 function revealableCodexSurfacePath(surface: CodexControlSurface): string | undefined {
   if (!surface.path) return undefined;
   if (surface.id === "config.global" || surface.id === "plugins.summary") return undefined;
@@ -6951,10 +6985,10 @@ function Notification(props: { notice: NoticeState; onClose: () => void; onRevea
                 className={`notificationItem ${item.tone ?? ""}`}
                 onClick={item.onClick ?? (() => item.path && void props.onRevealPath(item.path))}
                 disabled={!item.path && !item.onClick}
-                title={item.value}
+                title={item.path ? displayPath(item.path) ?? item.value : item.value}
               >
                 {item.label && <span>{item.label}</span>}
-                <em className="mono">{item.value}</em>
+                <em className="mono">{displayNoticeItemValue(item)}</em>
               </button>
             ))}
             {hasMore && (

@@ -28,12 +28,16 @@ and React/TypeScript renderer for the control surface.
 - Resolves Claude transcripts under `%USERPROFILE%\.claude\projects`.
 - Reads Codex `%USERPROFILE%\.codex\state_5.sqlite`.
 - Scans Codex rollout JSONL under `%USERPROFILE%\.codex\sessions`.
+- Inventories safe Codex control surfaces such as config modes, MCP summary,
+  rules, user skills, archives, memories, browser/computer-use state, and
+  protected auth metadata.
 - Scores process-to-session candidates with evidence from PID, cwd,
   transcript path, session id, window title, and start/update time.
 - Tracks confidence: `exact`, `indexed`, `heuristic`, `unknown`. Time-only
   candidates stay `unknown` and are shown as weak evidence, not as matches.
 - Shows evidence for every association.
-- Provides Processes, Sessions, Relations, Search, Doctor, and Settings views.
+- Provides Processes, Sessions, Relations, Doctor, Codex Control, and Settings
+  views plus global `Ctrl+F` search.
 - Uses a flat graphite desktop UI with functional Settings sections for
   General, Appearance, Indexing, Runtime, and Diagnostics.
 - Supports explicit session backup, safe delete, and AgentScope backup import
@@ -41,14 +45,19 @@ and React/TypeScript renderer for the control surface.
   applies journaled row-level changes, then moves removable files to quarantine.
   Claude global history/state references are inspect-only until reversible
   patch/restore support exists.
+- Supports a Sessions recycle panel for validated quarantine restore.
+- Supports Codex/Claude resume/fork launcher controls when safe launcher
+  evidence is available.
 
 ## Commands
 
 ```powershell
 npm install
+npm run audit:repo
 npm run typecheck
 npm test
-npm run build
+npm run i18n:check
+npm run package
 npm run dev
 ```
 
@@ -66,7 +75,7 @@ npm run electron:repair
 Packaging smoke test:
 
 ```powershell
-npm --workspace @agentscope/desktop run package
+npm run package
 ```
 
 The unpacked Windows app is written to:
@@ -76,7 +85,7 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 ```
 
 CI runs on `windows-latest` and verifies install, typecheck, tests, production
-build, and an unpacked Electron package artifact.
+build, repository audit, and an unpacked Electron package artifact.
 
 ## Safety Boundaries
 
@@ -86,6 +95,8 @@ Current behavior:
 - Does not decrypt hidden/internal vendor state.
 - Only parses local plaintext JSONL, SQLite, PID mappings, path encodings, and
   index relations.
+- JSONL search only checks safe metadata fields and does not return transcript
+  body excerpts.
 - Backs up sessions under `%USERPROFILE%\.agentscope\backups`.
 - Deletes only after backup and quarantine under
   `%USERPROFILE%\.agentscope\quarantine`.
@@ -101,6 +112,12 @@ Current behavior:
   deleted.
 - Never imports or deletes credentials, auth files, global settings, plugins,
   skills, rules, or full global history as a session side effect.
+- Electron main only opens AgentScope-owned text evidence such as journals,
+  manifests, and redacted exports. Transcripts, histories, logs, executables,
+  scripts, SQLite/DB files, native modules, credentials, auth, config, plugins,
+  skills, and rules are reveal-only or rejected.
+- Snapshot export is redacted by default to reduce accidental sharing of full
+  local paths, commands, titles, and previews.
 
 Known limits:
 
