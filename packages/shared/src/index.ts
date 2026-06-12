@@ -204,6 +204,7 @@ export interface SessionOperationDatabaseChange {
   where: string;
   action: "delete" | "insert" | "update" | "inspect" | "skip";
   estimatedRows?: number | undefined;
+  rollbackParams?: unknown[] | undefined;
   evidence: Evidence[];
 }
 
@@ -404,6 +405,7 @@ export interface CodexControlMutationRequest {
   expectedSha256: string;
   mutations: CodexControlMutation[];
   confirmedHighRisk?: boolean | undefined;
+  highRiskConfirmationToken?: string | undefined;
 }
 
 export interface CodexControlMutationPlan {
@@ -414,6 +416,7 @@ export interface CodexControlMutationPlan {
   blockers: string[];
   warnings: string[];
   highRisk: boolean;
+  highRiskConfirmationToken?: string | undefined;
   backupPath?: string | undefined;
   journalPath?: string | undefined;
   evidence: Evidence[];
@@ -431,6 +434,14 @@ export interface CodexControlDocument {
   editable: boolean;
   redacted: boolean;
   warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexControlRevealResult {
+  id: string;
+  path: string;
+  revealAllowed: boolean;
+  reason?: string | undefined;
   evidence: Evidence[];
 }
 

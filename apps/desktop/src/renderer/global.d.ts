@@ -14,6 +14,7 @@ import type {
   CodexControlCenterSnapshot,
   CodexControlMutationPlan,
   CodexControlMutationRequest,
+  CodexControlRevealResult,
   CodexControlSaveResult,
   CodexControlSnapshot,
   CodexModeConfigPatch,
@@ -45,6 +46,7 @@ export interface AgentScopeApi {
   listCodexControl(): Promise<CodexControlSnapshot>;
   getCodexControlCenter(): Promise<CodexControlCenterSnapshot>;
   readCodexControlDocument(id: string): Promise<CodexControlDocument>;
+  revealCodexControlSurface(id: string): Promise<CodexControlRevealResult>;
   saveCodexControlDocument(
     id: string,
     content: string,

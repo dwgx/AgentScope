@@ -72,6 +72,18 @@ type StrongConfidence = "exact" | "indexed" | "heuristic";
 type SessionLaunchAction = "resume" | "fork";
 type ProcessSortMode = "time" | "memory" | "runtime" | "score" | "tree";
 type ProcessGroupMode = "task" | "role" | "agent" | "parent" | "cwd" | "none";
+interface ProcessTreeRow {
+  process: AgentProcess;
+  depth: number;
+}
+
+interface ProcessGroupView {
+  key: string;
+  label: string;
+  summary?: string | undefined;
+  items: AgentProcess[];
+  rows: ProcessTreeRow[];
+}
 type SessionGroupMode = "agent" | "cwd" | "parent" | "none";
 type SessionKindFilter = "all" | "root" | "child" | "subagent";
 type RelationKindFilter = "all" | Relation["kind"];
@@ -96,6 +108,8 @@ type NoticePathRole =
   | "cwd"
   | "executable"
   | "sqlite";
+type NoticeActionKind = "open" | "reveal";
+type NoticeActionRole = NoticePathRole | "codexControl";
 type SelectionKey =
   | { type: "session"; agent: AgentKind; id: string }
   | { type: "process"; pid: number }
@@ -128,6 +142,8 @@ interface SearchSuggestion {
 interface NoticeAction {
   label: string;
   onClick: () => void;
+  kind?: NoticeActionKind | undefined;
+  role?: NoticeActionRole | undefined;
 }
 
 interface NoticeState {
@@ -277,9 +293,10 @@ function App() {
   const { t } = useTranslation();
   const smokeView = smokeInitialView();
   const smokeSettingsSection = smokeInitialSettingsSection();
+  const smokeLanguage = smokeInitialLanguage();
   const [snapshot, setSnapshot] = useState<ScopeSnapshot | null>(null);
   const [doctor, setDoctor] = useState<Diagnostic[]>([]);
-  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  const [settings, setSettings] = useState<AppSettings>(() => ({ ...loadSettings(), ...(smokeLanguage ? { language: smokeLanguage } : {}) }));
   const [view, setViewState] = useState<View>(smokeView ?? settings.defaultView);
   const [viewHistory, setViewHistory] = useState<View[]>([]);
   const [selectionKey, setSelectionKey] = useState<SelectionKey>(null);
@@ -440,12 +457,6 @@ function App() {
     void window.agentscope.getAppInfo().then(setAppInfo);
     void window.agentscope.listFonts().then((fonts) => setInstalledFonts(fonts));
   }, []);
-
-  useEffect(() => {
-    if (view === "sessions" && !quarantineLoaded && !quarantineLoading && !quarantineError) {
-      void refreshQuarantineState();
-    }
-  }, [quarantineError, quarantineLoaded, quarantineLoading, view]);
 
   useEffect(() => {
     syncControlMode(settings.controlMode);
@@ -924,10 +935,10 @@ function App() {
   function noticePathActions(targetPath?: string, role: NoticePathRole = "text"): NoticeAction[] {
     if (!targetPath) return [];
     const actions: NoticeAction[] = [
-      { label: t("common.action.reveal"), onClick: () => void revealPath(targetPath) }
+      { label: t("common.action.reveal"), kind: "reveal", role, onClick: () => void revealPath(targetPath) }
     ];
     if (canOpenNoticePath(role, targetPath)) {
-      actions.push({ label: t("common.action.open"), onClick: () => void openPath(targetPath) });
+      actions.push({ label: t("common.action.open"), kind: "open", role, onClick: () => void openPath(targetPath) });
     }
     return actions;
   }
@@ -1038,7 +1049,6 @@ function App() {
   const relations = snapshot?.relations ?? [];
   const selected = resolveSelection(selectionKey, sessions, processes);
   const selectedRelation = resolveRelationSelection(relationSelectionKey, relations, sessions);
-  const activeProcesses = processes.filter((item) => item.agent !== "unknown");
   const matchedProcesses = processes.filter((item) => strongCandidates(item).length > 0).length;
   const initialLoading = snapshot === null && loading;
   const counts = useMemo(
@@ -1071,6 +1081,7 @@ function App() {
       data-density={settings.density}
       data-motion={settings.motion}
       data-inspector={settings.inspector}
+      data-view={view}
       data-font={settings.fontScale}
       data-line-height={settings.uiLineHeight}
       style={
@@ -1135,7 +1146,7 @@ function App() {
           <section className="listPane" key={view}>
             {view === "processes" && (
               <ProcessList
-                processes={activeProcesses}
+                processes={processes}
                 sessions={sessions}
                 selectedPid={selected?.type === "process" ? selected.value.pid : undefined}
                 loading={initialLoading}
@@ -1255,7 +1266,7 @@ function App() {
               />
             )}
           </section>
-          {settings.inspector === "right" && (
+          {settings.inspector === "right" && view !== "settings" && view !== "codexControl" && (
             view === "graph" ? (
               <RelationInspector
                 selected={selectedRelation}
@@ -1326,18 +1337,21 @@ function Sidebar(props: {
           active={props.view === "processes"}
           icon={<Workflow size={17} />}
           label={t("nav.processes")}
+          testId="nav-processes"
           onClick={() => props.setView("processes")}
         />
         <NavButton
           active={props.view === "sessions"}
           icon={<MessagesSquare size={17} />}
           label={t("nav.sessions")}
+          testId="nav-sessions"
           onClick={() => props.setView("sessions")}
         />
         <NavButton
           active={props.view === "graph"}
           icon={<Network size={17} />}
           label={t("nav.relations")}
+          testId="nav-relations"
           onClick={() => props.setView("graph")}
         />
         <NavButton
@@ -1345,6 +1359,7 @@ function Sidebar(props: {
           icon={<Stethoscope size={17} />}
           label={t("nav.doctor")}
           badge={props.warnings}
+          testId="nav-doctor"
           onClick={() => props.setView("doctor")}
         />
       </nav>
@@ -1354,12 +1369,14 @@ function Sidebar(props: {
           active={props.view === "codexControl"}
           icon={<Code2 size={17} />}
           label={t("nav.codexControl")}
+          testId="nav-codex-control"
           onClick={() => props.setView("codexControl")}
         />
         <NavButton
           active={props.view === "settings"}
           icon={<Settings size={17} />}
           label={t("nav.settings")}
+          testId="nav-settings"
           onClick={() => props.setView("settings")}
         />
       </nav>
@@ -1376,10 +1393,11 @@ function NavButton(props: {
   icon: ReactNode;
   label: string;
   badge?: number;
+  testId?: string | undefined;
   onClick: () => void;
 }) {
   return (
-    <button className={`navButton ${props.active ? "active" : ""}`} onClick={props.onClick}>
+    <button className={`navButton ${props.active ? "active" : ""}`} data-testid={props.testId} onClick={props.onClick}>
       {props.icon}
       <span>{props.label}</span>
       {props.badge ? <strong>{props.badge}</strong> : null}
@@ -1789,6 +1807,18 @@ function ProcessList(props: {
     () => groupProcesses(props.processes, sortMode, groupMode),
     [props.processes, sortMode, groupMode]
   );
+  useEffect(() => {
+    if (groupMode !== "task") return;
+    setCollapsed((current) => {
+      const next = new Set(current);
+      for (const group of groups) {
+        const hasSelected = props.selectedPid !== undefined && group.items.some((process) => process.pid === props.selectedPid);
+        if (hasSelected) next.delete(group.key);
+        else if (!next.has(group.key)) next.add(group.key);
+      }
+      return next;
+    });
+  }, [groupMode, groups, props.selectedPid]);
   const toggleGroup = (key: string) => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -1858,6 +1888,7 @@ function ProcessList(props: {
               <ProcessRow
                 key={process.pid}
                 process={process}
+                depth={0}
                 selected={props.selectedPid === process.pid}
                 locale={locale}
                 onSelect={() => props.onSelect(process)}
@@ -1873,13 +1904,15 @@ function ProcessList(props: {
               <button className="groupHeader" onClick={() => toggleGroup(group.key)}>
                 <ChevronRight size={15} className={isCollapsed ? "" : "open"} />
                 <strong>{group.label}</strong>
+                {group.summary && <em>{group.summary}</em>}
                 <span>{t("views.processes.groupCount", { count: group.items.length })}</span>
               </button>
               {!isCollapsed &&
-                group.items.map((process) => (
+                group.rows.map(({ process, depth }) => (
                   <ProcessRow
                     key={process.pid}
                     process={process}
+                    depth={depth}
                     selected={props.selectedPid === process.pid}
                     locale={locale}
                     onSelect={() => props.onSelect(process)}
@@ -1916,6 +1949,7 @@ function ProcessList(props: {
 
 function ProcessRow(props: {
   process: AgentProcess;
+  depth: number;
   selected: boolean;
   locale?: string;
   onSelect: () => void;
@@ -1931,12 +1965,14 @@ function ProcessRow(props: {
   return (
     <button
       className={`processRow ${props.selected ? "selected" : ""}`}
+      style={{ "--process-depth": props.depth } as CSSProperties}
       onClick={props.onSelect}
       onContextMenu={(event) => {
         event.preventDefault();
         props.onContextMenu(event);
       }}
     >
+      {props.depth > 0 && <span className="processTreeLine" aria-hidden="true" />}
       <AgentTile agent={process.agent} />
       <div className="rowMain">
         <div className="rowTop">
@@ -2040,13 +2076,15 @@ function MiniSegmentedControl<T extends string>(props: {
   values: T[];
   label: (value: T) => string;
   onChange: (value: T) => void;
+  testId?: string | undefined;
 }) {
   return (
-    <div className="segmented miniSegmented">
+    <div className="segmented miniSegmented" data-testid={props.testId}>
       {props.values.map((value) => (
         <button
           key={value}
           className={props.value === value ? "active" : ""}
+          data-value={value}
           onClick={() => props.onChange(value)}
         >
           {props.label(value)}
@@ -2100,6 +2138,15 @@ function SessionList(props: {
     x: number;
     y: number;
   } | null>(null);
+  const handleRecycleToggle = () => {
+    setRecycleOpen((current) => {
+      const next = !current;
+      if (next && !props.quarantinedSessions.length && !props.quarantineLoading && !props.quarantineError) {
+        props.onRefreshQuarantine();
+      }
+      return next;
+    });
+  };
   const groups = useMemo(
     () => groupSessions(filterSessionsByKind(props.sessions, kindFilter), groupMode),
     [props.sessions, kindFilter, groupMode]
@@ -2185,7 +2232,7 @@ function SessionList(props: {
         items={props.quarantinedSessions}
         loading={props.quarantineLoading}
         error={props.quarantineError}
-        onToggle={() => setRecycleOpen((current) => !current)}
+        onToggle={handleRecycleToggle}
         onRefresh={props.onRefreshQuarantine}
         onRestore={props.onRestoreQuarantinedSession}
         onRevealPath={props.onRevealPath}
@@ -2198,6 +2245,7 @@ function SessionList(props: {
             values={["all", "root", "child", "subagent"]}
             label={(value) => t(`views.sessions.kindFilter.${value}`)}
             onChange={(value) => setKindFilter(value as SessionKindFilter)}
+            testId="sessions-kind-filter"
           />
         </ToolbarControl>
         <MiniSegmentedControl
@@ -2205,6 +2253,7 @@ function SessionList(props: {
           values={["cwd", "parent", "agent", "none"]}
           label={(value) => t(`views.sessions.group.${value}`)}
           onChange={(value) => setGroupMode(value as SessionGroupMode)}
+          testId="sessions-group-filter"
         />
       </div>
       <div className="rows">
@@ -2309,8 +2358,8 @@ function RecycleBinPanel(props: {
   const visible = props.items.slice(0, 6);
   const restorable = props.items.filter((item) => item.restorePossible).length;
   return (
-    <section className="recyclePanel" data-open={props.open ? "true" : "false"}>
-      <button type="button" className="recycleHeader" onClick={props.onToggle}>
+    <section className="recyclePanel" data-testid="recycle-panel" data-open={props.open ? "true" : "false"}>
+      <button type="button" className="recycleHeader" onClick={props.onToggle} data-testid="recycle-toggle">
         <ChevronRight size={15} className={props.open ? "open" : ""} />
         <div>
           <strong>{t("views.sessions.recycle.title")}</strong>
@@ -2334,7 +2383,14 @@ function RecycleBinPanel(props: {
         ) : visible.length ? (
           <div className="recycleRows">
             {visible.map((item) => (
-              <div className={`recycleRow ${item.restorePossible ? "" : "blocked"}`} key={`${item.agent}:${item.sessionId}:${item.deletedAt}`}>
+              <div
+                className={`recycleRow ${item.restorePossible ? "" : "blocked"}`}
+                key={`${item.agent}:${item.sessionId}:${item.deletedAt}`}
+                data-testid="recycle-row"
+                data-agent={item.agent}
+                data-session-id={item.sessionId}
+                data-restore-status={item.restoreStatus}
+              >
                 <AgentTile agent={item.agent} compact />
                 <div className="recycleMain">
                   <div className="recycleTop">
@@ -2356,16 +2412,29 @@ function RecycleBinPanel(props: {
                   )}
                 </div>
                 <div className="recycleActions">
-                  <button className="iconButton tiny" type="button" title={t("common.action.openJournal")} onClick={() => props.onOpenPath(item.journalPath)}>
+                  <button
+                    className="iconButton tiny"
+                    type="button"
+                    title={t("common.action.openJournal")}
+                    data-testid="recycle-open-journal"
+                    onClick={() => props.onOpenPath(item.journalPath)}
+                  >
                     <FileText size={15} />
                   </button>
-                  <button className="iconButton tiny" type="button" title={t("common.action.reveal")} onClick={() => props.onRevealPath(item.quarantineDir)}>
+                  <button
+                    className="iconButton tiny"
+                    type="button"
+                    title={t("common.action.reveal")}
+                    data-testid="recycle-reveal"
+                    onClick={() => props.onRevealPath(item.quarantineDir)}
+                  >
                     <FolderOpen size={15} />
                   </button>
                   <button
                     className="compactAction"
                     type="button"
                     title={restoreActionTitle(item, t("views.sessions.recycle.restoreTitle"))}
+                    data-testid="recycle-restore"
                     disabled={!item.restorePossible}
                     onClick={() => props.onRestore(item)}
                   >
@@ -2412,6 +2481,9 @@ function SessionRow(props: {
       className={`sessionRow ${props.selected ? "selected" : ""} ${props.multiSelected ? "multiSelected" : ""} ${
         props.highlighted ? "highlighted" : ""
       }`}
+      data-testid="session-row"
+      data-agent={session.agent}
+      data-session-id={session.sessionId}
       onClick={props.onSelect}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -2479,35 +2551,36 @@ function SessionContextMenu(props: {
     <div
       ref={menuRef}
       className="contextMenu sessionContextMenu"
+      data-testid="session-context-menu"
       style={{ left: position.left, top: position.top } as CSSProperties}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <span>
         {multi ? t("views.sessions.context.selectedCount", { count: props.sessions.length }) : displayTitle(primary)}
       </span>
-      <button onClick={props.onBackup}>
+      <button onClick={props.onBackup} data-testid="session-context-backup">
         <Download size={15} />
         <strong>
           {multi ? t("inspector.actions.backupSessions", { count: props.sessions.length }) : t("inspector.actions.backupSession")}
         </strong>
       </button>
-      <button disabled={multi || !primary.transcriptPath} onClick={props.onRevealTranscript}>
+      <button disabled={multi || !primary.transcriptPath} onClick={props.onRevealTranscript} data-testid="session-context-reveal-transcript">
         <FolderOpen size={15} />
         <strong>{t("inspector.actions.revealTranscript")}</strong>
       </button>
       <div className="menuDivider" />
-      <button disabled={multi || !canLaunchSession(primary)} onClick={() => props.onLaunch("resume")}>
+      <button disabled={multi || !canLaunchSession(primary)} onClick={() => props.onLaunch("resume")} data-testid="session-context-resume">
         <CircleDot size={15} />
         <strong>{t("inspector.actions.resumeInAgent", { agent: agentDisplayName(primary.agent, t) })}</strong>
         <em>{suggestedLaunchCommand(primary, "resume")}</em>
       </button>
-      <button disabled={multi || !canLaunchSession(primary)} onClick={() => props.onLaunch("fork")}>
+      <button disabled={multi || !canLaunchSession(primary)} onClick={() => props.onLaunch("fork")} data-testid="session-context-fork">
         <Workflow size={15} />
         <strong>{t("inspector.actions.forkInAgent", { agent: agentDisplayName(primary.agent, t) })}</strong>
         <em>{suggestedLaunchCommand(primary, "fork")}</em>
       </button>
       <div className="menuDivider" />
-      <button className="dangerItem" onClick={props.onDelete}>
+      <button className="dangerItem" onClick={props.onDelete} data-testid="session-context-delete">
         <AlertTriangle size={15} />
         <strong>
           {multi ? t("inspector.actions.deleteSessions", { count: props.sessions.length }) : t("inspector.actions.deleteSession")}
@@ -2571,6 +2644,7 @@ function RelationList(props: {
             values={["all", "parent_child", "process_parent", "transcript", "subagent"]}
             label={(value) => (value === "all" ? t("views.relations.filter.all") : t(`relations.kind.${value}`))}
             onChange={setKindFilter}
+            testId="relations-kind-filter"
           />
         </ToolbarControl>
         <ToolbarControl label={t("views.relations.filter.confidence")}>
@@ -2579,6 +2653,7 @@ function RelationList(props: {
             values={["all", "exact", "indexed", "heuristic", "unknown"]}
             label={(value) => (value === "all" ? t("views.relations.filter.all") : t(`common.confidence.${value}`))}
             onChange={setConfidenceFilter}
+            testId="relations-confidence-filter"
           />
         </ToolbarControl>
         {hasSpawnStatus && (
@@ -2588,12 +2663,14 @@ function RelationList(props: {
               values={["all", "open", "closed", "unknown"]}
               label={(value) => (value === "all" ? t("views.relations.filter.all") : t(`views.relations.filter.${value}`))}
               onChange={setSpawnStatusFilter}
+              testId="relations-spawn-filter"
             />
           </ToolbarControl>
         )}
         <div className="relationSearch">
           <Search size={14} />
           <input
+            data-testid="relations-search"
             value={relationQuery}
             onChange={(event) => setRelationQuery(event.target.value)}
             placeholder={t("views.relations.filter.search")}
@@ -2620,6 +2697,10 @@ function RelationList(props: {
               role="button"
               tabIndex={0}
               className={`relationItem ${props.selectedKey === key ? "selected" : ""}`}
+              data-testid="relation-row"
+              data-relation-kind={relation.kind}
+              data-confidence={relation.confidence}
+              data-spawn-status={relationSpawnStatus(relation) ?? "unknown"}
               key={`${key}:${index}`}
               onClick={() => props.onSelectRelation(key)}
               onKeyDown={(event) => {
@@ -2912,6 +2993,34 @@ function SettingsPanel(props: {
   }, [codexControl, codexControlLoading, section]);
   const selectedCodexSurface = codexControl?.surfaces.find((surface) => surface.id === selectedCodexSurfaceId);
   const readOnlyMode = props.settings.controlMode === "readOnly";
+  const selectCodexSurface = (surface: CodexControlSurface) => {
+    setSelectedCodexSurfaceId(surface.id);
+    setCodexControlTab("files");
+  };
+  const revealCodexSurface = (surface: CodexControlSurface) => {
+    window.agentscope
+      .revealCodexControlSurface(surface.id)
+      .then((result) => {
+        if (result.revealAllowed) {
+          props.onNotice({
+            message: t("toast.pathRevealed"),
+            items: [{ label: localizedCodexSurfaceLabel(surface, (key) => String(t(key))), value: result.path, fullValue: result.path, tone: "ok" }],
+            ttlMs: 12000
+          });
+          return;
+        }
+        props.onNotice({
+          message: t("toast.operationFailed", { message: result.reason ?? t("settings.codexControl.readOnly") }),
+          items: [{
+            label: localizedCodexSurfaceLabel(surface, (key) => String(t(key))),
+            value: result.reason ?? localizedCodexSurfaceDetail(surface, (key) => String(t(key))),
+            tone: "warn"
+          }],
+          ttlMs: 12000
+        });
+      })
+      .catch((error: unknown) => props.onNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) }));
+  };
   useEffect(() => {
     if (section !== "codexControl" || !selectedCodexSurface) return undefined;
     setCodexSaveStatus(undefined);
@@ -2958,6 +3067,19 @@ function SettingsPanel(props: {
             ? t("settings.codexControl.savedWithBackup", { path: result.backupPath })
             : t("settings.codexControl.saved")
         );
+        const surface = codexControl?.surfaces.find((item) => item.id === result.id);
+        props.onNotice({
+          message: t("settings.codexControl.saved"),
+          items: [
+            { label: "Document", value: result.path, fullValue: result.path, tone: "ok" },
+            ...(result.backupPath ? [{ label: "Backup", value: result.backupPath, path: result.backupPath, tone: "ok" as const }] : [])
+          ],
+          actions: [
+            ...(surface ? [{ label: t("common.action.reveal"), kind: "reveal" as const, role: "codexControl" as const, onClick: () => revealCodexSurface(surface) }] : []),
+            ...(result.backupPath ? props.noticePathActions(result.backupPath, "backup") : [])
+          ],
+          ttlMs: 30000
+        });
         return window.agentscope.readCodexControlDocument(codexDocument.id);
       })
       .then((document) => {
@@ -3052,7 +3174,10 @@ function SettingsPanel(props: {
           }
           throw new Error(plan.blockers.join("; "));
         }
-        return window.agentscope.executeCodexControlMutation(request);
+        return window.agentscope.executeCodexControlMutation({
+          ...request,
+          highRiskConfirmationToken: plan.highRiskConfirmationToken
+        });
       })
       .then((result) => {
         if (!result) return;
@@ -3153,6 +3278,7 @@ function SettingsPanel(props: {
                 >
                   <SegmentedControl
                     value={props.settings.controlMode}
+                    testId="settings-control-mode"
                     values={[
                       ["safe", t("settings.controlMode.safe")],
                       ["readOnly", t("settings.controlMode.readOnly")]
@@ -3647,6 +3773,7 @@ function SettingsPanel(props: {
                 {codexControlError && <p className="inlineError">{codexControlError}</p>}
                 <CodexControlCenterPanel
                   snapshot={codexCenter}
+                  surfaces={codexControl?.surfaces}
                   draft={codexCenterDraft}
                   tab={codexControlTab}
                   loading={codexControlLoading}
@@ -3657,6 +3784,7 @@ function SettingsPanel(props: {
                   onRefresh={refreshCodexControl}
                   onSave={() => saveCodexCenter(false)}
                   onRevealPath={props.onRevealPath}
+                  onSelectSurface={selectCodexSurface}
                 />
                 {codexControlTab === "models" && (
                   <CodexModeConfigPanel
@@ -3671,14 +3799,18 @@ function SettingsPanel(props: {
                   />
                 )}
                 {codexControlTab === "files" && (
-                  <div className="codexControlLayout">
-                    <div className="codexSurfaceList" aria-label={t("settings.codexControl.surfaces")}>
+                  <div className="codexControlLayout" data-testid="codex-control-files-layout">
+                    <div className="codexSurfaceList" data-testid="codex-control-surface-list" aria-label={t("settings.codexControl.surfaces")}>
                       {(codexControl?.surfaces ?? []).map((surface) => (
                         <button
                           key={surface.id}
                           type="button"
+                          data-testid="codex-control-surface-card"
+                          data-surface-id={surface.id}
+                          data-editable={surface.editable}
+                          data-status={surface.status}
                           className={`codexSurfaceCard ${selectedCodexSurfaceId === surface.id ? "active" : ""}`}
-                          onClick={() => setSelectedCodexSurfaceId(surface.id)}
+                          onClick={() => selectCodexSurface(surface)}
                         >
                           <span>
                             <strong>{surface.label}</strong>
@@ -3705,9 +3837,9 @@ function SettingsPanel(props: {
                       saveStatus={codexSaveStatus}
                       onDraftChange={setCodexDraft}
                       onSave={saveCodexDocument}
-                      onRevealPath={(targetPath) => props.onRevealPath(targetPath)}
                       dirty={!!codexDocument && codexDraft !== codexDocument.content}
                       readOnlyMode={readOnlyMode}
+                      onRevealSurface={selectedCodexSurface ? () => revealCodexSurface(selectedCodexSurface) : undefined}
                     />
                   </div>
                 )}
@@ -3788,6 +3920,7 @@ function SettingsNavItem(props: {
 
 function CodexControlCenterPanel(props: {
   snapshot: CodexControlCenterSnapshot | null;
+  surfaces?: CodexControlSurface[] | undefined;
   draft: CodexControlDraftMap;
   tab: CodexControlTab;
   loading: boolean;
@@ -3798,12 +3931,15 @@ function CodexControlCenterPanel(props: {
   onRefresh: () => void;
   onSave: () => void;
   onRevealPath: (targetPath?: string) => void;
+  onSelectSurface: (surface: CodexControlSurface) => void;
 }) {
   const { t } = useTranslation();
   const tabs: CodexControlTab[] = ["overview", "models", "safety", "runtime", "mcp", "skills", "storage", "files"];
   const dirty = props.snapshot ? codexControlMutationsFromDraft(props.draft, props.snapshot).length > 0 : false;
   const editableItems = props.snapshot?.items.filter((item) => item.section === props.tab && item.keyPath) ?? [];
   const summaryItems = props.snapshot?.items.filter((item) => item.section === props.tab && !item.keyPath) ?? [];
+  const surfaceForItem = (item: CodexControlCenterItem) =>
+    props.surfaces?.find((surface) => item.id === `surface.${surface.id}`);
   const setValue = (item: CodexControlCenterItem, value: string | number | boolean | undefined) =>
     props.onDraftChange({ ...props.draft, [item.id]: value });
   return (
@@ -3813,12 +3949,14 @@ function CodexControlCenterPanel(props: {
           value={props.tab}
           values={tabs}
           label={(tab) => t(`settings.codexControl.tabs.${tab}`)}
+          testId="codex-control-tabs"
           onChange={props.onTabChange}
         />
         <div className="settingInlineActions">
-          <ActionButton label={t("common.action.refresh")} onClick={props.onRefresh} disabled={props.loading} />
+          <ActionButton label={t("common.action.refresh")} testId="codex-control-center-refresh" onClick={props.onRefresh} disabled={props.loading} />
           <ActionButton
             label={t("settings.codexControl.save")}
+            testId="codex-control-center-save"
             onClick={props.onSave}
             disabled={props.loading || props.readOnlyMode || !dirty}
           />
@@ -3873,28 +4011,34 @@ function CodexControlCenterPanel(props: {
               value={props.draft[item.id]}
               disabled={props.loading || props.readOnlyMode || !item.editable}
               onChange={(value) => setValue(item, value)}
-              onRevealPath={props.onRevealPath}
             />
           ))}
         </div>
       )}
       {summaryItems.length > 0 && props.tab !== "overview" && (
         <div className="codexSummaryGrid">
-          {summaryItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="codexSummaryCard"
-              onClick={() => props.onRevealPath(item.targetPath)}
-              disabled={!item.targetPath}
-            >
-              <span>
-                <strong>{localizedCodexControlItemLabel(item, (key) => String(t(key)))}</strong>
-                <em>{localizedCodexControlItemDetail(item, (key) => String(t(key)))}</em>
-              </span>
-              <Badge text={item.status} tone={item.status === "ok" ? "ok" : "warn"} />
-            </button>
-          ))}
+          {summaryItems.map((item) => {
+            const surface = surfaceForItem(item);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className="codexSummaryCard"
+                data-testid="codex-control-summary-card"
+                data-surface-id={surface?.id}
+                data-status={surface?.status ?? item.status}
+                data-editable={surface?.editable}
+                onClick={() => surface && props.onSelectSurface(surface)}
+                disabled={!surface}
+              >
+                <span>
+                  <strong>{localizedCodexControlItemLabel(item, (key) => String(t(key)))}</strong>
+                  <em>{localizedCodexControlItemDetail(item, (key) => String(t(key)))}</em>
+                </span>
+                <Badge text={item.status} tone={item.status === "ok" ? "ok" : "warn"} />
+              </button>
+            );
+          })}
         </div>
       )}
       {!editableItems.length && !summaryItems.length && props.tab !== "overview" && props.tab !== "files" && (
@@ -3934,12 +4078,11 @@ function CodexControlItemRow(props: {
   value: string | number | boolean | undefined;
   disabled: boolean;
   onChange: (value: string | number | boolean | undefined) => void;
-  onRevealPath: (targetPath?: string) => void;
 }) {
   const { t } = useTranslation();
   const value = props.value ?? "";
   return (
-    <div className={`codexControlItem risk-${props.item.risk}`}>
+    <div className={`codexControlItem risk-${props.item.risk}`} data-testid="codex-control-item" data-item-id={props.item.id}>
       <div className="codexControlItemMeta">
         <strong>{localizedCodexControlItemLabel(props.item, (key) => String(t(key)))}</strong>
         <span>{localizedCodexControlItemDetail(props.item, (key) => String(t(key)))}</span>
@@ -3958,6 +4101,7 @@ function CodexControlItemRow(props: {
         ) : props.item.options?.length ? (
           <SearchableComboBox
             className="codexModeCombo"
+            testId={`codex-control-item-${props.item.id}`}
             value={String(value)}
             options={props.item.options}
             disabled={props.disabled}
@@ -3976,11 +4120,6 @@ function CodexControlItemRow(props: {
         )}
         <div className="settingInlineActions">
           <Badge text={t(`settings.codexControl.risk.${props.item.risk}`)} tone={props.item.risk === "high" ? "warn" : undefined} />
-          <ActionButton
-            label={t("common.action.reveal")}
-            onClick={() => props.onRevealPath(props.item.targetPath)}
-            disabled={!props.item.targetPath}
-          />
         </div>
       </div>
     </div>
@@ -4233,7 +4372,7 @@ function CodexControlDetail(props: {
   dirty: boolean;
   onDraftChange: (value: string) => void;
   onSave: () => void;
-  onRevealPath: (targetPath?: string) => void;
+  onRevealSurface?: (() => void) | undefined;
   readOnlyMode: boolean;
 }) {
   const { t } = useTranslation();
@@ -4249,11 +4388,10 @@ function CodexControlDetail(props: {
     );
   }
   const summaryEntries = Object.entries(props.surface.summary ?? {});
-  const revealPath = revealableCodexSurfacePath(props.surface);
   const surfaceLabel = localizedCodexSurfaceLabel(props.surface, (key) => String(t(key)));
   const surfaceDetail = localizedCodexSurfaceDetail(props.surface, (key) => String(t(key)));
   return (
-    <div className="codexControlDetail">
+    <div className="codexControlDetail" data-testid="codex-control-detail" data-surface-id={props.surface.id} data-status={props.surface.status} data-editable={props.surface.editable}>
       <div className="codexControlMeta">
         <div>
           <strong>{surfaceLabel}</strong>
@@ -4267,8 +4405,8 @@ function CodexControlDetail(props: {
           />
           <ActionButton
             label={t("common.action.reveal")}
-            onClick={() => props.onRevealPath(revealPath)}
-            disabled={!revealPath}
+            onClick={() => props.onRevealSurface?.()}
+            disabled={!props.onRevealSurface}
           />
         </div>
       </div>
@@ -4295,6 +4433,7 @@ function CodexControlDetail(props: {
         <>
           <textarea
             className="codexControlEditor mono"
+            data-testid="codex-control-editor"
             value={props.draft}
             onChange={(event) => props.onDraftChange(event.target.value)}
             spellCheck={false}
@@ -4309,15 +4448,16 @@ function CodexControlDetail(props: {
             </span>
             <ActionButton
               label={t("settings.codexControl.save")}
+              testId="codex-control-file-save"
               onClick={props.onSave}
               disabled={props.loading || props.readOnlyMode || !props.document?.editable || !props.dirty}
             />
           </div>
         </>
       ) : (
-        <div className="codexReadOnlyPanel">
+        <div className="codexReadOnlyPanel" data-testid="codex-control-readonly-panel">
           <FileText size={18} />
-          <span>{t("settings.codexControl.readOnlyDetail")}</span>
+          <span>{props.surface.warnings[0] ? localizedCodexControlWarning(props.surface.warnings[0], (key) => String(t(key))) : t("settings.codexControl.readOnlyDetail")}</span>
         </div>
       )}
       {props.saveStatus && <p className="inlineHint">{props.saveStatus}</p>}
@@ -4346,14 +4486,16 @@ function SegmentedControl(props: {
   value: string;
   values: Array<string | [string, string]>;
   onChange: (value: string) => void;
+  testId?: string | undefined;
 }) {
   return (
-    <span className="segmented">
+    <span className="segmented" data-testid={props.testId}>
       {props.values.map((item) => {
         const [value, label] = Array.isArray(item) ? item : [item, item];
         return (
           <button
             className={props.value === value ? "active" : ""}
+            data-value={value}
             key={value}
             onClick={() => props.onChange(value)}
           >
@@ -4440,13 +4582,16 @@ function SearchableComboBox(props: {
   emptyLabel?: string | undefined;
   disabled?: boolean | undefined;
   className?: string | undefined;
+  testId?: string | undefined;
   renderOption?: ((value: string) => ReactNode) | undefined;
   renderValue?: ((value: string) => ReactNode) | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | undefined>();
   const comboRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const options = useMemo(() => {
     const query = filter.trim().toLowerCase();
     const all = comboOptions(props.options, props.value, props.allowEmpty ? props.emptyLabel ?? "" : undefined);
@@ -4463,11 +4608,43 @@ function SearchableComboBox(props: {
     if (!open) return undefined;
     const close = (event: PointerEvent) => {
       if (comboRef.current?.contains(event.target as Node)) return;
+      if (menuRef.current?.contains(event.target as Node)) return;
       setOpen(false);
       setFilter("");
     };
     window.addEventListener("pointerdown", close);
     return () => window.removeEventListener("pointerdown", close);
+  }, [open]);
+  useEffect(() => {
+    if (!open) {
+      setMenuStyle(undefined);
+      return undefined;
+    }
+    const updatePosition = () => {
+      const trigger = comboRef.current?.querySelector<HTMLButtonElement>(".fontComboTrigger");
+      if (!trigger) return;
+      const box = trigger.getBoundingClientRect();
+      const gap = 6;
+      const maxHeight = Math.min(260, Math.max(140, window.innerHeight - box.bottom - gap - 14));
+      const fallbackTop = Math.max(14, box.top - maxHeight - gap);
+      const belowTop = box.bottom + gap;
+      const top = window.innerHeight - belowTop >= 140 ? belowTop : fallbackTop;
+      setMenuStyle({
+        position: "fixed",
+        top,
+        left: Math.min(box.left, window.innerWidth - Math.max(220, box.width) - 14),
+        width: Math.max(220, box.width),
+        maxHeight,
+        zIndex: 140
+      });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
   }, [open]);
 
   const commit = (value: string) => {
@@ -4477,10 +4654,11 @@ function SearchableComboBox(props: {
   };
 
   return (
-    <div className={`fontCombo ${props.className ?? ""} ${open ? "open" : ""}`} ref={comboRef}>
+    <div className={`fontCombo ${props.className ?? ""} ${open ? "open" : ""}`} data-testid={props.testId} ref={comboRef}>
       <button
         type="button"
         className="fontComboTrigger"
+        data-testid={props.testId ? `${props.testId}-trigger` : undefined}
         disabled={props.disabled}
         onClick={() => setOpen((value) => !value)}
         onKeyDown={(event) => {
@@ -4494,10 +4672,11 @@ function SearchableComboBox(props: {
         {props.renderValue ? props.renderValue(displayComboValue(props.value, props.emptyLabel)) : <span>{displayComboValue(props.value, props.emptyLabel)}</span>}
         <ChevronRight size={15} className={open ? "open" : ""} />
       </button>
-      {open && (
-        <div className="fontComboMenu">
+      {open && createPortal((
+        <div className="fontComboMenu fontComboMenuPortal" ref={menuRef} style={menuStyle}>
           <input
             className="fontComboSearch"
+            data-testid={props.testId ? `${props.testId}-search` : undefined}
             autoFocus
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
@@ -4532,6 +4711,8 @@ function SearchableComboBox(props: {
             <button
               type="button"
               key={font}
+              data-testid={props.testId ? `${props.testId}-option` : undefined}
+              data-value={optionValueFromLabel(font, props.emptyLabel)}
               className={`${optionValueFromLabel(font, props.emptyLabel) === props.value ? "active" : ""} ${
                 index === highlightedIndex ? "highlighted" : ""
               }`}
@@ -4563,7 +4744,7 @@ function SearchableComboBox(props: {
             )
           )}
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }
@@ -4952,9 +5133,9 @@ function Stepper(props: {
   );
 }
 
-function ActionButton(props: { label: string; onClick: () => void; disabled?: boolean }) {
+function ActionButton(props: { label: string; onClick: () => void; disabled?: boolean; testId?: string | undefined }) {
   return (
-    <button className="actionButton" disabled={props.disabled} onClick={props.onClick}>
+    <button className="actionButton" data-testid={props.testId} disabled={props.disabled} onClick={props.onClick}>
       {props.label}
     </button>
   );
@@ -6160,7 +6341,7 @@ function groupProcesses(
   processes: AgentProcess[],
   sortMode: ProcessSortMode,
   groupMode: ProcessGroupMode
-): Array<{ key: string; label: string; items: AgentProcess[] }> {
+): ProcessGroupView[] {
   const sorted = [...processes].sort((left, right) => compareProcesses(left, right, sortMode));
   const groups = new Map<string, { key: string; label: string; items: AgentProcess[] }>();
   for (const process of sorted) {
@@ -6169,12 +6350,69 @@ function groupProcesses(
     if (!groups.has(key)) groups.set(key, { key, label, items: [] });
     groups.get(key)!.items.push(process);
   }
-  if (groupMode === "task") {
-    for (const group of groups.values()) {
-      group.items.sort(compareProcessTreeOrder);
-    }
+  return [...groups.values()].map((group) => {
+    const rows = groupMode === "task" ? processTreeRows(group.items) : group.items.map((process) => ({ process, depth: 0 }));
+    return {
+      key: group.key,
+      label: groupMode === "task" ? processTaskGroupLabel(group.items) : group.label,
+      summary: groupMode === "task" ? processTaskGroupSummary(group.items) : undefined,
+      items: group.items,
+      rows
+    };
+  });
+}
+
+function processTreeRows(processes: AgentProcess[]): ProcessTreeRow[] {
+  const byPid = new Map(processes.map((process) => [process.pid, process]));
+  const children = new Map<number, AgentProcess[]>();
+  for (const process of processes) {
+    const parent = process.ppid === undefined ? undefined : byPid.get(process.ppid);
+    if (!parent) continue;
+    const list = children.get(parent.pid) ?? [];
+    list.push(process);
+    children.set(parent.pid, list);
   }
-  return [...groups.values()];
+  for (const list of children.values()) list.sort(compareProcessTreeOrder);
+  const roots = processes
+    .filter((process) => process.ppid === undefined || !byPid.has(process.ppid))
+    .sort(compareProcessTreeOrder);
+  const rows: ProcessTreeRow[] = [];
+  const visit = (process: AgentProcess, depth: number) => {
+    rows.push({ process, depth });
+    for (const child of children.get(process.pid) ?? []) visit(child, depth + 1);
+  };
+  for (const root of roots) visit(root, 0);
+  return rows;
+}
+
+function processTaskGroupLabel(processes: AgentProcess[]): string {
+  const actualRoot = processTaskActualRoot(processes);
+  const displayRoot = processTaskDisplayRoot(processes) ?? actualRoot;
+  if (!displayRoot) return i18n.t("views.processes.taskRoot", { pid: processes[0]?.rootPid ?? processes[0]?.pid ?? "unknown" });
+  const rootSuffix = actualRoot && actualRoot.pid !== displayRoot.pid ? ` · root PID ${actualRoot.pid}` : "";
+  return `${processDisplayTitle(displayRoot, (key) => i18n.t(key))} · PID ${displayRoot.pid}${rootSuffix}`;
+}
+
+function processTaskGroupSummary(processes: AgentProcess[]): string | undefined {
+  const actualRoot = processTaskActualRoot(processes);
+  const root = processTaskDisplayRoot(processes) ?? actualRoot;
+  if (!root) return undefined;
+  return [
+    root.processName,
+    processRoleLabel(root, (key) => i18n.t(key)),
+    actualRoot && actualRoot.pid !== root.pid ? `root PID ${actualRoot.pid}` : undefined,
+    topProcessCwd(root)
+  ].filter(Boolean).join(" · ");
+}
+
+function processTaskActualRoot(processes: AgentProcess[]): AgentProcess | undefined {
+  const pids = new Set(processes.map((process) => process.pid));
+  const roots = processes.filter((process) => process.ppid === undefined || !pids.has(process.ppid));
+  return [...(roots.length ? roots : processes)].sort(compareProcessTreeOrder)[0];
+}
+
+function processTaskDisplayRoot(processes: AgentProcess[]): AgentProcess | undefined {
+  return [...processes].sort(compareProcessTreeOrder)[0];
 }
 
 function groupSessions(
@@ -6701,6 +6939,12 @@ function smokeInitialCodexControlTab(): CodexControlTab | undefined {
   return isCodexControlTab(value) ? value : undefined;
 }
 
+function smokeInitialLanguage(): LanguageSetting | undefined {
+  if (!smokeModeEnabled()) return undefined;
+  const value = new URLSearchParams(window.location.search).get("language")?.trim() ?? "";
+  return isLanguageSetting(value) ? value : undefined;
+}
+
 function smokeModeEnabled(): boolean {
   return new URLSearchParams(window.location.search).get("agentscopeSmoke") === "1";
 }
@@ -6710,11 +6954,15 @@ function isView(value: string): value is View {
 }
 
 function isSettingsSection(value: string): value is SettingsSection {
-  return ["general", "appearance", "indexing", "runtime", "diagnostics"].includes(value);
+  return ["general", "appearance", "indexing", "runtime", "codexControl", "diagnostics"].includes(value);
 }
 
 function isCodexControlTab(value: string): value is CodexControlTab {
   return ["overview", "models", "safety", "runtime", "mcp", "skills", "storage", "advanced", "files"].includes(value);
+}
+
+function isLanguageSetting(value: string): value is LanguageSetting {
+  return languageValues.includes(value as LanguageSetting);
 }
 
 function journalPathFromError(message: string): string | undefined {
@@ -6880,15 +7128,6 @@ function displayNoticeItemValue(item: NoticeItem): string {
   return item.value;
 }
 
-function revealableCodexSurfacePath(surface: CodexControlSurface): string | undefined {
-  if (!surface.path) return undefined;
-  if (surface.id === "config.global" || surface.id === "plugins.summary") return undefined;
-  if (surface.id.startsWith("skill:") || surface.id.startsWith("skill-readonly:")) return undefined;
-  if (surface.id.startsWith("rules:")) return undefined;
-  if (surface.kind === "plugin" || surface.kind === "skill" || surface.kind === "rules") return undefined;
-  return surface.path;
-}
-
 function cleanTitle(value: string): string {
   return value.replaceAll("_", " ").replace(/\s+/g, " ").trim();
 }
@@ -6973,9 +7212,9 @@ function Notification(props: { notice: NoticeState; onClose: () => void; onRevea
   const visibleItems = expanded ? items : items.slice(0, 3);
   const hasMore = items.length > visibleItems.length;
   return (
-    <section className={`notification ${expanded ? "expanded" : ""}`} role="status" aria-live="polite">
+    <section className={`notification ${expanded ? "expanded" : ""}`} role="status" aria-live="polite" data-testid="notification">
       <div className="notificationBody">
-        <strong>{props.notice.message}</strong>
+        <strong data-testid="notification-message">{props.notice.message}</strong>
         {visibleItems.length ? (
           <div className="notificationItems">
             {visibleItems.map((item, index) => (
@@ -6983,6 +7222,7 @@ function Notification(props: { notice: NoticeState; onClose: () => void; onRevea
                 key={`${item.label ?? ""}:${item.value}:${index}`}
                 type="button"
                 className={`notificationItem ${item.tone ?? ""}`}
+                data-testid="notification-item"
                 onClick={item.onClick ?? (() => item.path && void props.onRevealPath(item.path))}
                 disabled={!item.path && !item.onClick}
                 title={item.path ? displayPath(item.path) ?? item.value : item.value}
@@ -7002,13 +7242,20 @@ function Notification(props: { notice: NoticeState; onClose: () => void; onRevea
       {props.notice.actions?.length ? (
         <div className="notificationActions">
           {props.notice.actions.map((action, index) => (
-            <button key={`${action.label}:${index}`} type="button" onClick={action.onClick}>
+            <button
+              key={`${action.label}:${index}`}
+              type="button"
+              data-testid="notification-action"
+              data-action-kind={action.kind}
+              data-action-role={action.role}
+              onClick={action.onClick}
+            >
               {action.label}
             </button>
           ))}
         </div>
       ) : null}
-      <button className="notificationClose" type="button" onClick={props.onClose} aria-label="Close">
+      <button className="notificationClose" type="button" onClick={props.onClose} aria-label="Close" data-testid="notification-close">
         <X size={14} />
       </button>
     </section>
@@ -7029,17 +7276,18 @@ function ConfirmDialog(props: { value: ConfirmState; onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [props]);
   return (
-    <div className="confirmOverlay" onMouseDown={props.onClose}>
-      <section className="confirmDialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="confirmOverlay" data-testid="confirm-overlay" onMouseDown={props.onClose}>
+      <section className="confirmDialog" data-testid="confirm-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <h2>{props.value.title}</h2>
         <p>{props.value.detail}</p>
         <div className="confirmActions">
-          <button type="button" onClick={props.onClose}>
+          <button type="button" data-testid="confirm-cancel" onClick={props.onClose}>
             {t("common.action.cancel")}
           </button>
           <button
             type="button"
             className={props.value.danger ? "dangerAction" : ""}
+            data-testid="confirm-confirm"
             onClick={confirm}
           >
             {props.value.confirmLabel}

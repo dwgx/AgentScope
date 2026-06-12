@@ -12,6 +12,7 @@ describe("session launcher resolution", () => {
         "codex.ps1": [{ path: "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\codex.ps1", source: "where.codex" }],
         "codex.cmd": [{ path: "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\codex.cmd", source: "where.codex" }]
       },
+      programFilesDir: "C:\\Program Files",
       existingFiles: new Set([nodePath.toLowerCase(), codexJs.toLowerCase(), "c:\\users\\dwgx1\\appdata\\roaming\\npm\\codex.ps1"]),
       processes: [
         {
@@ -35,6 +36,7 @@ describe("session launcher resolution", () => {
     expect(() =>
       resolveSessionLauncher("codex", "resume", "019ea42d", {
         homeDir: "C:\\Users\\dwgx1",
+        appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
         pathCandidates: {
           "codex.ps1": [{ path: "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\codex.ps1", source: "where.codex" }]
         },
@@ -47,6 +49,7 @@ describe("session launcher resolution", () => {
     const cmd = "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\claude.cmd";
     const result = resolveSessionLauncher("claude", "fork", "session-123", {
       homeDir: "C:\\Users\\dwgx1",
+      appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
       pathCandidates: {
         "claude.cmd": [{ path: cmd, source: "where.claude" }]
       },
@@ -55,6 +58,78 @@ describe("session launcher resolution", () => {
     expect(result.filePath).toBe(cmd);
     expect(result.args).toEqual(["--resume", "session-123", "--fork-session"]);
     expect(result.command.startsWith("claude ")).toBe(false);
+  });
+
+  it("refuses bat launchers and unsafe session ids", () => {
+    expect(() =>
+      resolveSessionLauncher("codex", "resume", "abc & calc", {
+        homeDir: "C:\\Users\\dwgx1",
+        appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
+        pathCandidates: {
+          "codex.cmd": [{ path: "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\codex.cmd", source: "where.codex" }]
+        },
+        existingFiles: new Set(["c:\\users\\dwgx1\\appdata\\roaming\\npm\\codex.cmd"])
+      })
+    ).toThrow(/unsupported characters/i);
+
+    expect(() =>
+      resolveSessionLauncher("codex", "resume", "019ea42d", {
+        homeDir: "C:\\Users\\dwgx1",
+        appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
+        pathCandidates: {
+          "codex.cmd": [{ path: "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\codex.bat", source: "where.codex" }]
+        },
+        existingFiles: new Set(["c:\\users\\dwgx1\\appdata\\roaming\\npm\\codex.bat"])
+      })
+    ).toThrow(/refusing \.ps1\/\.bat/i);
+  });
+
+  it("refuses process-derived Codex launchers outside trusted install roots", () => {
+    const nodePath = "D:\\tools\\node.exe";
+    const codexJs = "D:\\evil\\node_modules\\@openai\\codex\\bin\\codex.js";
+
+    expect(() =>
+      resolveSessionLauncher("codex", "resume", "019ea42d", {
+        homeDir: "C:\\Users\\dwgx1",
+        appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
+        programFilesDir: "C:\\Program Files",
+        pathCandidates: {},
+        existingFiles: new Set([nodePath.toLowerCase(), codexJs.toLowerCase()]),
+        processes: [
+          {
+            pid: 100,
+            processName: "node.exe",
+            executablePath: nodePath,
+            commandLine: `"${nodePath}" "${codexJs}"`,
+            agent: "codex",
+            evidence: []
+          }
+        ]
+      })
+    ).toThrow(/untrusted process paths/i);
+  });
+
+  it("refuses process-derived Claude executables outside trusted install roots", () => {
+    const claudeExe = "D:\\tools\\claude.exe";
+
+    expect(() =>
+      resolveSessionLauncher("claude", "resume", "session-123", {
+        homeDir: "C:\\Users\\dwgx1",
+        appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
+        pathCandidates: {},
+        existingFiles: new Set([claudeExe.toLowerCase()]),
+        processes: [
+          {
+            pid: 101,
+            processName: "claude.exe",
+            executablePath: claudeExe,
+            commandLine: `"${claudeExe}" --resume session-123`,
+            agent: "claude",
+            evidence: []
+          }
+        ]
+      })
+    ).toThrow(/untrusted process paths/i);
   });
 });
 

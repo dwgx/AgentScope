@@ -11,6 +11,7 @@ import {
   planCodexControlMutation,
   readCodexModeConfig,
   readCodexControlDocument,
+  revealCodexControlSurface,
   saveCodexControlDocument,
   saveCodexModeConfig
 } from "./codexControl.js";
@@ -110,6 +111,31 @@ describe("Codex control surfaces", () => {
     expect(saved.evidence.map((item) => item.source)).toContain("codex.control.backup");
   });
 
+  it("reveals only id-resolved user Codex control documents", async () => {
+    const home = await tempHome();
+    const skillPath = path.join(home, ".codex", "skills", "review-helper", "SKILL.md");
+    const rulePath = path.join(home, ".codex", "rules", "default.rules");
+    await writeFile(skillPath, "---\nname: review-helper\n---\n");
+    await writeFile(rulePath, "# rules\n");
+
+    const skill = await revealCodexControlSurface("skill:review-helper", home);
+    const rule = await revealCodexControlSurface("rules:default.rules", home);
+    const config = await revealCodexControlSurface("config.global", home);
+    const systemSkill = await revealCodexControlSurface("skill-readonly:.system/skill-creator", home);
+    const plugins = await revealCodexControlSurface("plugins.summary", home);
+
+    expect(skill.revealAllowed).toBe(true);
+    expect(skill.path).toBe(skillPath);
+    expect(rule.revealAllowed).toBe(true);
+    expect(rule.path).toBe(rulePath);
+    expect(config.revealAllowed).toBe(false);
+    expect(config.path).toBe("");
+    expect(systemSkill.revealAllowed).toBe(false);
+    expect(systemSkill.path).toBe("");
+    expect(plugins.revealAllowed).toBe(false);
+    expect(plugins.path).toBe("");
+  });
+
   it("rejects stale writes and path traversal ids", async () => {
     const home = await tempHome();
     const agentsPath = path.join(home, ".codex", "AGENTS.md");
@@ -133,6 +159,9 @@ describe("Codex control surfaces", () => {
     expect(doc.editable).toBe(false);
     expect(doc.content).not.toContain("fake-redacted-token-for-test");
     expect(doc.warnings.join("\n")).toContain("Sensitive content");
+    await expect(saveCodexControlDocument("agents.global", "# cleaned\n", doc.sha256, home)).rejects.toThrow(
+      /redacted on read/
+    );
     await expect(
       saveCodexControlDocument("rules:default.rules", "Authorization = fake-redacted-token-for-test\n", "0".repeat(64), home)
     ).rejects.toThrow(/sensitive-looking content/);
@@ -310,10 +339,20 @@ describe("Codex control surfaces", () => {
     const configPath = path.join(home, ".codex", "config.toml");
     await writeFile(configPath, 'model = "gpt-5.5"\n');
     const snapshot = await readCodexModeConfig(home);
+    const fakeOpenAiToken = `sk-proj_${"agentscope_control_save_token_123456"}`;
+    const fakeGithubToken = `ghp_${"agentscope_control_save_token_123456"}`;
 
     await expect(saveCodexModeConfig({ planReasoningEffort: "extreme" }, snapshot.sha256, home)).rejects.toThrow(
       /Invalid Codex reasoning/
     );
+    await expect(saveCodexModeConfig({ defaultModel: fakeOpenAiToken }, snapshot.sha256, home)).rejects.toThrow(
+      /sensitive-looking value/
+    );
+    await expect(saveCodexModeConfig({ reviewModel: fakeGithubToken }, snapshot.sha256, home)).rejects.toThrow(
+      /sensitive-looking value/
+    );
+    expect(await readFile(configPath, "utf8")).not.toContain(fakeOpenAiToken);
+    expect(await readFile(configPath, "utf8")).not.toContain(fakeGithubToken);
     await writeFile(configPath, 'model = "gpt-5.4-mini"\n');
     await expect(saveCodexModeConfig({ planReasoningEffort: "medium" }, snapshot.sha256, home)).rejects.toThrow(
       /changed on disk/
@@ -353,6 +392,38 @@ describe("Codex control surfaces", () => {
     expect(JSON.stringify(snapshot)).not.toContain("sk-secret-model-token");
   });
 
+  it("does not echo sensitive-looking mode model values", async () => {
+    const home = await tempHome();
+    const fakeOpenAiToken = `sk-proj_${"agentscope_control_mode_token_123456"}`;
+    const fakeGithubToken = `ghp_${"agentscope_control_mode_token_123456"}`;
+    await writeFile(
+      path.join(home, ".codex", "config.toml"),
+      [`model = "${fakeOpenAiToken}"`, `review_model = "${fakeGithubToken}"`].join("\n")
+    );
+
+    const snapshot = await readCodexModeConfig(home);
+
+    expect(snapshot.modes.default.model).toBeUndefined();
+    expect(snapshot.modes.review.model).toBeUndefined();
+    expect(JSON.stringify(snapshot)).not.toContain(fakeOpenAiToken);
+    expect(JSON.stringify(snapshot)).not.toContain(fakeGithubToken);
+  });
+
+  it("refuses allowlisted documents that are symbolic links outside CODEX_HOME", async () => {
+    const home = await tempHome();
+    const outside = path.join(home, "outside.rules");
+    const linkPath = path.join(home, ".codex", "rules", "default.rules");
+    await writeFile(outside, "outside marker\n");
+    try {
+      fs.symlinkSync(outside, linkPath, "file");
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "EPERM") return;
+      throw error;
+    }
+
+    await expect(readCodexControlDocument("rules:default.rules", home)).rejects.toThrow(/symbolic link|escapes CODEX_HOME/i);
+  });
+
   it("plans and executes allowlisted structured Codex config mutations with journal evidence", async () => {
     const home = await tempHome();
     const configPath = path.join(home, ".codex", "config.toml");
@@ -368,6 +439,31 @@ describe("Codex control surfaces", () => {
     );
     expect(blocked.highRisk).toBe(true);
     expect(blocked.blockers.join("\n")).toContain("explicit confirmation");
+    const sensitivePlanValue = "secret-model-value-for-agentscope-plan";
+    expect(JSON.stringify(blocked)).not.toContain(sensitivePlanValue);
+
+    const sensitiveBlocked = await planCodexControlMutation(
+      {
+        expectedSha256: snapshot.configSha256,
+        mutations: [{ itemId: "config.model", keyPath: "model", value: sensitivePlanValue }]
+      },
+      home
+    );
+    expect(sensitiveBlocked.blockers.join("\n")).toContain("sensitive");
+    expect(JSON.stringify(sensitiveBlocked)).not.toContain(sensitivePlanValue);
+    expect(sensitiveBlocked.mutations[0]?.value).toBe("[redacted by AgentScope]");
+
+    const tokenShapedValue = `sk-${"proj_1234567890abcdefghijklmnop"}`;
+    const tokenShapedBlocked = await planCodexControlMutation(
+      {
+        expectedSha256: snapshot.configSha256,
+        mutations: [{ itemId: "config.model", keyPath: "model", value: tokenShapedValue }]
+      },
+      home
+    );
+    expect(tokenShapedBlocked.blockers.join("\n")).toContain("sensitive");
+    expect(JSON.stringify(tokenShapedBlocked)).not.toContain(tokenShapedValue);
+    expect(tokenShapedBlocked.mutations[0]?.value).toBe("[redacted by AgentScope]");
 
     const result = await executeCodexControlMutation(
       {

@@ -6,7 +6,7 @@ import { normalizeWindowsPath } from "./paths.js";
 const execFileAsync = promisify(execFile);
 
 const relatedNames = new Set(["codex.exe", "codex", "claude.exe", "claude", "node_repl.exe", "node_repl"]);
-const relatedMarkers = ["codex", "claude", "node_repl", "app-server", "daemon"];
+const relatedMarkers = ["codex", "claude", "node_repl", "app-server"];
 
 interface Win32ProcessRow {
   ProcessId?: number;
@@ -22,14 +22,33 @@ interface Win32ProcessRow {
   CPU?: number | null;
 }
 
+export interface ListProcessOptions {
+  timeoutMs?: number | undefined;
+  throwOnTimeout?: boolean | undefined;
+  throwOnFailure?: boolean | undefined;
+}
+
 export function isWindows(): boolean {
   return process.platform === "win32";
 }
 
-export async function listProcesses(includeAll = false): Promise<AgentProcess[]> {
+export async function listProcesses(includeAll = false, options: ListProcessOptions = {}): Promise<AgentProcess[]> {
   if (!isWindows()) return [];
   const script = `
 $ErrorActionPreference = 'Stop'
+try {
+  $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+  [Console]::OutputEncoding = $utf8NoBom
+  $OutputEncoding = $utf8NoBom
+} catch {}
+function Clean-JsonString($value) {
+  if ($null -eq $value) { return $null }
+  $chars = ([string]$value).ToCharArray()
+  for ($index = 0; $index -lt $chars.Length; $index++) {
+    if ([int][char]$chars[$index] -lt 32) { $chars[$index] = [char]32 }
+  }
+  return -join $chars
+}
 $processMap = @{}
 Get-Process | ForEach-Object {
   $startTime = $null
@@ -37,8 +56,8 @@ Get-Process | ForEach-Object {
     if ($_.StartTime) { $startTime = $_.StartTime.ToString('o') }
   } catch {}
   $processMap[[int]$_.Id] = [pscustomobject]@{
-    MainWindowTitle = $_.MainWindowTitle
-    StartTime = $startTime
+    MainWindowTitle = Clean-JsonString ($_.MainWindowTitle)
+    StartTime = Clean-JsonString ($startTime)
     WorkingSet64 = $_.WorkingSet64
     PrivateMemorySize64 = $_.PrivateMemorySize64
     CPU = $_.CPU
@@ -49,30 +68,61 @@ Get-CimInstance Win32_Process | ForEach-Object {
   [pscustomobject]@{
     ProcessId = $_.ProcessId
     ParentProcessId = $_.ParentProcessId
-    Name = $_.Name
-    ExecutablePath = $_.ExecutablePath
-    CommandLine = $_.CommandLine
-    CreationDate = if ($_.CreationDate) { $_.CreationDate.ToString('o') } else { $null }
+    Name = Clean-JsonString ($_.Name)
+    ExecutablePath = Clean-JsonString ($_.ExecutablePath)
+    CommandLine = Clean-JsonString ($_.CommandLine)
+    CreationDate = if ($_.CreationDate) { Clean-JsonString ($_.CreationDate.ToString('o')) } else { $null }
     StartTime = if ($runtime) { $runtime.StartTime } else { $null }
     MainWindowTitle = if ($runtime) { $runtime.MainWindowTitle } else { $null }
     WorkingSet64 = if ($runtime) { $runtime.WorkingSet64 } else { $null }
     PrivateMemorySize64 = if ($runtime) { $runtime.PrivateMemorySize64 } else { $null }
     CPU = if ($runtime) { $runtime.CPU } else { $null }
-  }
-} | ConvertTo-Json -Depth 3
+  } | ConvertTo-Json -Depth 3 -Compress
+}
 `;
   try {
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], {
       maxBuffer: 16 * 1024 * 1024,
-      windowsHide: true
+      windowsHide: true,
+      timeout: options.timeoutMs ?? 5000
     });
-    const parsed = JSON.parse(stdout.trim()) as Win32ProcessRow[] | Win32ProcessRow;
-    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    const rows = parseProcessRows(stdout);
     const processes = annotateProcessTree(rows.map(processFromRow));
     return includeAll ? processes : processes.filter(isRelatedProcess);
-  } catch {
+  } catch (error) {
+    if (options.throwOnTimeout && isProcessScanTimeout(error)) {
+      throw new Error(`win32.process.scan timed out after ${Math.round((options.timeoutMs ?? 5000) / 1000)}s`);
+    }
+    if (options.throwOnFailure) {
+      throw new Error(`win32.process.scan failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return [];
   }
+}
+
+function parseProcessRows(stdout: string): Win32ProcessRow[] {
+  const rows: Win32ProcessRow[] = [];
+  const failures: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as Win32ProcessRow;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) rows.push(parsed);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (!rows.length && stdout.trim()) {
+    throw new Error(`PowerShell process JSON parse failed: ${failures[0] ?? "no process rows parsed"}`);
+  }
+  return rows;
+}
+
+function isProcessScanTimeout(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { killed?: boolean; signal?: string | null; code?: string | number | null; message?: string };
+  return candidate.killed === true || candidate.signal === "SIGTERM" || candidate.code === "ETIMEDOUT" || /timed out/i.test(candidate.message ?? "");
 }
 
 export function classifyProcess(name = "", commandLine = "", executablePath = ""): AgentKind {
@@ -96,6 +146,7 @@ export function isRelatedProcess(process: AgentProcess): boolean {
   if (relatedNames.has(name)) return true;
   const haystack = `${process.commandLine ?? ""} ${process.executablePath ?? ""}`.toLowerCase();
   if (name === "node.exe" || name === "node") return relatedMarkers.some((marker) => haystack.includes(marker));
+  if (haystack.includes("daemon") && (haystack.includes("codex") || haystack.includes("claude"))) return true;
   return relatedMarkers.some((marker) => haystack.includes(marker));
 }
 
@@ -291,7 +342,8 @@ function processRootPid(process: AgentProcess, byPid: Map<number, AgentProcess>)
   while (current && !seen.has(current.pid)) {
     seen.add(current.pid);
     const parent: AgentProcess | undefined = current.ppid === undefined ? undefined : byPid.get(current.ppid);
-    if (!parent || !isRelatedProcess(parent) || parent.agent !== process.agent) return current.pid;
+    if (!parent || !isRelatedProcess(parent)) return current.pid;
+    if (parent.agent !== process.agent && process.agent !== "unknown" && parent.agent !== "unknown") return current.pid;
     current = parent;
   }
   return process.pid;

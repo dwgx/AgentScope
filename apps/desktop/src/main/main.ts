@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import { execFile, spawn } from "node:child_process";
@@ -14,6 +15,7 @@ import {
   type LaunchFileCandidate,
   type SessionLaunchAction,
   type SessionLaunchContext,
+  type SessionLaunchResolution,
   type SessionLaunchResult
 } from "@agentscope/shared";
 import type { CodexControlMutationRequest, CodexModeConfigPatch, Evidence, ScopeSnapshot } from "@agentscope/shared";
@@ -23,6 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === "development" || process.env.VITE_DEV_SERVER_URL;
 const isSmoke = process.env.AGENTSCOPE_SMOKE === "1" || process.argv.includes("--agentscope-smoke");
 const isVisibleSmoke = isSmoke && process.env.AGENTSCOPE_SMOKE_VISIBLE === "1";
+const smokeUserData = isSmoke ? process.env.AGENTSCOPE_SMOKE_USER_DATA?.trim() : undefined;
 const execFileAsync = promisify(execFile);
 
 let mainWindow: BrowserWindow | undefined;
@@ -30,6 +33,11 @@ let corePromise: Promise<typeof AgentScopeCore> | undefined;
 let lastCoreError: string | undefined;
 let controlMode: "safe" | "readOnly" = "safe";
 const openedTextArtifacts = new Set<string>();
+const highRiskCodexControlConfirmations = new Map<string, { signature: string; expiresAt: number }>();
+
+if (smokeUserData) {
+  app.setPath("userData", path.resolve(smokeUserData));
+}
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -98,7 +106,8 @@ async function createWindow(): Promise<void> {
               agentscopeSmoke: "1",
               view: process.env.AGENTSCOPE_SMOKE_VIEW ?? "",
               settingsSection: process.env.AGENTSCOPE_SMOKE_SETTINGS_SECTION ?? "",
-              codexControlTab: process.env.AGENTSCOPE_SMOKE_CODEX_CONTROL_TAB ?? ""
+              codexControlTab: process.env.AGENTSCOPE_SMOKE_CODEX_CONTROL_TAB ?? "",
+              language: process.env.AGENTSCOPE_SMOKE_LANGUAGE ?? ""
             }
           }
         : undefined
@@ -159,6 +168,14 @@ ipcMain.handle("codexControl:read", async (_event, id: string) => {
   const core = await loadCore();
   return core.readCodexControlDocument(id);
 });
+ipcMain.handle("codexControl:revealSurface", async (_event, id: string) => {
+  const core = await loadCore();
+  const result = await core.revealCodexControlSurface(validateCodexControlSurfaceId(id));
+  if (!result.revealAllowed) return result;
+  if (!fs.existsSync(result.path)) return { ...result, revealAllowed: false, reason: "Path does not exist" };
+  if (!isSmokeNoShell()) shell.showItemInFolder(result.path);
+  return result;
+});
 ipcMain.handle("codexControl:save", async (_event, id: string, content: string, expectedSha256: string) => {
   assertWriteControlAllowed("Codex control save");
   const core = await loadCore();
@@ -175,12 +192,40 @@ ipcMain.handle("codexControl:saveModes", async (_event, patch: CodexModeConfigPa
 });
 ipcMain.handle("codexControl:planMutation", async (_event, request: CodexControlMutationRequest) => {
   const core = await loadCore();
-  return core.planCodexControlMutation(validateCodexControlMutationRequest(request));
+  const validated = validateCodexControlMutationRequest(request);
+  const unconfirmedPlan = await core.planCodexControlMutation({
+    ...validated,
+    confirmedHighRisk: false,
+    highRiskConfirmationToken: undefined
+  });
+  if (unconfirmedPlan.highRisk && validated.confirmedHighRisk) {
+    const confirmedPlan = await core.planCodexControlMutation({
+      ...validated,
+      confirmedHighRisk: true,
+      highRiskConfirmationToken: undefined
+    });
+    if (confirmedPlan.blockers.length > 0) return confirmedPlan;
+    if (!(await confirmHighRiskCodexControlMutation(confirmedPlan.changedKeys, confirmedPlan.warnings))) {
+      return unconfirmedPlan;
+    }
+    return {
+      ...confirmedPlan,
+      highRiskConfirmationToken: createHighRiskCodexControlConfirmation(validated),
+      blockers: []
+    };
+  }
+  return unconfirmedPlan;
 });
 ipcMain.handle("codexControl:executeMutation", async (_event, request: CodexControlMutationRequest) => {
   assertWriteControlAllowed("Codex control mutation");
   const core = await loadCore();
-  return core.executeCodexControlMutation(validateCodexControlMutationRequest(request));
+  const validated = validateCodexControlMutationRequest(request);
+  const plan = await core.planCodexControlMutation(validated);
+  if (plan.highRisk) {
+    consumeHighRiskCodexControlConfirmation(validated);
+    validated.confirmedHighRisk = true;
+  }
+  return core.executeCodexControlMutation(validated);
 });
 ipcMain.handle("app:reload", async () => {
   mainWindow?.reload();
@@ -195,6 +240,7 @@ ipcMain.handle("app:clearCache", async () => {
 });
 ipcMain.handle("shell:openExternal", async (_event, url: string) => {
   if (!isAllowedExternalUrl(url)) return false;
+  if (isSmokeNoShell()) return true;
   await shell.openExternal(url);
   return true;
 });
@@ -202,11 +248,13 @@ ipcMain.handle("shell:openPath", async (_event, targetPath: string) => {
   if (!(await isAllowedLocalPath(targetPath))) return "Path is not in AgentScope's local trace allowlist";
   if (!fs.existsSync(targetPath)) return "Path does not exist";
   if (!isAllowedOpenPath(targetPath)) return "Path can only be revealed, not opened by AgentScope";
+  if (isSmokeNoShell()) return "";
   return shell.openPath(targetPath);
 });
 ipcMain.handle("shell:revealPath", async (_event, targetPath: string) => {
   if (!(await isAllowedLocalPath(targetPath))) return "Path is not in AgentScope's local trace allowlist";
   if (!fs.existsSync(targetPath)) return "Path does not exist";
+  if (isSmokeNoShell()) return "";
   shell.showItemInFolder(targetPath);
   return "";
 });
@@ -297,7 +345,7 @@ ipcMain.handle("session:importPlan", async (_event, backupDir: string) => {
 });
 ipcMain.handle("session:chooseImportPlan", async () => {
   assertWriteControlAllowed("Session import plan");
-  const backupRoot = path.join(os.homedir(), ".agentscope", "backups");
+  const backupRoot = path.join(agentScopeDataRoot(), "backups");
   await fs.promises.mkdir(backupRoot, { recursive: true });
   const options = {
     title: "Choose AgentScope backup directory",
@@ -318,7 +366,7 @@ ipcMain.handle("session:chooseImportPlan", async () => {
 });
 ipcMain.handle("session:chooseImport", async () => {
   assertWriteControlAllowed("Session import");
-  const agentScopeRoot = path.join(os.homedir(), ".agentscope");
+  const agentScopeRoot = agentScopeDataRoot();
   const backupRoot = path.join(agentScopeRoot, "backups");
   await fs.promises.mkdir(backupRoot, { recursive: true });
   const options = {
@@ -350,6 +398,14 @@ process.on("unhandledRejection", (reason) => {
 log("main module loaded");
 void bootstrap();
 
+app.on("will-finish-launching", () => {
+  log("app will-finish-launching");
+});
+
+app.on("ready", () => {
+  log("app ready event");
+});
+
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) void createWindow();
 });
@@ -359,6 +415,7 @@ app.on("window-all-closed", () => {
 });
 
 async function bootstrap(): Promise<void> {
+  log("bootstrap start");
   await app.whenReady();
   log(`app ready packaged=${app.isPackaged} appPath=${app.getAppPath()} dirname=${__dirname}`);
   await createWindow().catch((error: unknown) => {
@@ -406,14 +463,31 @@ function ipcResultSummary(value: unknown): string {
 async function buildSnapshot(): Promise<ScopeSnapshot> {
   try {
     const core = await loadCore();
-    const snapshot = await core.buildSnapshot();
+    const includeProcesses = !(isSmoke && process.env.AGENTSCOPE_SMOKE_DISABLE_PROCESSES === "1");
+    const includeRolloutActivity = process.env.AGENTSCOPE_INCLUDE_ROLLOUT_ACTIVITY === "1";
+    const includeCodexLogMetadata = process.env.AGENTSCOPE_INCLUDE_CODEX_LOG_METADATA === "1";
+    const processTimeoutMs = numberEnv("AGENTSCOPE_PROCESS_SCAN_TIMEOUT_MS", 5000);
+    const snapshot = await core.buildSnapshot(undefined, {
+      includeProcesses,
+      includeRolloutActivity,
+      includeCodexLogMetadata,
+      processTimeoutMs
+    });
     lastCoreError = undefined;
+    for (const diagnostic of snapshot.diagnostics ?? []) {
+      if (diagnostic.status === "warn") log(`snapshot diagnostic ${diagnostic.name}: ${diagnostic.detail}`);
+    }
     return snapshot;
   } catch (error) {
     log(`buildSnapshot failed ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
     lastCoreError = error instanceof Error ? error.message : String(error);
     return { processes: [], sessions: [], transcripts: [], indexRecords: [], relations: [] };
   }
+}
+
+function numberEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 async function runDoctor() {
@@ -456,18 +530,39 @@ async function exportSnapshot() {
 }
 
 function appInfo() {
-  const home = process.env.USERPROFILE || os.homedir();
+  const home = appHome();
   return {
     userData: app.getPath("userData"),
     locale: app.getLocale(),
     home,
-    codexHome: path.join(home, ".codex"),
-    claudeHome: path.join(home, ".claude"),
+    codexHome: process.env.CODEX_HOME?.trim() || path.join(home, ".codex"),
+    claudeHome: process.env.CLAUDE_HOME?.trim() || path.join(home, ".claude"),
     githubUrl: "https://github.com/dwgx/AgentScope",
     actionsUrl: "https://github.com/dwgx/AgentScope/actions",
     issuesUrl: "https://github.com/dwgx/AgentScope/issues",
     readmeUrl: "https://github.com/dwgx/AgentScope#readme"
   };
+}
+
+function appHome(): string {
+  return process.env.AGENTSCOPE_HOME?.trim() || process.env.USERPROFILE || os.homedir();
+}
+
+function agentScopeDataRoot(): string {
+  return process.env.AGENTSCOPE_DATA_HOME?.trim() || path.join(appHome(), ".agentscope");
+}
+
+function npmAppDataRoot(): string | undefined {
+  if (process.env.AGENTSCOPE_LAUNCHER_APPDATA?.trim()) return process.env.AGENTSCOPE_LAUNCHER_APPDATA.trim();
+  return process.env.APPDATA;
+}
+
+function isSmokeNoShell(): boolean {
+  return isSmoke && process.env.AGENTSCOPE_SMOKE_NO_SHELL === "1";
+}
+
+function isSmokeFakeLaunch(): boolean {
+  return isSmoke && process.env.AGENTSCOPE_SMOKE_FAKE_LAUNCH === "1";
 }
 
 async function listInstalledFonts(): Promise<string[]> {
@@ -516,7 +611,7 @@ function allowedLocalPathPrefixes(): string[] {
   const info = appInfo();
   return [
     normalizeFsPath(info.userData),
-    normalizeFsPath(path.join(os.homedir(), ".agentscope"))
+    normalizeFsPath(agentScopeDataRoot())
   ].filter((item): item is string => !!item);
 }
 
@@ -538,7 +633,7 @@ function isAgentScopeTextArtifact(targetPath: string): boolean {
   const normalized = normalizeFsPath(targetPath);
   if (!normalized) return false;
   if (openedTextArtifacts.has(normalized)) return true;
-  const agentScopeRoot = normalizeFsPath(path.join(os.homedir(), ".agentscope"));
+  const agentScopeRoot = normalizeFsPath(agentScopeDataRoot());
   const userDataBackups = normalizeFsPath(path.join(app.getPath("userData"), "backups"));
   const userDataQuarantine = normalizeFsPath(path.join(app.getPath("userData"), "quarantine"));
   const operationRoots = [agentScopeRoot, userDataBackups, userDataQuarantine].filter((item): item is string => !!item);
@@ -569,7 +664,7 @@ function redactPathForExport(value: string): string {
 }
 
 function redactEmbeddedPaths(value: string): string {
-  const home = normalizeFsPath(os.homedir());
+  const home = normalizeFsPath(appHome());
   let out = value.replace(/\//g, "\\");
   if (home) {
     const escapedHome = escapeRegExp(home);
@@ -588,7 +683,7 @@ async function allowedLocalPaths(): Promise<string[]> {
   const info = appInfo();
   const paths = new Set<string>();
   addAllowedPath(paths, info.userData);
-  addAllowedPath(paths, path.join(os.homedir(), ".agentscope"));
+  addAllowedPath(paths, agentScopeDataRoot());
   addAllowedPath(paths, info.codexHome);
   addAllowedPath(paths, path.join(info.codexHome, "state_5.sqlite"));
 
@@ -669,7 +764,7 @@ async function isAllowedAgentScopeOperationPath(targetPath: string, child: "back
   const normalizedTarget = normalizeFsPath(targetPath);
   if (!normalizedTarget) return false;
   const operationRoots = [
-    normalizeFsPath(path.join(os.homedir(), ".agentscope", child)),
+    normalizeFsPath(path.join(agentScopeDataRoot(), child)),
     normalizeFsPath(path.join(app.getPath("userData"), child))
   ].filter((item): item is string => !!item);
   return operationRoots.some((root) => normalizedTarget === root || normalizedTarget.startsWith(`${root}${path.sep}`));
@@ -765,6 +860,7 @@ async function confirmNativeSqliteRepair(name: string): Promise<boolean> {
 }
 
 async function confirmControlModeSafe(): Promise<boolean> {
+  if (isSmoke && process.env.AGENTSCOPE_SMOKE_AUTO_CONFIRM_CONTROL_MODE === "1") return true;
   const options = {
     type: "warning" as const,
     buttons: ["Stay read-only", "Enable safe controls"],
@@ -777,6 +873,26 @@ async function confirmControlModeSafe(): Promise<boolean> {
       "Safe mode allows AgentScope to write allowlisted Codex config files, create backups, delete sessions through backup/quarantine/journal, restore quarantine entries, import AgentScope backups, launch resume/fork commands, and run confirmed diagnostic repair.",
       "Read-only mode keeps these actions blocked in the main process."
     ].join("\n")
+  };
+  const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+  return result.response === 1;
+}
+
+async function confirmHighRiskCodexControlMutation(changedKeys: string[], warnings: string[]): Promise<boolean> {
+  if (isSmoke && process.env.AGENTSCOPE_SMOKE_AUTO_CONFIRM_HIGH_RISK === "1") return true;
+  const options = {
+    type: "warning" as const,
+    buttons: ["Cancel", "Save high-risk changes"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: "Confirm Codex Control change",
+    message: "Save high-risk Codex Control changes?",
+    detail: [
+      changedKeys.length ? `Keys: ${changedKeys.join(", ")}` : undefined,
+      warnings.length ? `Warnings: ${warnings.join("\n")}` : undefined,
+      "AgentScope will write only allowlisted Codex config keys and record a backup plus journal."
+    ].filter(Boolean).join("\n\n")
   };
   const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
   return result.response === 1;
@@ -796,6 +912,15 @@ async function launchSessionCommand(
   const snapshot = await buildSnapshot();
   const resolution = resolveSessionLauncher(agent, action as SessionLaunchAction, sessionId, await launchResolverEnvironment(snapshot), context);
   assertLaunchResolutionSafe(resolution.filePath);
+  if (isSmokeFakeLaunch()) {
+    await recordSmokeLaunch(resolution, workingDirectory);
+    return {
+      ok: true,
+      ...resolution,
+      command: formatCommandForDisplay(resolution.filePath, resolution.args),
+      ...(workingDirectory ? { cwd: workingDirectory } : {})
+    };
+  }
   const child = spawn(resolution.filePath, resolution.args, {
     cwd: workingDirectory,
     detached: true,
@@ -810,6 +935,24 @@ async function launchSessionCommand(
     command: formatCommandForDisplay(resolution.filePath, resolution.args),
     ...(workingDirectory ? { cwd: workingDirectory } : {})
   };
+}
+
+async function recordSmokeLaunch(resolution: SessionLaunchResolution, cwd?: string): Promise<void> {
+  const logPath = process.env.AGENTSCOPE_SMOKE_LAUNCH_LOG?.trim();
+  if (!logPath) return;
+  const entry = {
+    at: new Date().toISOString(),
+    agent: resolution.agent,
+    action: resolution.action,
+    sessionId: resolution.sessionId,
+    filePath: resolution.filePath,
+    args: resolution.args,
+    command: formatCommandForDisplay(resolution.filePath, resolution.args),
+    source: resolution.source,
+    ...(cwd ? { cwd } : {})
+  };
+  await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
+  await fs.promises.appendFile(logPath, `${JSON.stringify(entry)}\n`, "utf8");
 }
 
 function assertLaunchResolutionSafe(filePath: string): void {
@@ -845,6 +988,7 @@ async function waitForLaunchAccepted(child: ChildProcess): Promise<void> {
 async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
   const existingFiles = new Set<string>();
   const candidates: Record<string, LaunchFileCandidate[]> = {};
+  const appDataDir = npmAppDataRoot();
   const addFile = (candidate: string | undefined) => {
     if (!candidate) return;
     if (!fs.existsSync(candidate)) return;
@@ -871,18 +1015,18 @@ async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
       if (/\.js$/i.test(arg)) addFile(arg);
     }
   }
-  addFile(process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "node_modules", "@openai", "codex", "bin", "codex.js") : undefined);
+  addFile(appDataDir ? path.join(appDataDir, "npm", "node_modules", "@openai", "codex", "bin", "codex.js") : undefined);
   addFile(process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "nodejs", "node.exe") : undefined);
   addFile(process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "nodejs", "node.exe") : undefined);
   await Promise.all(["node.exe", "codex.cmd", "codex.exe", "claude.cmd", "claude.exe"].map(addCandidates));
-  const npmBin = process.env.APPDATA ? path.join(process.env.APPDATA, "npm") : undefined;
+  const npmBin = appDataDir ? path.join(appDataDir, "npm") : undefined;
   addDirectCandidate("codex.cmd", npmBin ? path.join(npmBin, "codex.cmd") : undefined, "appdata.npm.codexCmd");
   addDirectCandidate("codex.exe", npmBin ? path.join(npmBin, "codex.exe") : undefined, "appdata.npm.codexExe");
   addDirectCandidate("claude.cmd", npmBin ? path.join(npmBin, "claude.cmd") : undefined, "appdata.npm.claudeCmd");
   addDirectCandidate("claude.exe", npmBin ? path.join(npmBin, "claude.exe") : undefined, "appdata.npm.claudeExe");
   return {
-    homeDir: os.homedir(),
-    ...(process.env.APPDATA ? { appDataDir: process.env.APPDATA } : {}),
+    homeDir: appHome(),
+    ...(appDataDir ? { appDataDir } : {}),
     ...(process.env.ProgramFiles ? { programFilesDir: process.env.ProgramFiles } : {}),
     ...(process.env["ProgramFiles(x86)"] ? { programFilesX86Dir: process.env["ProgramFiles(x86)"] } : {}),
     pathCandidates: candidates,
@@ -894,7 +1038,8 @@ async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
 function isTrustedWhereLauncher(command: string, candidatePath: string): boolean {
   const normalized = normalizeFsPath(candidatePath);
   if (!normalized) return false;
-  const appDataNpm = process.env.APPDATA ? normalizeFsPath(path.join(process.env.APPDATA, "npm")) : undefined;
+  const appDataDir = npmAppDataRoot();
+  const appDataNpm = appDataDir ? normalizeFsPath(path.join(appDataDir, "npm")) : undefined;
   const programFilesNode = process.env.ProgramFiles ? normalizeFsPath(path.join(process.env.ProgramFiles, "nodejs")) : undefined;
   const programFilesX86Node = process.env["ProgramFiles(x86)"] ? normalizeFsPath(path.join(process.env["ProgramFiles(x86)"], "nodejs")) : undefined;
   if (command.toLowerCase() === "node.exe") {
@@ -1013,8 +1158,64 @@ function validateCodexControlMutationRequest(value: unknown): CodexControlMutati
   return {
     expectedSha256: request.expectedSha256,
     confirmedHighRisk: request.confirmedHighRisk === true,
+    highRiskConfirmationToken: typeof request.highRiskConfirmationToken === "string" ? request.highRiskConfirmationToken : undefined,
     mutations
   };
+}
+
+function validateCodexControlSurfaceId(value: unknown): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 160) {
+    throw new Error("Invalid Codex control surface id.");
+  }
+  if (!/^[A-Za-z0-9_.:@/-]+$/.test(value)) {
+    throw new Error("Invalid Codex control surface id.");
+  }
+  return value;
+}
+
+function createHighRiskCodexControlConfirmation(request: CodexControlMutationRequest): string {
+  pruneExpiredHighRiskCodexControlConfirmations();
+  const token = crypto.randomBytes(24).toString("base64url");
+  highRiskCodexControlConfirmations.set(token, {
+    signature: codexControlMutationSignature(request),
+    expiresAt: Date.now() + 60_000
+  });
+  return token;
+}
+
+function consumeHighRiskCodexControlConfirmation(request: CodexControlMutationRequest): void {
+  pruneExpiredHighRiskCodexControlConfirmations();
+  const token = request.highRiskConfirmationToken;
+  if (!token) throw new Error("High-risk Codex control mutation requires main-process confirmation.");
+  const confirmation = highRiskCodexControlConfirmations.get(token);
+  highRiskCodexControlConfirmations.delete(token);
+  if (!confirmation || confirmation.expiresAt < Date.now()) {
+    throw new Error("High-risk Codex control confirmation is missing or expired.");
+  }
+  if (confirmation.signature !== codexControlMutationSignature(request)) {
+    throw new Error("High-risk Codex control confirmation does not match this mutation.");
+  }
+}
+
+function pruneExpiredHighRiskCodexControlConfirmations(): void {
+  const now = Date.now();
+  for (const [token, confirmation] of highRiskCodexControlConfirmations) {
+    if (confirmation.expiresAt < now) highRiskCodexControlConfirmations.delete(token);
+  }
+}
+
+function codexControlMutationSignature(request: CodexControlMutationRequest): string {
+  const normalized = request.mutations
+    .map((mutation) => ({
+      itemId: mutation.itemId,
+      keyPath: mutation.keyPath,
+      value: mutation.value
+    }))
+    .sort((a, b) => `${a.itemId}\n${a.keyPath}`.localeCompare(`${b.itemId}\n${b.keyPath}`));
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ expectedSha256: request.expectedSha256, mutations: normalized }))
+    .digest("hex");
 }
 
 function assertWriteControlAllowed(action: string): void {
@@ -1041,7 +1242,11 @@ async function sessionsForPid(snapshot: ScopeSnapshot, pid: number) {
 function log(message: string): void {
   try {
     const dir =
-      app.isReady() && app.isPackaged ? app.getPath("userData") : path.join(process.env.APPDATA ?? process.cwd(), "AgentScope");
+      smokeUserData
+        ? path.resolve(smokeUserData)
+        : app.isReady() && app.isPackaged
+          ? app.getPath("userData")
+          : path.join(process.env.APPDATA ?? process.cwd(), "AgentScope");
     fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, "agentscope-main.log"), `${new Date().toISOString()} ${message}\n`);
   } catch {

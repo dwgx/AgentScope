@@ -1,13 +1,68 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentProcess, AgentSession, ScopeSnapshot } from "@agentscope/shared";
-import { annotateProcessTree, classifyProcess } from "./processes.js";
+import { annotateProcessTree, classifyProcess, isRelatedProcess } from "./processes.js";
 import { readRolloutMetadata } from "./codex.js";
-import { heuristicSessionsForProcess, mergeSessions, sessionCandidatesForProcess, sessionsForPid } from "./scope.js";
+import { buildSnapshot, heuristicSessionsForProcess, mergeSessions, sessionCandidatesForProcess, sessionsForPid } from "./scope.js";
 
 describe("scope confidence", () => {
+  it("returns indexed sessions when live process enumeration times out", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-scope-timeout-"));
+    try {
+      const sessionId = "11111111-1111-4111-8111-111111111111";
+      const rollout = join(home, ".codex", "sessions", "2026", "06", "12", `rollout-2026-06-12T00-00-00-${sessionId}.jsonl`);
+      mkdirSync(dirname(rollout), { recursive: true });
+      writeFileSync(
+        rollout,
+        JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\AgentScopeSmoke\Timeout` } }) + "\n",
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        includeRolloutActivity: false,
+        processTimeoutMs: 20,
+        processProvider: () => new Promise<AgentProcess[]>(() => undefined)
+      });
+
+      const session = snapshot.sessions.find((item) => item.sessionId === sessionId);
+      expect(session).toBeTruthy();
+      expect(session?.activity).toBeUndefined();
+      expect(snapshot.processes).toHaveLength(0);
+      expect(snapshot.diagnostics?.some((item) => item.name === "win32.process.scan" && item.status === "warn")).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("returns indexed sessions with diagnostics when live process enumeration fails", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-scope-process-failure-"));
+    try {
+      const sessionId = "22222222-2222-4222-8222-222222222222";
+      const rollout = join(home, ".codex", "sessions", "2026", "06", "12", `rollout-2026-06-12T00-00-00-${sessionId}.jsonl`);
+      mkdirSync(dirname(rollout), { recursive: true });
+      writeFileSync(
+        rollout,
+        JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\AgentScopeSmoke\Failure` } }) + "\n",
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        includeRolloutActivity: false,
+        processProvider: () => Promise.reject(new Error("bad process JSON"))
+      });
+
+      expect(snapshot.sessions.some((item) => item.sessionId === sessionId)).toBe(true);
+      expect(snapshot.processes).toHaveLength(0);
+      expect(snapshot.diagnostics?.some((item) => item.name === "win32.process.scan" && item.detail.includes("bad process JSON"))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("merges to the best index confidence", () => {
     const sessions = mergeSessions([baseSession("t1", "heuristic"), baseSession("t1", "indexed")]);
     expect(sessions).toHaveLength(1);
@@ -340,6 +395,28 @@ describe("process role classification", () => {
         String.raw`C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe`
       )
     ).toBe("codex");
+  });
+
+  it("does not treat unrelated Windows daemon processes as agent processes", () => {
+    expect(
+      isRelatedProcess({
+        pid: 10,
+        processName: "SearchProtocolHost.exe",
+        executablePath: String.raw`C:\Windows\System32\SearchProtocolHost.exe`,
+        commandLine: String.raw`"C:\Windows\System32\SearchProtocolHost.exe" "DownLevelDaemon"`,
+        agent: "unknown",
+        evidence: []
+      })
+    ).toBe(false);
+    expect(
+      isRelatedProcess({
+        pid: 11,
+        processName: "node.exe",
+        commandLine: String.raw`node C:\Users\dwgx1\.claude\daemon\worker.js`,
+        agent: "claude",
+        evidence: []
+      })
+    ).toBe(true);
   });
 });
 

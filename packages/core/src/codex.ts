@@ -20,11 +20,25 @@ interface CodexThreadSourceMetadata {
   kind?: "subagent";
 }
 
-export function loadCodexIndex(home?: string): {
+export interface ScanCodexRolloutOptions {
+  includeActivity?: boolean | undefined;
+  metadataMaxLines?: number | undefined;
+}
+
+export interface RolloutMetadataOptions {
+  maxLines?: number | undefined;
+}
+
+export interface LoadCodexIndexOptions {
+  includeLogMetadata?: boolean | undefined;
+}
+
+export function loadCodexIndex(home?: string, options: LoadCodexIndexOptions = {}): {
   sessions: AgentSession[];
   records: IndexRecord[];
   relations: Relation[];
 } {
+  const includeLogMetadata = options.includeLogMetadata ?? true;
   const sqliteRoot = codexSqliteHome(home);
   const dbPath = path.join(sqliteRoot, "state_5.sqlite");
   if (!fs.existsSync(dbPath)) return { sessions: [], records: [], relations: [] };
@@ -32,7 +46,7 @@ export function loadCodexIndex(home?: string): {
   if (!opened) return { sessions: [], records: [], relations: [] };
   const { db, evidencePath } = opened;
   try {
-    const logMetadata = loadCodexLogMetadata(sqliteRoot);
+    const logMetadata = includeLogMetadata ? loadCodexLogMetadata(sqliteRoot) : new Map<string, Record<string, unknown>>();
     const rows = selectExistingColumns(db, "threads", [
       "id",
       "rollout_path",
@@ -147,12 +161,13 @@ export function loadCodexIndex(home?: string): {
   }
 }
 
-export async function scanCodexRollouts(home?: string): Promise<{
+export async function scanCodexRollouts(home?: string, options: ScanCodexRolloutOptions = {}): Promise<{
   transcripts: Transcript[];
   sessions: AgentSession[];
   records: IndexRecord[];
   relations: Relation[];
 }> {
+  const includeActivity = options.includeActivity ?? true;
   const roots = codexRolloutRoots(home).filter((root) => fs.existsSync(root.path));
   if (!roots.length) return { transcripts: [], sessions: [], records: [], relations: [] };
   const files: Array<{ filePath: string; archived: boolean; rootPath: string }> = [];
@@ -169,8 +184,8 @@ export async function scanCodexRollouts(home?: string): Promise<{
   for (const { filePath, archived, rootPath } of files) {
     const sessionId = rolloutThreadId(filePath);
     if (!sessionId) continue;
-    const metadata = await readRolloutMetadata(filePath);
-    const activity = await analyzeTranscriptActivity("codex", filePath);
+    const metadata = await readRolloutMetadata(filePath, { maxLines: options.metadataMaxLines });
+    const activity = includeActivity ? await analyzeTranscriptActivity("codex", filePath) : undefined;
     const cwd = normalizeWindowsPath(stringValue(metadata.cwd));
     const startedAt = rolloutStartedAt(filePath);
     const updatedAt = fs.statSync(filePath).mtime.toISOString();
@@ -186,6 +201,11 @@ export async function scanCodexRollouts(home?: string): Promise<{
     ];
     const kindEvidence = codexSessionKindEvidence(metadata);
     transcripts.push({ agent: "codex", sessionId, path: filePath, cwd, updatedAt, activity, evidence });
+    const indexMetadata = compactMetadata({
+      ...metadata,
+      ...(activity ? { activity_line_count: activity.lineCount } : {}),
+      archived_rollout: archived
+    });
     sessions.push({
       agent: "codex",
       sessionId,
@@ -199,7 +219,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
       title: stringValue(metadata.title),
       startedAt,
       updatedAt,
-      indexMetadata: compactMetadata({ ...metadata, activity_line_count: activity.lineCount, archived_rollout: archived }),
+      indexMetadata,
       activity,
       evidence: appendEvidenceUnique(evidence, kindEvidence.evidence)
     });
@@ -212,7 +232,7 @@ export async function scanCodexRollouts(home?: string): Promise<{
       title: stringValue(metadata.title),
       startedAt,
       updatedAt,
-      metadata: { ...metadata, archived_rollout: archived, rollout_root: rootPath, activity },
+      metadata: compactMetadata({ ...metadata, archived_rollout: archived, rollout_root: rootPath, ...(activity ? { activity } : {}) }),
       evidence
     });
     const parentSessionId = stringValue(metadata.parent_thread_id) ?? stringValue(metadata.parent_id);
@@ -262,15 +282,18 @@ export function rolloutStartedAt(filePath: string): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-export async function readRolloutMetadata(filePath: string): Promise<Record<string, unknown>> {
+export async function readRolloutMetadata(filePath: string, options: RolloutMetadataOptions = {}): Promise<Record<string, unknown>> {
+  const maxLines = Number.isFinite(options.maxLines) && options.maxLines !== undefined && options.maxLines > 0 ? Math.floor(options.maxLines) : 2500;
+  const minimumLines = Math.min(250, maxLines);
   const metadata: Record<string, unknown> = {};
   let parsed = 0;
   await iterateJsonl(filePath, (_line, _raw, value) => {
     parsed += 1;
     collectMetadata(value, metadata);
-    return parsed < 2500 && (parsed < 250 || missingImportantRolloutMetadata(metadata));
+    return parsed < maxLines && (parsed < minimumLines || missingImportantRolloutMetadata(metadata));
   }).catch(() => undefined);
   metadata.metadata_scan_lines = parsed;
+  if (parsed >= maxLines && missingImportantRolloutMetadata(metadata)) metadata.metadata_scan_truncated = true;
   return metadata;
 }
 

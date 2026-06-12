@@ -46,9 +46,34 @@ export async function runDoctor(home = userHome()): Promise<Diagnostic[]> {
       ? [...sqliteChecks(path.join(codexSqlite, "state_5.sqlite")), ...sqliteInventoryChecks(codexSqlite)]
       : sqliteBlockedByNativeChecks(codexSqlite, native.detail))
   );
-  const processes = await listProcesses(false);
-  checks.push(check("win32.process.scan", isWindows(), `${processes.length} related process rows`));
+  const processScan = await withTimeout(listProcesses(false, { timeoutMs: 5000, throwOnTimeout: true }), 6000, "win32.process.scan");
+  checks.push(
+    processScan.ok
+      ? check("win32.process.scan", isWindows(), `${processScan.value.length} related process rows`)
+      : check("win32.process.scan", false, processScan.error)
+  );
   return checks;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const value = await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+      })
+    ]);
+    return { ok: true, value };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function checkOptionalFile(name: string, filePath: string): Diagnostic {

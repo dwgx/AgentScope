@@ -90,6 +90,7 @@ describe("session operations", () => {
 
     const plan = await planSessionDelete(parentId, "codex", {
       home,
+      includeProcesses: false,
       now: new Date("2026-06-07T00:00:00Z")
     });
 
@@ -99,6 +100,7 @@ describe("session operations", () => {
       deleteSession(parentId, "codex", {
         home,
         allowActive: true,
+        includeProcesses: false,
         now: new Date("2026-06-07T00:00:00Z")
       })
     ).rejects.toThrow(/child sessions/);
@@ -160,6 +162,24 @@ describe("session operations", () => {
     expect(fs.existsSync(result.journalPath)).toBe(true);
     const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as Record<string, unknown>;
     expect(journal.kind).toBe("AgentScope Session Delete Journal");
+  });
+
+  it("records the actual backup directory in delete journals when now is not fixed", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-delete-journal-backup-"));
+    const sessionId = "56565656-5656-4565-8565-565656565656";
+    const encoded = "D--Project-AgentScope";
+    const transcript = path.join(home, ".claude", "projects", encoded, `${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    fs.writeFileSync(transcript, "{}\n");
+
+    const result = await deleteSession(sessionId, "claude", { home, outputRoot });
+    const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as { backupDir?: string };
+    const manifest = JSON.parse(fs.readFileSync(result.backup.manifestPath, "utf8")) as { createdAt?: string };
+
+    expect(journal.backupDir).toBe(result.backup.backupDir);
+    expect(fs.existsSync(path.join(String(journal.backupDir), "manifest.json"))).toBe(true);
+    expect(manifest.createdAt).toBe(result.plan.createdAt);
   });
 
   it("keeps Codex files in place and writes journal evidence when SQLite delete fails", async () => {
@@ -236,6 +256,42 @@ describe("session operations", () => {
     const restored = state.prepare("SELECT COUNT(*) count FROM threads WHERE id = ?").get(sessionId) as { count: number };
     state.close();
     expect(restored.count).toBe(1);
+  });
+
+  it("rolls back Codex sqlite deletes when file quarantine fails after DB deletion", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-file-fail-"));
+    const sessionId = "67676767-5555-4555-8555-676767676767";
+    const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout);
+    const blockingTarget = path.join(
+      outputRoot,
+      "quarantine",
+      `2026-06-07T04-41-00-000Z-codex-${sessionId}`,
+      relativeBackupPathForTest(rollout)
+    );
+    fs.mkdirSync(path.dirname(path.dirname(blockingTarget)), { recursive: true });
+    fs.writeFileSync(path.dirname(blockingTarget), "not a directory\n");
+
+    await expect(
+      deleteSession(sessionId, "codex", {
+        home,
+        outputRoot,
+        includeProcesses: false,
+        now: new Date("2026-06-07T04:41:00Z")
+      })
+    ).rejects.toThrow(/backupDir=.*quarantineDir=.*journalPath=/);
+
+    expect(fs.existsSync(rollout)).toBe(true);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    expect(Number((state.prepare("SELECT COUNT(*) AS count FROM threads WHERE id = ?").get(sessionId) as { count: number }).count)).toBe(1);
+    state.close();
+    const journalPath = path.join(outputRoot, "quarantine", `2026-06-07T04-41-00-000Z-codex-${sessionId}`, "journal.json");
+    const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
+    expect(journal.steps?.some((step) => step.phase === "file" && step.status === "started")).toBe(true);
+    expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.action === "rollback_restore" && step.status === "succeeded")).toBe(true);
   });
 
   it("imports an AgentScope backup when target files are absent", async () => {
@@ -323,6 +379,9 @@ describe("session operations", () => {
     const restoreJournal = JSON.parse(fs.readFileSync(restored.restoreJournalPath, "utf8")) as Record<string, unknown>;
     expect(restoreJournal.kind).toBe("AgentScope Session Restore Journal");
     expect(restoreJournal.status).toBe("succeeded");
+    const steps = restoreJournal.steps as Array<Record<string, unknown>>;
+    expect(steps.some((step) => step.phase === "file" && step.action === "copy" && step.status === "succeeded")).toBe(true);
+    expect(steps.some((step) => step.phase === "operation" && step.action === "restoreQuarantinedSession" && step.status === "succeeded")).toBe(true);
   });
 
   it("blocks quarantine restore when a target session already exists", async () => {
@@ -347,6 +406,7 @@ describe("session operations", () => {
     await expect(restoreQuarantinedSession(deleted.quarantineDir, { home, outputRoot })).rejects.toThrow(/restoreJournalPath=/);
     const failedJournal = JSON.parse(fs.readFileSync(path.join(deleted.quarantineDir, "restore-journal.json"), "utf8")) as Record<string, unknown>;
     expect(failedJournal.status).toBe("failed");
+    expect((failedJournal.steps as Array<Record<string, unknown>>).some((step) => step.phase === "plan" && step.status === "failed")).toBe(true);
   });
 
   it("rejects non-AgentScope quarantine journals", async () => {
@@ -539,6 +599,41 @@ describe("session operations", () => {
     expect(Number((state.prepare("SELECT COUNT(*) AS count FROM thread_spawn_edges WHERE child_thread_id = ?").get(sessionId) as { count: number }).count)).toBe(0);
     expect(Number((state.prepare("SELECT COUNT(*) AS count FROM thread_dynamic_tools WHERE thread_id = ?").get(sessionId) as { count: number }).count)).toBe(0);
     state.close();
+  });
+
+  it("persists restore journal rollback steps when Codex DB import fails", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-codex-restore-rollback-"));
+    const sessionId = "f2f2f2f2-2222-4f2f-8f2f-f2f2f2f2f2f2";
+    const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(rollout), { recursive: true });
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    createCodexBundleFixture(home, sessionId, rollout);
+    const deleted = await deleteSession(sessionId, "codex", {
+      home,
+      outputRoot,
+      includeProcesses: false,
+      allowActive: true,
+      now: new Date("2026-06-07T09:10:00Z")
+    });
+
+    recreateCodexEmptySchema(home);
+    const goals = new Database(path.join(home, ".codex", "goals_1.sqlite"));
+    goals.exec(`
+      CREATE TRIGGER agentscope_fail_goals_restore BEFORE INSERT ON thread_goals
+      BEGIN
+        SELECT RAISE(FAIL, 'goals restore failed');
+      END;
+    `);
+    goals.close();
+
+    await expect(restoreQuarantinedSession(deleted.quarantineDir, { home, outputRoot })).rejects.toThrow(/goals restore failed/);
+
+    const restoreJournal = JSON.parse(fs.readFileSync(path.join(deleted.quarantineDir, "restore-journal.json"), "utf8")) as { steps?: Array<Record<string, unknown>>; status?: string };
+    expect(restoreJournal.status).toBe("failed");
+    expect(restoreJournal.steps?.some((step) => step.phase === "sqlite_import" && step.status === "failed")).toBe(true);
+    expect(restoreJournal.steps?.some((step) => step.phase === "rollback" && step.action === "sqlite_delete_inserted_rows" && step.status === "succeeded")).toBe(true);
+    expect(restoreJournal.steps?.some((step) => step.phase === "rollback" && step.action === "removeImportedFiles" && step.status === "succeeded")).toBe(true);
   });
 
   it("rejects Codex SQLite row bundles that target unsupported databases or tables", async () => {
@@ -785,6 +880,12 @@ function recreateCodexEmptySchema(home: string, sqliteRoot = path.join(home, ".c
 
 function sha256(filePath: string): string {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function relativeBackupPathForTest(filePath: string): string {
+  const normalized = path.resolve(filePath);
+  const withoutRoot = normalized.replace(/^([A-Za-z]):\\/, "$1/").replace(/^\\\\/, "UNC/");
+  return withoutRoot.replace(/[<>:"|?*]/g, "_");
 }
 
 async function waitForProcessList(): Promise<void> {

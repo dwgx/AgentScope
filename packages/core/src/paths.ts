@@ -3,10 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 export function userHome(): string {
+  const smokeHome = process.env.AGENTSCOPE_HOME?.trim();
+  if (smokeHome) return smokeHome;
   return process.env.USERPROFILE || os.homedir();
 }
 
 export function codexHome(home = userHome()): string {
+  const env = process.env.CODEX_HOME?.trim();
+  if (env && home === userHome()) return resolveAgentHome(env);
   return path.join(home, ".codex");
 }
 
@@ -20,7 +24,15 @@ export function codexSqliteHome(home = userHome(), cwd = process.cwd()): string 
 }
 
 export function claudeHome(home = userHome()): string {
+  const env = process.env.CLAUDE_HOME?.trim();
+  if (env && home === userHome()) return resolveAgentHome(env);
   return path.join(home, ".claude");
+}
+
+export function agentScopeHome(home = userHome()): string {
+  const env = process.env.AGENTSCOPE_DATA_HOME?.trim();
+  if (env && home === userHome()) return resolveAgentHome(env);
+  return path.join(home, ".agentscope");
 }
 
 export function normalizeWindowsPath(value?: string | null): string | undefined {
@@ -79,6 +91,11 @@ function isPathTokenBoundary(value: string): boolean {
 function resolveCodexSqliteHome(value: string, cwd: string): string {
   const normalized = normalizeWindowsPath(value) ?? value;
   return path.isAbsolute(normalized) ? normalized : path.resolve(cwd, normalized);
+}
+
+function resolveAgentHome(value: string): string {
+  const normalized = normalizeWindowsPath(value) ?? value;
+  return path.resolve(normalized);
 }
 
 function readCodexSqliteHomeFromConfig(configPath: string): string | undefined {

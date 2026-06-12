@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type {
@@ -19,7 +18,7 @@ import type {
 } from "@agentscope/shared";
 import { tableColumns } from "./codex.js";
 import { buildSnapshot, findSession } from "./scope.js";
-import { claudeHome, codexHome, codexSqliteHome, encodeClaudeProjectPath, normalizeWindowsPath, userHome } from "./paths.js";
+import { agentScopeHome, claudeHome, codexHome, codexSqliteHome, encodeClaudeProjectPath, normalizeWindowsPath, userHome } from "./paths.js";
 
 export interface SessionOperationOptions {
   home?: string | undefined;
@@ -80,7 +79,25 @@ interface RestoreJournal {
   status: "succeeded" | "failed";
   importedFiles: SessionOperationFile[];
   databaseChanges: SessionOperationDatabaseChange[];
+  steps: RestoreJournalStep[];
   error?: string | undefined;
+}
+
+interface RestoreJournalStep {
+  at?: string | undefined;
+  phase: "plan" | "preflight" | "file" | "sqlite_import" | "rollback" | "operation";
+  action: string;
+  status: "started" | "succeeded" | "failed" | "skipped";
+  role?: string | undefined;
+  path?: string | undefined;
+  targetPath?: string | undefined;
+  database?: string | undefined;
+  table?: string | undefined;
+  sha256?: string | undefined;
+  estimatedRows?: number | undefined;
+  detail?: string | undefined;
+  error?: string | undefined;
+  evidence?: Evidence[] | undefined;
 }
 
 interface CodexDatabaseBundleManifest {
@@ -221,9 +238,12 @@ export async function deleteSession(
   const patchedFiles: SessionOperationFile[] = [];
   let backup: SessionBackupResult | undefined;
   const databaseChanges: SessionOperationDatabaseChange[] = [];
+  const backupOptions = { ...options, now: new Date(plan.createdAt) };
   try {
     await appendJournalStep(journal, { phase: "backup", action: "backupSession", status: "started", path: backupDir });
-    backup = await backupSession(session.sessionId, session.agent, options);
+    backup = await backupSession(session.sessionId, session.agent, backupOptions);
+    journal.backupDir = backup.backupDir;
+    await writeJson(journal.journalPath, journal);
     await appendJournalStep(journal, {
       phase: "backup",
       action: "backupSession",
@@ -241,7 +261,6 @@ export async function deleteSession(
       if (!file.exists) continue;
       if (file.action === "delete") {
         const target = path.join(quarantineDir, relativeBackupPath(file.path));
-        await fs.promises.mkdir(path.dirname(target), { recursive: true });
         await appendJournalStep(journal, {
           phase: "file",
           action: "move",
@@ -251,6 +270,7 @@ export async function deleteSession(
           targetPath: target,
           evidence: file.evidence
         });
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
         await movePath(file.path, target);
         const moved: SessionOperationFile = { ...file, action: "move", sha256: await hashPath(target) };
         movedFiles.push(moved);
@@ -268,38 +288,24 @@ export async function deleteSession(
         await appendJournalStep(journal, {
           phase: "patch",
           action: "patch",
-          status: "started",
+          status: "failed",
           role: file.role,
           path: file.path,
+          detail: "Patch actions are disabled until reversible restore support exists.",
           evidence: file.evidence
         });
-        const patched = await patchSessionReferenceFile(file, session);
-        if (patched) {
-          patchedFiles.push(patched);
-          await appendJournalStep(journal, {
-            phase: "patch",
-            action: "patch",
-            status: "succeeded",
-            role: file.role,
-            path: file.path,
-            sha256: patched.sha256,
-            evidence: patched.evidence
-          });
-        } else {
-          await appendJournalStep(journal, {
-            phase: "patch",
-            action: "patch",
-            status: "skipped",
-            role: file.role,
-            path: file.path,
-            detail: "No exact session reference found to patch.",
-            evidence: file.evidence
-          });
-        }
+        throw new Error(`Patch action is disabled until reversible restore is implemented: ${file.role}`);
       }
-    }
+  }
     return { plan, backup, quarantineDir, journalPath, movedFiles, patchedFiles, databaseChanges };
   } catch (error) {
+    if (session.agent === "codex" && databaseChanges.some((change) => change.action === "delete" && (change.estimatedRows ?? 0) > 0)) {
+      try {
+        rollbackCodexDatabaseDeletes(databaseChanges, quarantineDir, journal, "Restoring SQLite database from delete-time backup after file quarantine failed.");
+      } catch {
+        // rollbackCodexDatabaseDeletes already journals the rollback failure; preserve the original operation error.
+      }
+    }
     await appendJournalStep(journal, {
       phase: "operation",
       action: "deleteSession",
@@ -312,17 +318,34 @@ export async function deleteSession(
 
 export async function importSessionBackup(
   backupDir: string,
-  options: SessionOperationOptions = {}
+  options: SessionOperationOptions = {},
+  restoreJournal?: RestoreJournal | undefined
 ): Promise<SessionImportResult> {
   try {
+    await appendRestoreJournalStep(restoreJournal, { phase: "plan", action: "planSessionImport", status: "started", path: backupDir });
     const planResult = await planSessionImport(backupDir, options);
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "plan",
+      action: "planSessionImport",
+      status: planResult.plan.blockers.length ? "failed" : "succeeded",
+      path: planResult.path,
+      detail: planResult.plan.blockers.length ? planResult.plan.blockers.join(" ") : undefined
+    });
     const plan = planResult.plan;
     if (plan.blockers.length) throw new Error(plan.blockers.join(" "));
     const manifest = await readBackupManifest(backupDir);
     const copiedFiles = manifestCopiedFiles(manifest);
     if (!copiedFiles.length) throw new Error("Backup manifest has no copied files to import.");
+    await appendRestoreJournalStep(restoreJournal, { phase: "preflight", action: "preflightImportFiles", status: "started", path: backupDir });
     await preflightImportFiles(manifest, backupDir, options.home);
     preflightCodexDatabaseBundles(manifest, backupDir, options.home);
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "preflight",
+      action: "preflightImportFiles",
+      status: "succeeded",
+      path: backupDir,
+      detail: `Validated ${copiedFiles.length} file(s) and ${(manifest.databaseBundles ?? []).length} database bundle(s).`
+    });
     const importedFiles: SessionOperationFile[] = [];
     const filesRoot = path.join(backupDir, "files");
     await assertImportTargetsAbsent(copiedFiles);
@@ -334,6 +357,14 @@ export async function importSessionBackup(
         if (!originalPath || !backupRelativePath) continue;
         const source = resolveSafeRelative(filesRoot, backupRelativePath);
         if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
+        await appendRestoreJournalStep(restoreJournal, {
+          phase: "file",
+          action: "copy",
+          status: "started",
+          role: typeof file.role === "string" ? file.role : "backup_file",
+          path: source,
+          targetPath: originalPath
+        });
         const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
         const actualSha = await hashPath(source);
         if (expectedSha && actualSha && expectedSha !== actualSha) {
@@ -362,14 +393,52 @@ export async function importSessionBackup(
             }
           ]
         });
+        await appendRestoreJournalStep(restoreJournal, {
+          phase: "file",
+          action: "copy",
+          status: "succeeded",
+          role: typeof file.role === "string" ? file.role : "backup_file",
+          path: source,
+          targetPath: originalPath,
+          sha256: importedFiles[importedFiles.length - 1]?.sha256
+        });
       }
-      const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home) : [];
+      const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home, restoreJournal) : [];
       return { plan, backupDir, importedFiles, databaseChanges };
     } catch (error) {
-      await removeImportedFiles(importedFiles).catch(() => undefined);
+      await appendRestoreJournalStep(restoreJournal, {
+        phase: "rollback",
+        action: "removeImportedFiles",
+        status: "started",
+        detail: `Removing ${importedFiles.length} file(s) copied before import failed.`
+      }).catch(() => undefined);
+      try {
+        await removeImportedFiles(importedFiles, restoreJournal);
+        await appendRestoreJournalStep(restoreJournal, {
+          phase: "rollback",
+          action: "removeImportedFiles",
+          status: "succeeded",
+          detail: `Removed ${importedFiles.length} copied file(s).`
+        }).catch(() => undefined);
+      } catch (rollbackError) {
+        await appendRestoreJournalStep(restoreJournal, {
+          phase: "rollback",
+          action: "removeImportedFiles",
+          status: "failed",
+          detail: `Failed to remove all copied file(s) after import failure.`,
+          error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+        }).catch(() => undefined);
+      }
       throw error;
     }
   } catch (error) {
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "operation",
+      action: "importSessionBackup",
+      status: "failed",
+      path: backupDir,
+      error: error instanceof Error ? error.message : String(error)
+    }).catch(() => undefined);
     throw withImportOperationPaths(error, backupDir);
   }
 }
@@ -459,15 +528,12 @@ export async function restoreQuarantinedSession(
   options: SessionOperationOptions = {}
 ): Promise<SessionRestoreResult> {
   let journal: DeleteJournal | undefined;
+  let restoreJournal: RestoreJournal | undefined;
   let restoreJournalPath: string | undefined;
   try {
     journal = await readQuarantineJournalPath(quarantineDirOrJournalPath, options);
     restoreJournalPath = restoreJournalPathFor(journal.quarantineDir);
-    const planResult = await planSessionRestore(journal.journalPath, options);
-    if (planResult.plan.blockers.length) throw new Error(planResult.plan.blockers.join(" "));
-    const imported = await importSessionBackup(journal.backupDir, options);
-    const databaseChanges = imported.databaseChanges ?? [];
-    const restoreJournal: RestoreJournal = {
+    restoreJournal = {
       schemaVersion: 1,
       kind: restoreJournalKind,
       createdAt: new Date().toISOString(),
@@ -478,10 +544,34 @@ export async function restoreQuarantinedSession(
       quarantineDir: journal.quarantineDir,
       journalPath: journal.journalPath,
       restoreJournalPath,
-      status: "succeeded",
-      importedFiles: imported.importedFiles,
-      databaseChanges
+      status: "failed",
+      importedFiles: [],
+      databaseChanges: [],
+      steps: []
     };
+    await writeJson(restoreJournalPath, restoreJournal);
+    await appendRestoreJournalStep(restoreJournal, { phase: "plan", action: "planSessionRestore", status: "started", path: journal.journalPath });
+    const planResult = await planSessionRestore(journal.journalPath, options);
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "plan",
+      action: "planSessionRestore",
+      status: planResult.plan.blockers.length ? "failed" : "succeeded",
+      path: journal.journalPath,
+      detail: planResult.plan.blockers.length ? planResult.plan.blockers.join(" ") : undefined
+    });
+    if (planResult.plan.blockers.length) throw new Error(planResult.plan.blockers.join(" "));
+    const imported = await importSessionBackup(journal.backupDir, options, restoreJournal);
+    const databaseChanges = imported.databaseChanges ?? [];
+    restoreJournal.status = "succeeded";
+    restoreJournal.updatedAt = new Date().toISOString();
+    restoreJournal.importedFiles = imported.importedFiles;
+    restoreJournal.databaseChanges = databaseChanges;
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "operation",
+      action: "restoreQuarantinedSession",
+      status: "succeeded",
+      detail: `Restored ${imported.importedFiles.length} file(s) and ${databaseChanges.length} database change(s).`
+    });
     await writeJson(restoreJournalPath, restoreJournal);
     return {
       plan: { ...planResult.plan, mode: "execute" },
@@ -495,7 +585,7 @@ export async function restoreQuarantinedSession(
   } catch (error) {
     if (journal) {
       restoreJournalPath ??= restoreJournalPathFor(journal.quarantineDir);
-      const failedJournal: RestoreJournal = {
+      restoreJournal ??= {
         schemaVersion: 1,
         kind: restoreJournalKind,
         createdAt: new Date().toISOString(),
@@ -509,9 +599,18 @@ export async function restoreQuarantinedSession(
         status: "failed",
         importedFiles: [],
         databaseChanges: [],
-        error: error instanceof Error ? error.message : String(error)
+        steps: []
       };
-      await writeJson(restoreJournalPath, failedJournal).catch(() => undefined);
+      restoreJournal.status = "failed";
+      restoreJournal.updatedAt = new Date().toISOString();
+      restoreJournal.error = error instanceof Error ? error.message : String(error);
+      await appendRestoreJournalStep(restoreJournal, {
+        phase: "operation",
+        action: "restoreQuarantinedSession",
+        status: "failed",
+        error: restoreJournal.error
+      }).catch(() => undefined);
+      await writeJson(restoreJournalPath, restoreJournal).catch(() => undefined);
       throw withRestoreOperationPaths(error, journal.backupDir, journal.quarantineDir, journal.journalPath, restoreJournalPath);
     }
     throw error;
@@ -651,7 +750,11 @@ async function resolveSession(
   home?: string,
   includeProcesses = false
 ): Promise<AgentSession> {
-  const snapshot = await buildSnapshot(home, includeProcesses);
+  const snapshot = await buildSnapshot(home, {
+    includeProcesses,
+    includeRolloutActivity: false,
+    includeCodexLogMetadata: false
+  });
   const exact = findSession(snapshot, sessionId, agent);
   if (exact) return exact;
   throw new Error(`Session not found: ${agent ? `${agent}:` : ""}${sessionId}`);
@@ -962,111 +1065,6 @@ function riskWarnings(session: AgentSession, operation: "backup" | "delete"): st
   return warnings;
 }
 
-async function patchSessionReferenceFile(
-  file: SessionOperationFile,
-  session: AgentSession
-): Promise<SessionOperationFile | undefined> {
-  if (file.role === "claude.history_jsonl_patch") {
-    return patchJsonlLinesBySessionId(file, session.sessionId);
-  }
-  if (file.role === "claude.global_state_patch") {
-    return patchClaudeGlobalState(file, session.sessionId);
-  }
-  if (file.role === "claude.daemon_roster_patch") {
-    return patchClaudeDaemonRoster(file, session.sessionId);
-  }
-  return undefined;
-}
-
-async function patchJsonlLinesBySessionId(
-  file: SessionOperationFile,
-  sessionId: string
-): Promise<SessionOperationFile | undefined> {
-  const original = await fs.promises.readFile(file.path, "utf8");
-  const lines = original.split(/\r?\n/);
-  const kept: string[] = [];
-  let removed = 0;
-  for (const line of lines) {
-    if (!line.trim()) {
-      kept.push(line);
-      continue;
-    }
-    try {
-      const value = JSON.parse(line) as Record<string, unknown>;
-      if (value.sessionId === sessionId || value.session_id === sessionId) {
-        removed += 1;
-        continue;
-      }
-    } catch {
-      // Keep malformed lines; destructive cleanup must not drop data it cannot parse.
-    }
-    kept.push(line);
-  }
-  if (!removed) return undefined;
-  await writePatchBackup(file.path, original);
-  await fs.promises.writeFile(file.path, kept.join("\n"), "utf8");
-  return {
-    ...file,
-    action: "patch",
-    sha256: await hashPath(file.path),
-    evidence: [
-      ...file.evidence,
-      {
-        source: "agentscope.delete.patch",
-        detail: `Removed ${removed} JSONL line(s) referencing this session id.`,
-        path: file.path,
-        field: "sessionId"
-      }
-    ]
-  };
-}
-
-async function patchClaudeGlobalState(
-  file: SessionOperationFile,
-  sessionId: string
-): Promise<SessionOperationFile | undefined> {
-  const original = await fs.promises.readFile(file.path, "utf8");
-  let payload: unknown;
-  try {
-    payload = JSON.parse(original) as unknown;
-  } catch {
-    return undefined;
-  }
-  const removed = removeMatchingJsonValues(payload, sessionId);
-  if (!removed) return undefined;
-  await writePatchBackup(file.path, original);
-  await writeJson(file.path, payload);
-  return patchedFile(file, `Removed ${removed} JSON field(s) equal to the session id.`, "lastSessionId");
-}
-
-async function patchClaudeDaemonRoster(
-  file: SessionOperationFile,
-  sessionId: string
-): Promise<SessionOperationFile | undefined> {
-  const original = await fs.promises.readFile(file.path, "utf8");
-  let payload: Record<string, unknown>;
-  try {
-    payload = JSON.parse(original) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-  const workers = objectValue(payload.workers);
-  if (!workers) return undefined;
-  let removed = 0;
-  for (const [key, worker] of Object.entries(workers)) {
-    const workerObject = objectValue(worker);
-    const dispatch = objectValue(workerObject?.dispatch);
-    if (workerObject?.sessionId === sessionId || dispatch?.sessionId === sessionId) {
-      delete workers[key];
-      removed += 1;
-    }
-  }
-  if (!removed) return undefined;
-  await writePatchBackup(file.path, original);
-  await writeJson(file.path, payload);
-  return patchedFile(file, `Removed ${removed} daemon worker reference(s) for this session id.`, "workers.*.sessionId");
-}
-
 function applyCodexDatabaseDelete(
   plan: SessionOperationPlan,
   home: string | undefined,
@@ -1167,7 +1165,8 @@ function applyCodexDatabaseDelete(
 function rollbackCodexDatabaseDeletes(
   applied: SessionOperationDatabaseChange[],
   quarantineDir: string,
-  journal?: DeleteJournal | undefined
+  journal?: DeleteJournal | undefined,
+  detail = "Restoring SQLite database from delete-time backup after a later Codex DB delete failed."
 ): void {
   const seen = new Set<string>();
   for (const change of [...applied].reverse()) {
@@ -1184,10 +1183,10 @@ function rollbackCodexDatabaseDeletes(
       database,
       path: backupPath,
       targetPath: database,
-      detail: "Restoring SQLite database from delete-time backup after a later Codex DB delete failed."
+      detail
     });
     try {
-      restoreSqliteBackupFiles(backupPath, database);
+      const restoredRows = restoreDeletedRowsFromSqliteBackup(backupPath, database, change);
       appendJournalStepSync(journal, {
         phase: "sqlite_delete",
         action: "rollback_restore",
@@ -1195,6 +1194,7 @@ function rollbackCodexDatabaseDeletes(
         database,
         path: backupPath,
         targetPath: database,
+        estimatedRows: restoredRows,
         sha256: hashPathSync(database)
       });
     } catch (error) {
@@ -1212,17 +1212,46 @@ function rollbackCodexDatabaseDeletes(
   }
 }
 
-function restoreSqliteBackupFiles(backupPath: string, targetPath: string): void {
+function restoreDeletedRowsFromSqliteBackup(
+  backupPath: string,
+  targetPath: string,
+  change: SessionOperationDatabaseChange
+): number {
   if (!fs.existsSync(backupPath)) throw new Error(`SQLite backup is missing: ${backupPath}`);
-  fs.copyFileSync(backupPath, targetPath);
-  for (const suffix of ["-wal", "-shm"]) {
-    const backupSidecar = `${backupPath}${suffix}`;
-    const targetSidecar = `${targetPath}${suffix}`;
-    if (fs.existsSync(backupSidecar)) {
-      fs.copyFileSync(backupSidecar, targetSidecar);
-    } else if (fs.existsSync(targetSidecar)) {
-      fs.rmSync(targetSidecar, { force: true });
+  const backupDb = openReadableDb(backupPath);
+  const targetDb = openWritableDb(targetPath);
+  if (!backupDb) throw new Error(`Could not open SQLite backup: ${backupPath}`);
+  if (!targetDb) {
+    backupDb.close();
+    throw new Error(`Could not open SQLite database for rollback: ${targetPath}`);
+  }
+  try {
+    backupDb.pragma("busy_timeout = 5000");
+    targetDb.pragma("busy_timeout = 5000");
+    const backupColumns = tableColumns(backupDb, change.table);
+    const targetColumns = tableColumns(targetDb, change.table);
+    const columns = [...backupColumns].filter((column) => targetColumns.has(column));
+    if (!columns.length) throw new Error(`SQLite rollback table has no compatible columns: ${change.table}`);
+    if (!whereColumnsExist(targetColumns, change.where)) {
+      throw new Error(`SQLite rollback table is missing where columns: ${change.table}`);
     }
+    const params = change.rollbackParams;
+    if (!params) throw new Error(`SQLite rollback parameters are missing for ${change.table}.`);
+    const rows = backupDb.prepare(`SELECT ${columns.map(quoteIdentifier).join(", ")} FROM ${quoteIdentifier(change.table)} WHERE ${change.where}`).all(...params);
+    const placeholders = columns.map(() => "?").join(", ");
+    const insert = targetDb.prepare(`INSERT OR IGNORE INTO ${quoteIdentifier(change.table)} (${columns.map(quoteIdentifier).join(", ")}) VALUES (${placeholders})`);
+    const transaction = targetDb.transaction((items: Record<string, unknown>[]) => {
+      let inserted = 0;
+      for (const row of items) {
+        const result = insert.run(...columns.map((column) => row[column]));
+        inserted += Number(result.changes ?? 0);
+      }
+      return inserted;
+    });
+    return Number(transaction(rows as Record<string, unknown>[]));
+  } finally {
+    backupDb.close();
+    targetDb.close();
   }
 }
 
@@ -1271,7 +1300,8 @@ function deleteRows(
   if (before > 0) db.prepare(`DELETE FROM ${quoteIdentifier(table)} WHERE ${where}`).run(...params);
   return {
     ...dbChange(dbPath, table, where, "delete", source),
-    estimatedRows: before
+    estimatedRows: before,
+    rollbackParams: params
   };
 }
 
@@ -1342,6 +1372,21 @@ function appendJournalStepSync(journal: DeleteJournal | undefined, step: DeleteJ
   journal.steps.push({ ...step, at: step.at ?? journal.updatedAt });
   fs.mkdirSync(path.dirname(journal.journalPath), { recursive: true });
   fs.writeFileSync(journal.journalPath, `${JSON.stringify(journal, null, 2)}\n`, "utf8");
+}
+
+async function appendRestoreJournalStep(journal: RestoreJournal | undefined, step: RestoreJournalStep): Promise<void> {
+  if (!journal) return;
+  journal.updatedAt = new Date().toISOString();
+  journal.steps.push({ ...step, at: step.at ?? journal.updatedAt });
+  await writeJson(journal.restoreJournalPath, journal);
+}
+
+function appendRestoreJournalStepSync(journal: RestoreJournal | undefined, step: RestoreJournalStep): void {
+  if (!journal) return;
+  journal.updatedAt = new Date().toISOString();
+  journal.steps.push({ ...step, at: step.at ?? journal.updatedAt });
+  fs.mkdirSync(path.dirname(journal.restoreJournalPath), { recursive: true });
+  fs.writeFileSync(journal.restoreJournalPath, `${JSON.stringify(journal, null, 2)}\n`, "utf8");
 }
 
 function withOperationPaths(
@@ -1574,7 +1619,8 @@ async function exportCodexDatabaseBundles(
 function importCodexDatabaseBundles(
   manifest: BackupManifest,
   backupDir: string,
-  home: string | undefined
+  home: string | undefined,
+  restoreJournal?: RestoreJournal | undefined
 ): SessionOperationDatabaseChange[] {
   const bundles = manifest.databaseBundles ?? [];
   if (!bundles.length) return [];
@@ -1604,6 +1650,14 @@ function importCodexDatabaseBundles(
       try {
         db.pragma("busy_timeout = 5000");
         db.pragma("foreign_keys = ON");
+        const transactionChanges: SessionOperationDatabaseChange[] = [];
+        const transactionSteps: RestoreJournalStep[] = [];
+        appendRestoreJournalStepSync(restoreJournal, {
+          phase: "sqlite_import",
+          action: "transaction",
+          status: "started",
+          database: dbPath
+        });
         const transaction = db.transaction(() => {
           for (const bundle of databaseBundles) {
             const source = resolveSafeRelative(backupDir, bundle.relativePath);
@@ -1615,20 +1669,53 @@ function importCodexDatabaseBundles(
             validateCodexBundlePayload(payload, bundle, manifest.sessionId);
             const rows = Array.isArray(payload.rows) ? payload.rows.filter(isObjectValue) : [];
             validateCodexBundleRows(bundle.table, rows, manifest.sessionId, bundle.action);
+            appendRestoreJournalStepSync(restoreJournal, {
+              phase: "sqlite_import",
+              action: "insert",
+              status: "started",
+              database: dbPath,
+              table: bundle.table,
+              path: source,
+              estimatedRows: rows.length
+            });
             const inserted = insertBundleRows(db, bundle.table, rows, manifest.sessionId);
-            changes.push({
+            const change = {
               ...dbChange(dbPath, bundle.table, `session = ${jsonQuote(manifest.sessionId)}`, inserted ? "insert" : "skip", "agentscope.import.codex"),
+              estimatedRows: inserted
+            };
+            transactionChanges.push(change);
+            transactionSteps.push({
+              phase: "sqlite_import",
+              action: inserted ? "insert" : "skip",
+              status: inserted ? "succeeded" : "skipped",
+              database: dbPath,
+              table: bundle.table,
+              path: source,
               estimatedRows: inserted
             });
           }
         });
         transaction();
+        changes.push(...transactionChanges);
+        for (const step of transactionSteps) appendRestoreJournalStepSync(restoreJournal, step);
+        appendRestoreJournalStepSync(restoreJournal, {
+          phase: "sqlite_import",
+          action: "transaction",
+          status: "succeeded",
+          database: dbPath
+        });
       } finally {
         db.close();
       }
     }
   } catch (error) {
-    const rollbackError = rollbackCodexDatabaseImports(changes, manifest.sessionId);
+    appendRestoreJournalStepSync(restoreJournal, {
+      phase: "sqlite_import",
+      action: "transaction",
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error)
+    });
+    const rollbackError = rollbackCodexDatabaseImports(changes, manifest.sessionId, restoreJournal);
     if (rollbackError) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`${message}; Codex SQLite import rollback failed: ${rollbackError.message}`);
@@ -1640,7 +1727,8 @@ function importCodexDatabaseBundles(
 
 function rollbackCodexDatabaseImports(
   changes: SessionOperationDatabaseChange[],
-  sessionId: string
+  sessionId: string,
+  restoreJournal?: RestoreJournal | undefined
 ): Error | undefined {
   const seen = new Set<string>();
   for (const change of [...changes].reverse()) {
@@ -1653,6 +1741,14 @@ function rollbackCodexDatabaseImports(
     const db = openWritableDb(change.database);
     if (!db) continue;
     try {
+      appendRestoreJournalStepSync(restoreJournal, {
+        phase: "rollback",
+        action: "sqlite_delete_inserted_rows",
+        status: "started",
+        database: change.database,
+        table: change.table,
+        estimatedRows: change.estimatedRows
+      });
       db.pragma("busy_timeout = 5000");
       db.pragma("foreign_keys = ON");
       const transaction = db.transaction(() => {
@@ -1661,7 +1757,24 @@ function rollbackCodexDatabaseImports(
         db.prepare(`DELETE FROM ${quoteIdentifier(change.table)} WHERE ${where}`).run(...rollbackWhereParams(where, sessionId));
       });
       transaction();
+      appendRestoreJournalStepSync(restoreJournal, {
+        phase: "rollback",
+        action: "sqlite_delete_inserted_rows",
+        status: "succeeded",
+        database: change.database,
+        table: change.table,
+        estimatedRows: change.estimatedRows
+      });
     } catch (error) {
+      appendRestoreJournalStepSync(restoreJournal, {
+        phase: "rollback",
+        action: "sqlite_delete_inserted_rows",
+        status: "failed",
+        database: change.database,
+        table: change.table,
+        estimatedRows: change.estimatedRows,
+        error: error instanceof Error ? error.message : String(error)
+      });
       return error instanceof Error ? error : new Error(String(error));
     } finally {
       db.close();
@@ -1954,53 +2067,6 @@ function countRows(db: Database.Database, table: string, where: string, params: 
 
 function quoteIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
-}
-
-async function writePatchBackup(filePath: string, original: string): Promise<void> {
-  const backupPath = `${filePath}.agentscope-${safeStamp(new Date().toISOString())}.bak`;
-  await fs.promises.writeFile(backupPath, original, "utf8");
-}
-
-function patchedFile(file: SessionOperationFile, detail: string, field: string): SessionOperationFile {
-  return {
-    ...file,
-    action: "patch",
-    evidence: [
-      ...file.evidence,
-      {
-        source: "agentscope.delete.patch",
-        detail,
-        path: file.path,
-        field
-      }
-    ]
-  };
-}
-
-function removeMatchingJsonValues(value: unknown, target: string): number {
-  if (!value || typeof value !== "object") return 0;
-  let removed = 0;
-  if (Array.isArray(value)) {
-    for (let index = value.length - 1; index >= 0; index -= 1) {
-      if (value[index] === target) {
-        value.splice(index, 1);
-        removed += 1;
-      } else {
-        removed += removeMatchingJsonValues(value[index], target);
-      }
-    }
-    return removed;
-  }
-  const object = value as Record<string, unknown>;
-  for (const [key, child] of Object.entries(object)) {
-    if (child === target) {
-      delete object[key];
-      removed += 1;
-      continue;
-    }
-    removed += removeMatchingJsonValues(child, target);
-  }
-  return removed;
 }
 
 function backupNotes(agent: AgentKind): string[] {
@@ -2367,9 +2433,35 @@ function walkMaybeSync(root: string, visitor: (filePath: string) => void): void 
   }
 }
 
-async function removeImportedFiles(importedFiles: SessionOperationFile[]): Promise<void> {
+async function removeImportedFiles(importedFiles: SessionOperationFile[], restoreJournal?: RestoreJournal | undefined): Promise<void> {
   for (const file of [...importedFiles].reverse()) {
-    await fs.promises.rm(file.path, { recursive: true, force: true }).catch(() => undefined);
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "rollback",
+      action: "removeImportedFile",
+      status: "started",
+      role: file.role,
+      path: file.path
+    });
+    try {
+      await fs.promises.rm(file.path, { recursive: true, force: true });
+      await appendRestoreJournalStep(restoreJournal, {
+        phase: "rollback",
+        action: "removeImportedFile",
+        status: "succeeded",
+        role: file.role,
+        path: file.path
+      });
+    } catch (error) {
+      await appendRestoreJournalStep(restoreJournal, {
+        phase: "rollback",
+        action: "removeImportedFile",
+        status: "failed",
+        role: file.role,
+        path: file.path,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
     await pruneEmptyParents(path.dirname(file.path), 3);
   }
 }
@@ -2407,7 +2499,7 @@ function relativeBackupPath(filePath: string): string {
 }
 
 function operationRoot(options: SessionOperationOptions): string {
-  return options.outputRoot ?? path.join(os.homedir(), ".agentscope");
+  return options.outputRoot ?? agentScopeHome(options.home);
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {

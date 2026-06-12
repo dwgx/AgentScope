@@ -61,6 +61,30 @@ describe("Codex helpers", () => {
     expect(snapshot.relations.some((relation) => relation.kind === "subagent" && relation.targetId === "child-thread")).toBe(true);
   });
 
+  it("can skip Codex log metadata for fast UI snapshots", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-log-skip-"));
+    tempRoots.push(home);
+    const codexRoot = join(home, ".codex");
+    mkdirSync(codexRoot, { recursive: true });
+    const stateDb = new Database(join(codexRoot, "state_5.sqlite"));
+    stateDb.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, cwd TEXT);");
+    stateDb.prepare("INSERT INTO threads (id, title, cwd) VALUES (?, ?, ?)").run("thread-with-logs", "Logs", String.raw`D:\work`);
+    stateDb.close();
+
+    const logsDb = new Database(join(codexRoot, "logs_2.sqlite"));
+    logsDb.exec("CREATE TABLE logs (thread_id TEXT, level TEXT, ts TEXT, process_uuid TEXT, target TEXT);");
+    logsDb
+      .prepare("INSERT INTO logs (thread_id, level, ts, process_uuid, target) VALUES (?, ?, ?, ?, ?)")
+      .run("thread-with-logs", "WARN", "2026-06-12T00:00:00.000Z", "process-a", "target-a");
+    logsDb.close();
+
+    const fast = loadCodexIndex(home, { includeLogMetadata: false });
+    const full = loadCodexIndex(home, { includeLogMetadata: true });
+
+    expect(fast.sessions[0]?.indexMetadata?.log_count).toBeUndefined();
+    expect(full.sessions[0]?.indexMetadata?.log_count).toBe(1);
+  });
+
   it("keeps plain Codex spawn edges as child sessions rather than subagents", () => {
     const home = mkdtempSync(join(tmpdir(), "agentscope-codex-child-"));
     tempRoots.push(home);
@@ -218,5 +242,66 @@ describe("Codex helpers", () => {
     expect(session?.title).toBe("Archived");
     expect(session?.indexMetadata?.archived_rollout).toBe(true);
     expect(session?.evidence[0]?.detail).toContain("archived");
+  });
+
+  it("can index Codex rollout metadata without transcript activity analysis", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-light-rollout-"));
+    tempRoots.push(home);
+    const sessionId = "019ea000-0000-7000-8000-000000000002";
+    const rolloutPath = join(
+      home,
+      ".codex",
+      "sessions",
+      "2026",
+      "06",
+      "12",
+      `rollout-2026-06-12T12-00-00-${sessionId}.jsonl`
+    );
+    mkdirSync(dirname(rolloutPath), { recursive: true });
+    writeFileSync(
+      rolloutPath,
+      [
+        JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\work`, title: "Light" } }),
+        JSON.stringify({ type: "turn_context", payload: { cwd: String.raw`D:\work` } })
+      ].join("\n") + "\n"
+    );
+
+    const snapshot = await scanCodexRollouts(home, { includeActivity: false });
+    const session = snapshot.sessions.find((item) => item.sessionId === sessionId);
+    const transcript = snapshot.transcripts.find((item) => item.sessionId === sessionId);
+    const record = snapshot.records.find((item) => item.sessionId === sessionId);
+    expect(session?.title).toBe("Light");
+    expect(session?.activity).toBeUndefined();
+    expect(session?.indexMetadata?.activity_line_count).toBeUndefined();
+    expect(transcript?.activity).toBeUndefined();
+    expect(record?.metadata?.activity).toBeUndefined();
+    expect(session?.evidence[0]?.source).toBe("codex.sessions.rollout");
+  });
+
+  it("marks rollout metadata scans as truncated when a max line cap stops early", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-truncated-rollout-"));
+    tempRoots.push(home);
+    const sessionId = "019ea000-0000-7000-8000-000000000003";
+    const rolloutPath = join(
+      home,
+      ".codex",
+      "sessions",
+      "2026",
+      "06",
+      "12",
+      `rollout-2026-06-12T12-00-00-${sessionId}.jsonl`
+    );
+    mkdirSync(dirname(rolloutPath), { recursive: true });
+    writeFileSync(
+      rolloutPath,
+      Array.from({ length: 80 }, (_value, index) =>
+        JSON.stringify({ type: "turn_context", payload: { cwd: String.raw`D:\work`, index } })
+      ).join("\n") + "\n"
+    );
+
+    const snapshot = await scanCodexRollouts(home, { includeActivity: false, metadataMaxLines: 12 });
+    const session = snapshot.sessions.find((item) => item.sessionId === sessionId);
+    expect(session?.indexMetadata?.metadata_scan_lines).toBe(12);
+    expect(session?.indexMetadata?.metadata_scan_truncated).toBe(true);
   });
 });

@@ -61,12 +61,12 @@ export function resolveSessionLauncher(
   const candidates = agent === "codex"
     ? codexLaunchCandidates(env, context)
     : claudeLaunchCandidates(env, context);
-  const selected = candidates.find((candidate) => isLaunchTargetAllowed(candidate.path, agent) && launchCandidateExists(env, candidate));
+  const selected = candidates.find((candidate) => isLaunchCandidateAllowed(candidate, agent, env) && launchCandidateExists(env, candidate));
   if (!selected) {
     throw new Error(
       agent === "codex"
-        ? "Unable to find a safe Codex launcher. Expected node.exe + @openai/codex/bin/codex.js or codex.cmd; refusing .ps1."
-        : "Unable to find a safe Claude launcher. Expected claude.exe/claude.cmd or node.exe + Claude JS entrypoint; refusing .ps1."
+        ? "Unable to find a safe Codex launcher. Expected trusted node.exe + @openai/codex/bin/codex.js or codex.cmd; refusing .ps1/.bat and untrusted process paths."
+        : "Unable to find a safe Claude launcher. Expected trusted claude.exe/claude.cmd or node.exe + Claude JS entrypoint; refusing .ps1/.bat and untrusted process paths."
     );
   }
   const launcherArgs = selected.extraArgs ? [...selected.extraArgs, ...args] : args;
@@ -344,15 +344,51 @@ function processEvidence(process: AgentProcess): Evidence[] {
   ];
 }
 
-function isLaunchTargetAllowed(filePath: string, agent: Extract<AgentKind, "codex" | "claude">): boolean {
-  if (/\.ps1$/i.test(filePath)) return false;
-  if (isNodeExecutable(filePath)) return true;
-  if (agent === "codex") return /(?:^|[\\/])codex\.(?:cmd|exe)$/i.test(filePath);
-  return /(?:^|[\\/])claude\.(?:cmd|exe)$/i.test(filePath);
+function isLaunchCandidateAllowed(
+  candidate: InternalLaunchCandidate,
+  agent: Extract<AgentKind, "codex" | "claude">,
+  env: LaunchResolverEnvironment
+): boolean {
+  if (/\.(?:ps1|bat)$/i.test(candidate.path)) return false;
+  if (isNodeExecutable(candidate.path)) {
+    return isTrustedNodeExecutable(candidate.path, env) && (candidate.extraArgs ?? []).every((arg) => isTrustedJsEntrypoint(arg, agent, env));
+  }
+  return isTrustedAgentCommand(candidate.path, agent, env);
 }
 
 function isNodeExecutable(filePath: string): boolean {
   return /(?:^|[\\/])node(?:\.exe)?$/i.test(filePath);
+}
+
+function isTrustedNodeExecutable(filePath: string, env: LaunchResolverEnvironment): boolean {
+  return [env.programFilesDir, env.programFilesX86Dir]
+    .map((root) => root ? path.join(root, "nodejs") : undefined)
+    .some((root) => !!root && pathInsideOrEqual(root, filePath));
+}
+
+function isTrustedJsEntrypoint(
+  filePath: string,
+  agent: Extract<AgentKind, "codex" | "claude">,
+  env: LaunchResolverEnvironment
+): boolean {
+  if (!/\.js$/i.test(filePath) || !env.appDataDir) return false;
+  const npmRoot = path.join(env.appDataDir, "npm");
+  if (agent === "codex") {
+    return pathEquals(filePath, path.join(env.appDataDir, ...CODEX_JS_RELATIVE));
+  }
+  return pathInsideOrEqual(path.join(npmRoot, "node_modules"), filePath) && CLAUDE_JS_PATTERNS.some((pattern) => pattern.test(filePath));
+}
+
+function isTrustedAgentCommand(
+  filePath: string,
+  agent: Extract<AgentKind, "codex" | "claude">,
+  env: LaunchResolverEnvironment
+): boolean {
+  if (!env.appDataDir) return false;
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension !== ".cmd" && extension !== ".exe") return false;
+  const namePattern = agent === "codex" ? /^codex\.(?:cmd|exe)$/i : /^claude\.(?:cmd|exe)$/i;
+  return namePattern.test(path.basename(filePath)) && pathInsideOrEqual(path.join(env.appDataDir, "npm"), filePath);
 }
 
 function fileExists(env: LaunchResolverEnvironment, candidate: string): boolean {
@@ -366,6 +402,15 @@ function launchCandidateExists(env: LaunchResolverEnvironment, candidate: Intern
 
 function normalizePathKey(candidate: string): string {
   return path.resolve(candidate).toLowerCase();
+}
+
+function pathInsideOrEqual(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function pathEquals(left: string, right: string): boolean {
+  return normalizePathKey(left) === normalizePathKey(right);
 }
 
 function quoteArg(arg: string): string {

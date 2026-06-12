@@ -7,6 +7,7 @@ import type {
   CodexControlCenterSnapshot,
   CodexControlMutationPlan,
   CodexControlMutationRequest,
+  CodexControlRevealResult,
   CodexControlSaveResult,
   CodexControlSnapshot,
   CodexControlSurface,
@@ -244,6 +245,8 @@ const sensitiveKeyRe =
   /(?:^|[_.-])(?:api[-_]?key|authorization|bearer|credential|credentials|password|refresh[-_]?token|secret|token)(?:$|[_.-])/i;
 const sensitiveTokenRe =
   /(?:^|[^a-z0-9])(?:api[-_]?key|authorization|bearer|credential|credentials|password|refresh[-_]?token|secret|token)(?:$|[^a-z0-9])/i;
+const vendorTokenShapeRe = /\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]+)\b/;
+const redactedMutationValue = "[redacted by AgentScope]";
 
 interface ResolvedDocument {
   id: string;
@@ -251,6 +254,10 @@ interface ResolvedDocument {
   label: string;
   path: string;
   editable: boolean;
+}
+
+interface InternalMutationPlan extends CodexControlMutationPlan {
+  rawMutations: CodexControlMutationRequest["mutations"];
 }
 
 interface FileSnapshot {
@@ -427,6 +434,15 @@ export async function planCodexControlMutation(
   request: CodexControlMutationRequest,
   home = userHome()
 ): Promise<CodexControlMutationPlan> {
+  const plan = await planCodexControlMutationInternal(request, home);
+  const { rawMutations: _rawMutations, ...publicPlan } = plan;
+  return publicPlan;
+}
+
+async function planCodexControlMutationInternal(
+  request: CodexControlMutationRequest,
+  home = userHome()
+): Promise<InternalMutationPlan> {
   validateMutationRequest(request);
   const root = codexHome(home);
   const configPath = path.join(root, "config.toml");
@@ -471,7 +487,8 @@ export async function planCodexControlMutation(
   return {
     configPath,
     expectedSha256: request.expectedSha256,
-    mutations: normalized,
+    mutations: safeMutationsForPlan(normalized),
+    rawMutations: normalized,
     changedKeys: normalized.map((mutation) => mutation.keyPath),
     blockers,
     warnings,
@@ -491,7 +508,7 @@ export async function executeCodexControlMutation(
   request: CodexControlMutationRequest,
   home = userHome()
 ): Promise<CodexControlSaveResult> {
-  const plan = await planCodexControlMutation(request, home);
+  const plan = await planCodexControlMutationInternal(request, home);
   if (plan.blockers.length > 0) {
     throw new Error(`Codex control mutation blocked: ${plan.blockers.join("; ")}`);
   }
@@ -502,7 +519,7 @@ export async function executeCodexControlMutation(
     throw new Error(`Codex control config changed on disk; reload before saving: ${resolved.path}`);
   }
   let next = current.toString(textEncoding);
-  for (const mutation of plan.mutations) {
+  for (const mutation of plan.rawMutations) {
     next = applyConfigMutation(next, mutation.keyPath, mutation.value);
   }
   const validation = validateTomlShape(next);
@@ -563,6 +580,7 @@ export async function readCodexControlDocument(id: string, home = userHome()): P
   if (id === "config.global") {
     throw new Error("Raw config.toml editing is disabled; use structured Codex controls.");
   }
+  await assertResolvedDocumentPathSafe(resolved, home);
   const stat = await statFile(resolved.path);
   if (!stat.exists) {
     return {
@@ -710,8 +728,14 @@ export async function saveCodexControlDocument(
     throw new Error("Raw config.toml saving is disabled; use structured Codex controls.");
   }
   if (!resolved.editable) throw new Error(`Codex control document is read-only: ${id}`);
+  await assertResolvedDocumentPathSafe(resolved, home);
   if (Buffer.byteLength(content, textEncoding) > maxEditableBytes) {
     throw new Error(`Codex control document is too large for built-in editing: ${resolved.path}`);
+  }
+  const current = await readCurrentBytes(resolved.path);
+  const currentText = current.toString(textEncoding);
+  if (current.length > 0 && sensitiveDocumentLineNumbers(currentText).length > 0) {
+    throw new Error("AgentScope refuses to save Codex control documents that were redacted on read; clean the file externally first.");
   }
   if (resolved.kind === "config" && sensitiveLineNumbers(content).length > 0) {
     throw new Error("AgentScope refuses to save config.toml with sensitive-looking key names.");
@@ -723,8 +747,7 @@ export async function saveCodexControlDocument(
     const validation = validateTomlShape(content);
     if (validation) throw new Error(`config.toml validation failed: ${validation}`);
   }
-  const current = await readCurrentBytes(resolved.path);
-  const currentHash = sha256(current.toString(textEncoding));
+  const currentHash = sha256(currentText);
   if (currentHash !== expectedSha256) {
     throw new Error(`Codex control document changed on disk; reload before saving: ${resolved.path}`);
   }
@@ -755,6 +778,16 @@ export async function saveCodexControlDocument(
   };
 }
 
+export async function revealCodexControlSurface(
+  id: string,
+  home = userHome()
+): Promise<CodexControlRevealResult> {
+  const resolved = resolveDocumentForReveal(id, home);
+  if (!resolved.revealAllowed) return resolved;
+  await assertResolvedDocumentPathSafe(resolveDocument(id, home), home);
+  return resolved;
+}
+
 function resolveDocument(id: string, home: string): ResolvedDocument {
   const root = codexHome(home);
   if (id === "config.global") {
@@ -776,6 +809,43 @@ function resolveDocument(id: string, home: string): ResolvedDocument {
   throw new Error(`Unknown Codex control document id: ${id}`);
 }
 
+function resolveDocumentForReveal(id: string, home: string): CodexControlRevealResult {
+  const root = codexHome(home);
+  const blocked = (reason: string): CodexControlRevealResult => ({
+    id,
+    path: "",
+    revealAllowed: false,
+    reason,
+    evidence: [
+      {
+        source: "codex.control.reveal",
+        detail: reason
+      }
+    ]
+  });
+  if (id === "agents.global" || id.startsWith("rules:") || id.startsWith("skill:")) {
+    const resolved = resolveDocument(id, home);
+    return {
+      id,
+      path: resolved.path,
+      revealAllowed: true,
+      evidence: [
+        {
+          source: "codex.control.reveal",
+          detail: "Codex Control resolved this user-editable document by allowlisted id before reveal.",
+          path: resolved.path,
+          field: id
+        }
+      ]
+    };
+  }
+  if (id === "config.global") return blocked("Raw config.toml is managed only through structured Codex Control keys.");
+  if (id.startsWith("skill-readonly:")) return blocked("System or plugin-provided skills are read-only and not revealed by AgentScope.");
+  if (id.startsWith("rules:")) return blocked("Codex rule id is invalid or blocked.");
+  if (id === "plugins.summary") return blocked("Installed plugin cache is evidence-only; AgentScope does not reveal plugin cache paths.");
+  return blocked("This Codex Control surface is read-only or metadata-only; AgentScope will not reveal its path.");
+}
+
 function resolveAllowedFile(
   root: string,
   id: string,
@@ -794,6 +864,54 @@ function resolveAllowedFile(
     throw new Error(`Codex control document is sensitive and blocked: ${id}`);
   }
   return { id, kind, label, path: normalizedPath, editable };
+}
+
+async function assertResolvedDocumentPathSafe(resolved: ResolvedDocument, home: string): Promise<void> {
+  const root = path.resolve(codexHome(home));
+  const target = path.resolve(resolved.path);
+  if (!pathInsideResolved(root, target)) {
+    throw new Error(`Codex control document escapes CODEX_HOME: ${resolved.id}`);
+  }
+
+  const targetLstat = await fs.promises.lstat(target).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (targetLstat?.isSymbolicLink()) {
+    throw new Error(`Codex control document is a symbolic link and is blocked: ${resolved.id}`);
+  }
+
+  const existing = await nearestExistingPath(target);
+  const rootReal = await fs.promises.realpath(root).catch(() => root);
+  const existingReal = existing ? await fs.promises.realpath(existing) : rootReal;
+  if (!pathInsideResolved(rootReal, existingReal)) {
+    throw new Error(`Codex control document escapes CODEX_HOME after realpath: ${resolved.id}`);
+  }
+  if (targetLstat) {
+    const targetReal = await fs.promises.realpath(target);
+    if (!pathInsideResolved(rootReal, targetReal)) {
+      throw new Error(`Codex control document escapes CODEX_HOME after realpath: ${resolved.id}`);
+    }
+  }
+}
+
+async function nearestExistingPath(filePath: string): Promise<string | undefined> {
+  let current = path.resolve(filePath);
+  while (true) {
+    if (await pathExistsLocal(current)) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+async function pathExistsLocal(filePath: string): Promise<boolean> {
+  return fs.promises.lstat(filePath).then(() => true, () => false);
+}
+
+function pathInsideResolved(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function fileSurface(input: {
@@ -1289,6 +1407,19 @@ function normalizeMutations(mutations: CodexControlMutationRequest["mutations"])
   return normalized;
 }
 
+function safeMutationsForPlan(
+  mutations: CodexControlMutationRequest["mutations"]
+): CodexControlMutationRequest["mutations"] {
+  return mutations.map((mutation) => ({
+    ...mutation,
+    value: isSensitiveMutationValue(mutation.value) ? redactedMutationValue : mutation.value
+  }));
+}
+
+function isSensitiveMutationValue(value: string | number | boolean | null): boolean {
+  return typeof value === "string" && (sensitiveTokenRe.test(value) || vendorTokenShapeRe.test(value));
+}
+
 function validateMutationRequest(request: CodexControlMutationRequest): void {
   if (!request || typeof request !== "object") throw new Error("Invalid Codex control mutation request.");
   if (!/^[a-f0-9]{64}$/i.test(request.expectedSha256)) {
@@ -1329,7 +1460,7 @@ function validateMutationValue(
   }
   if (typeof value !== "string") return `${descriptor.keyPath} expects a string value.`;
   if (value.length > 160) return `${descriptor.keyPath} value is too long.`;
-  if (sensitiveTokenRe.test(value)) return `${descriptor.keyPath} value looks sensitive and is blocked.`;
+  if (isSensitiveMutationValue(value)) return `${descriptor.keyPath} value looks sensitive and is blocked.`;
   if (descriptor.options?.length && !descriptor.options.includes(value)) {
     return `${descriptor.keyPath} must be one of: ${descriptor.options.join(", ")}`;
   }
@@ -1539,8 +1670,10 @@ function modeConfigSnapshot(
   assignments: Map<string, TopLevelAssignment>,
   sensitiveLines: number[]
 ): CodexModeConfigSnapshot {
-  const model = stringTomlValue(assignments.get("model")?.value);
-  const reviewModel = stringTomlValue(assignments.get("review_model")?.value);
+  const modelAssignment = assignments.get("model");
+  const reviewModelAssignment = assignments.get("review_model");
+  const model = safeModeModelValue(modelAssignment, sensitiveLines);
+  const reviewModel = safeModeModelValue(reviewModelAssignment, sensitiveLines);
   const defaultReasoning = stringTomlValue(assignments.get("model_reasoning_effort")?.value);
   const planReasoning = stringTomlValue(assignments.get("plan_mode_reasoning_effort")?.value);
   const modes: Record<CodexModeId, CodexModeValue> = {
@@ -1615,6 +1748,15 @@ function modeEvidence(configPath: string, assignments: Array<TopLevelAssignment 
   }));
 }
 
+function safeModeModelValue(assignment: TopLevelAssignment | undefined, sensitiveLines: number[]): string | undefined {
+  if (!assignment) return undefined;
+  const value = stringTomlValue(assignment.value);
+  if (!value) return undefined;
+  if (sensitiveLines.includes(assignment.line)) return undefined;
+  if (isSensitiveDocumentLine(value)) return undefined;
+  return value;
+}
+
 function applyModePatch(content: string, patch: CodexModeConfigPatch): string {
   let next = normalizeTrailingNewline(content);
   const entries: Array<[string, string | null | undefined]> = [
@@ -1659,6 +1801,9 @@ function validateModePatch(patch: CodexModeConfigPatch): void {
   ];
   for (const [key, value] of modelEntries) {
     if (value === null) continue;
+    if (typeof value === "string" && isSensitiveDocumentLine(value)) {
+      throw new Error(`Invalid Codex model value for ${key}: sensitive-looking value.`);
+    }
     if (value !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,80}$/.test(value)) {
       throw new Error(`Invalid Codex model value for ${key}.`);
     }
@@ -1850,7 +1995,7 @@ function isSensitiveDocumentLine(rawLine: string): boolean {
   if (!line) return false;
   if (isSensitiveTomlLine(line)) return true;
   if (sensitiveTokenRe.test(line)) return true;
-  if (/\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]+)\b/.test(line)) return true;
+  if (vendorTokenShapeRe.test(line)) return true;
   if (/\b(?:api[_-]?key|authorization|bearer|password|refresh[_-]?token|access[_-]?token|id[_-]?token)\b/i.test(line)) return true;
   return false;
 }

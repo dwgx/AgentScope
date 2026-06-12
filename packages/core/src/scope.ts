@@ -17,13 +17,46 @@ import { appendEvidenceUnique, loadCodexIndex, scanCodexRollouts } from "./codex
 import { containsNormalizedPath, containsNormalizedPathToken } from "./paths.js";
 import { listProcesses } from "./processes.js";
 
-export async function buildSnapshot(home?: string, includeProcesses = true): Promise<ScopeSnapshot> {
-  const processes = includeProcesses ? await listProcesses(false) : [];
+const defaultProcessScanTimeoutMs = 5000;
+
+export interface BuildSnapshotOptions {
+  includeProcesses?: boolean | undefined;
+  includeRolloutActivity?: boolean | undefined;
+  includeCodexLogMetadata?: boolean | undefined;
+  processTimeoutMs?: number | undefined;
+  processProvider?: (() => Promise<AgentProcess[]>) | undefined;
+}
+
+export async function buildSnapshot(
+  home?: string,
+  includeProcessesOrOptions: boolean | BuildSnapshotOptions = true
+): Promise<ScopeSnapshot> {
+  const options = typeof includeProcessesOrOptions === "boolean" ? { includeProcesses: includeProcessesOrOptions } : includeProcessesOrOptions;
+  const includeProcesses = options.includeProcesses ?? true;
+  const includeRolloutActivity = options.includeRolloutActivity ?? true;
+  const includeCodexLogMetadata = options.includeCodexLogMetadata ?? true;
+  const rolloutMetadataMaxLines = includeRolloutActivity ? undefined : 50;
+  const processTimeoutMs = options.processTimeoutMs ?? defaultProcessScanTimeoutMs;
+  const processProvider =
+    options.processProvider ?? (() => listProcesses(false, { timeoutMs: processTimeoutMs, throwOnTimeout: true, throwOnFailure: true }));
+  const diagnostics: ScopeSnapshot["diagnostics"] = [];
+  const processesPromise = includeProcesses ? processProvider() : Promise.resolve([]);
   const claudeSessions = loadClaudeSessions(home);
-  const claudeTranscriptIndex = await loadClaudeTranscripts(home);
   const claudeRecords = loadClaudeIndexRecords(home);
-  const codex = loadCodexIndex(home);
-  const rollouts = await scanCodexRollouts(home);
+  const codex = loadCodexIndex(home, { includeLogMetadata: includeCodexLogMetadata });
+  const [claudeTranscriptIndex, rollouts, processResult] = await Promise.all([
+    loadClaudeTranscripts(home),
+    scanCodexRollouts(home, { includeActivity: includeRolloutActivity, metadataMaxLines: rolloutMetadataMaxLines }),
+    withTimeout(processesPromise, processTimeoutMs, "win32.process.scan")
+  ]);
+  const processes = processResult.ok ? processResult.value : [];
+  if (!processResult.ok) {
+    diagnostics.push({
+      name: "win32.process.scan",
+      status: "warn",
+      detail: `${processResult.error}; snapshot returned indexed session data without live process correlation.`
+    });
+  }
 
   const sessions = mergeSessions([...claudeSessions, ...codex.sessions, ...rollouts.sessions]);
   const transcripts = [...claudeTranscriptIndex.transcripts, ...rollouts.transcripts];
@@ -36,7 +69,28 @@ export async function buildSnapshot(home?: string, includeProcesses = true): Pro
 
   sessions.sort((a, b) => a.agent.localeCompare(b.agent) || (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "") || a.sessionId.localeCompare(b.sessionId));
 
-  return { processes, sessions, transcripts, indexRecords, relations };
+  return diagnostics.length ? { processes, sessions, transcripts, indexRecords, relations, diagnostics } : { processes, sessions, transcripts, indexRecords, relations };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const value = await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+      })
+    ]);
+    return { ok: true, value };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function findSession(snapshot: ScopeSnapshot, sessionId: string, agent?: string): AgentSession | undefined {
