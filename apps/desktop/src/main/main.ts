@@ -18,7 +18,7 @@ import {
   type SessionLaunchResolution,
   type SessionLaunchResult
 } from "@agentscope/shared";
-import type { CodexControlMutationRequest, CodexModeConfigPatch, Evidence, ScopeSnapshot } from "@agentscope/shared";
+import type { AgentProcess, CodexControlMutationRequest, CodexModeConfigPatch, Evidence, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -471,7 +471,8 @@ async function buildSnapshot(): Promise<ScopeSnapshot> {
       includeProcesses,
       includeRolloutActivity,
       includeCodexLogMetadata,
-      processTimeoutMs
+      processTimeoutMs,
+      processProvider: smokeProcessProvider(core)
     });
     lastCoreError = undefined;
     for (const diagnostic of snapshot.diagnostics ?? []) {
@@ -483,6 +484,105 @@ async function buildSnapshot(): Promise<ScopeSnapshot> {
     lastCoreError = error instanceof Error ? error.message : String(error);
     return { processes: [], sessions: [], transcripts: [], indexRecords: [], relations: [] };
   }
+}
+
+function smokeProcessProvider(core: typeof AgentScopeCore): (() => Promise<AgentProcess[]>) | undefined {
+  if (!isSmoke || process.env.AGENTSCOPE_SMOKE_PROCESS_TREE !== "1") return undefined;
+  return async () => core.annotateProcessTree(syntheticSmokeProcesses());
+}
+
+function syntheticSmokeProcesses(): AgentProcess[] {
+  const startedAt = "2026-06-12T00:00:00.000Z";
+  const evidence: Evidence[] = [
+    {
+      source: "smoke.synthetic.process",
+      detail: "Synthetic process tree used by desktop smoke; it does not read local Win32 processes.",
+      field: "pid,ppid,processName,CommandLine"
+    }
+  ];
+  return [
+    {
+      pid: 9100,
+      ppid: 90,
+      processName: "node.exe",
+      executablePath: String.raw`C:\Program Files\nodejs\node.exe`,
+      commandLine: String.raw`"node" "C:\Users\smoke\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"`,
+      startTime: startedAt,
+      windowTitle: "AgentScope smoke parent",
+      agent: "codex",
+      evidence: [...evidence]
+    },
+    {
+      pid: 9110,
+      ppid: 9100,
+      processName: "codex.exe",
+      executablePath: String.raw`C:\Users\smoke\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
+      commandLine: String.raw`C:\Users\smoke\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
+      startTime: startedAt,
+      agent: "codex",
+      evidence: [...evidence]
+    },
+    {
+      pid: 9120,
+      ppid: 9110,
+      processName: "node_repl.exe",
+      executablePath: String.raw`C:\Users\smoke\AppData\Local\OpenAI\Codex\bin\34ab3e1324cc55b5\node_repl.exe`,
+      commandLine: String.raw`"C:\Users\smoke\AppData\Local\OpenAI\Codex\bin\34ab3e1324cc55b5\node_repl.exe"`,
+      startTime: startedAt,
+      agent: "codex",
+      evidence: [...evidence]
+    },
+    {
+      pid: 9130,
+      ppid: 9120,
+      processName: "codex.exe",
+      executablePath: String.raw`C:\Users\smoke\AppData\Local\OpenAI\Codex\bin\fb2111b91430cb17\codex.exe`,
+      commandLine: String.raw`"C:\Users\smoke\AppData\Local\OpenAI\Codex\bin\fb2111b91430cb17\codex.exe" app-server --listen stdio://`,
+      startTime: startedAt,
+      agent: "codex",
+      evidence: [...evidence]
+    },
+    {
+      pid: 9140,
+      ppid: 9120,
+      processName: "node.exe",
+      executablePath: String.raw`C:\Program Files\nodejs\node.exe`,
+      commandLine: String.raw`"C:\Program Files\nodejs\node.exe" C:\Users\smoke\.codex\mcp-node\node_modules\@playwright\mcp\cli.js --cdp-endpoint http://127.0.0.1:9222`,
+      startTime: startedAt,
+      agent: "unknown",
+      evidence: [...evidence]
+    },
+    {
+      pid: 9150,
+      ppid: 9120,
+      processName: "node.exe",
+      executablePath: String.raw`C:\Users\smoke\AppData\Local\OpenAI\Codex\bin\5b9024f90663758b\node.exe`,
+      commandLine: String.raw`"C:\Users\smoke\AppData\Local\OpenAI\Codex\bin\5b9024f90663758b\node.exe" --experimental-vm-modules C:\Temp\kernel.js --session-id smoke-runtime --working-dir "D:\AgentScopeSmoke\Workspace"`,
+      startTime: startedAt,
+      agent: "unknown",
+      evidence: [...evidence]
+    },
+    {
+      pid: 9160,
+      ppid: 9110,
+      processName: "ida-pro-mcp.exe",
+      executablePath: String.raw`C:\Users\smoke\.local\bin\ida-pro-mcp.exe`,
+      commandLine: String.raw`"C:\Users\smoke\.local\bin\ida-pro-mcp.exe"`,
+      startTime: startedAt,
+      agent: "unknown",
+      evidence: [...evidence]
+    },
+    {
+      pid: 9170,
+      ppid: 9160,
+      processName: "python.exe",
+      executablePath: String.raw`C:\Users\smoke\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
+      commandLine: String.raw`"C:\Users\smoke\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe" "C:\Users\smoke\.local\bin\ida-pro-mcp.exe"`,
+      startTime: startedAt,
+      agent: "unknown",
+      evidence: [...evidence]
+    }
+  ];
 }
 
 function numberEnv(name: string, fallback: number): number {

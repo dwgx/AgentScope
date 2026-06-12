@@ -44,7 +44,7 @@ try {
       AGENTSCOPE_SMOKE: "1",
       AGENTSCOPE_SMOKE_VISIBLE: "1",
       AGENTSCOPE_SMOKE_VIEW: "sessions",
-      AGENTSCOPE_SMOKE_DISABLE_PROCESSES: "1",
+      AGENTSCOPE_SMOKE_PROCESS_TREE: "1",
       AGENTSCOPE_SMOKE_NO_SHELL: "1",
       AGENTSCOPE_SMOKE_FAKE_LAUNCH: "1",
       AGENTSCOPE_SMOKE_AUTO_CONFIRM_HIGH_RISK: "1",
@@ -69,6 +69,7 @@ try {
   await smokeSessionContextMenu(page);
   await smokeRecycleAndNotification(page);
   await smokeRelationsFilter(page);
+  await smokeProcessTree(page);
   await smokeResumeFork(page);
   await smokeCommandSearch(page);
   await smokeCodexControlInteractions(page);
@@ -162,6 +163,40 @@ async function smokeRelationsFilter(page) {
   const count = await page.locator('[data-testid="relation-row"]').count();
   if (count !== 1) throw new Error(`Expected one filtered relation, got ${count}.`);
   await page.screenshot({ path: path.join(outputRoot, "relations-filtered.png"), fullPage: true });
+}
+
+async function smokeProcessTree(page) {
+  await page.locator('[data-testid="nav-processes"]').click();
+  const taskGroup = page.locator('[data-testid="process-group"][data-group-key="root:9100"]');
+  await taskGroup.waitFor();
+  await taskGroup.locator('[data-testid="process-group-toggle"]').click();
+  await page.locator('[data-testid="process-row"][data-pid="9100"][data-process-role="codex_cli"]').waitFor();
+  await page.locator('[data-testid="process-row"][data-pid="9100"]').click();
+  await page.locator('[data-testid="inspector"]').waitFor();
+  await expectText(page.locator('[data-testid="inspector"]'), /Codex CLI|PID 9100/i);
+
+  await page.locator('[data-testid="process-row"][data-pid="9120"][data-process-role="codex_node_repl"]').waitFor();
+  await expectAttribute(page.locator('[data-testid="process-row"][data-pid="9120"]'), "data-depth", "2");
+  await page.locator('[data-testid="process-row"][data-pid="9130"][data-process-role="codex_app_server"]').waitFor();
+  await page.locator('[data-testid="process-row"][data-pid="9140"][data-process-role="codex_mcp_tool"]').waitFor();
+  await page.locator('[data-testid="process-row"][data-pid="9150"][data-process-role="codex_tool_kernel"]').waitFor();
+  await page.locator('[data-testid="process-row"][data-pid="9160"][data-process-role="codex_mcp_tool"]').waitFor();
+  await page.locator('[data-testid="process-row"][data-pid="9170"][data-process-role="codex_mcp_tool"]').waitFor();
+  await expectAttribute(page.locator('[data-testid="process-row"][data-pid="9170"]'), "data-parent-agent-pid", "9160");
+  await page.screenshot({ path: path.join(outputRoot, "process-tree-expanded.png"), fullPage: true });
+
+  await page.locator('[data-testid="process-row"][data-pid="9140"]').click({ button: "right" });
+  await page.locator('[data-testid="process-context-menu"]').waitFor();
+  await expectText(page.locator('[data-testid="process-context-menu"]'), /MCP|parent PID|root PID/i);
+  await page.locator('[data-testid="process-context-inspect"]').click();
+  await page.locator('[data-testid="process-row"][data-pid="9140"].selected').waitFor();
+  await expectText(page.locator('[data-testid="inspector"]'), /MCP|process\.parent_tree|Win32_Process|smoke\.synthetic\.process/i);
+
+  await page.locator('[data-testid="process-group-control"] button[data-value="role"]').click();
+  await page.locator('[data-testid="process-group"][data-group-key="role:codex_mcp_tool"]').waitFor();
+  await page.locator('[data-testid="process-group"][data-group-key="role:codex_tool_kernel"]').waitFor();
+  await page.locator('[data-testid="process-group"][data-group-key="role:codex_app_server"]').waitFor();
+  await page.screenshot({ path: path.join(outputRoot, "process-role-groups.png"), fullPage: true });
 }
 
 async function smokeResumeFork(page) {

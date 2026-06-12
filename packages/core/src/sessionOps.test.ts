@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,34 +15,41 @@ import {
   restoreQuarantinedSession,
   writeSessionDeletePlan
 } from "./sessionOps.js";
+import { annotateProcessTree } from "./processes.js";
 
 describe("session operations", () => {
   it("blocks deleting high-confidence active Codex heuristic process candidates", async () => {
     const home = tempHome();
     const sessionId = "77777777-7777-4777-8777-777777777777";
     const cwd = process.cwd();
-    const child = process.platform === "win32"
-      ? spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)", String.raw`C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`, "resume", sessionId, "--cwd", cwd], { cwd, stdio: "ignore", windowsHide: true })
-      : undefined;
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
     fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd } }) + "\n");
 
-    try {
-      if (child) await waitForProcessList();
-      const plan = await planSessionDelete(sessionId, "codex", {
-        home,
-        includeProcesses: true,
-        now: new Date("2026-06-07T00:00:00Z")
-      });
+    const plan = await planSessionDelete(sessionId, "codex", {
+      home,
+      includeProcesses: true,
+      now: new Date("2026-06-07T00:00:00Z"),
+      processProvider: process.platform === "win32"
+        ? async () => annotateProcessTree([
+            {
+              pid: 7770,
+              ppid: process.pid,
+              processName: "node.exe",
+              executablePath: String.raw`C:\Program Files\nodejs\node.exe`,
+              commandLine: String.raw`"node" "C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js" resume ${sessionId} --cwd "${cwd}"`,
+              startTime: "2026-06-07T00:00:00.000Z",
+              agent: "codex",
+              evidence: []
+            }
+          ])
+        : undefined
+    });
 
-      if (process.platform === "win32") {
-        expect(plan.blockers.join(" ")).toContain("high-confidence active Codex process candidate");
-      } else {
-        expect(plan.blockers).toEqual([]);
-      }
-    } finally {
-      child?.kill();
+    if (process.platform === "win32") {
+      expect(plan.blockers.join(" ")).toContain("high-confidence active Codex process candidate");
+    } else {
+      expect(plan.blockers).toEqual([]);
     }
   });
 
@@ -886,8 +892,4 @@ function relativeBackupPathForTest(filePath: string): string {
   const normalized = path.resolve(filePath);
   const withoutRoot = normalized.replace(/^([A-Za-z]):\\/, "$1/").replace(/^\\\\/, "UNC/");
   return withoutRoot.replace(/[<>:"|?*]/g, "_");
-}
-
-async function waitForProcessList(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 350));
 }

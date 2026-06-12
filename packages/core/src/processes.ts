@@ -6,7 +6,25 @@ import { normalizeWindowsPath } from "./paths.js";
 const execFileAsync = promisify(execFile);
 
 const relatedNames = new Set(["codex.exe", "codex", "claude.exe", "claude", "node_repl.exe", "node_repl"]);
-const relatedMarkers = ["codex", "claude", "node_repl", "app-server"];
+const codexPathMarkers = [
+  "@openai\\codex",
+  "@openai/codex",
+  "\\openai\\codex\\",
+  "/openai/codex/",
+  "codex-win32",
+  "node_repl",
+  "\\.codex\\mcp",
+  "/.codex/mcp"
+];
+const claudePathMarkers = [
+  "@anthropic-ai\\claude-code",
+  "@anthropic-ai/claude-code",
+  "\\.claude\\",
+  "/.claude/",
+  "\\claude\\",
+  "/claude/",
+  "claude_"
+];
 
 interface Win32ProcessRow {
   ProcessId?: number;
@@ -88,7 +106,7 @@ Get-CimInstance Win32_Process | ForEach-Object {
     });
     const rows = parseProcessRows(stdout);
     const processes = annotateProcessTree(rows.map(processFromRow));
-    return includeAll ? processes : processes.filter(isRelatedProcess);
+    return includeAll ? processes : selectRelatedProcesses(processes);
   } catch (error) {
     if (options.throwOnTimeout && isProcessScanTimeout(error)) {
       throw new Error(`win32.process.scan timed out after ${Math.round((options.timeoutMs ?? 5000) / 1000)}s`);
@@ -130,10 +148,10 @@ export function classifyProcess(name = "", commandLine = "", executablePath = ""
   const lowerPath = executablePath.toLowerCase();
   const lowerCommand = commandLine.toLowerCase();
   const pathAndName = `${lowerName} ${lowerPath}`;
-  if (pathAndName.includes("codex") || lowerCommand.includes("@openai\\codex") || lowerCommand.includes("@openai/codex") || lowerName.includes("node_repl")) {
+  if (pathAndName.includes("codex") || hasCodexPathMarker(lowerCommand) || lowerName.includes("node_repl")) {
     return "codex";
   }
-  if (pathAndName.includes("claude") || lowerCommand.includes("\\.claude\\") || lowerCommand.includes("/.claude/")) {
+  if (pathAndName.includes("claude") || hasClaudePathMarker(lowerCommand)) {
     return "claude";
   }
   const haystack = `${pathAndName} ${lowerCommand}`;
@@ -143,11 +161,38 @@ export function classifyProcess(name = "", commandLine = "", executablePath = ""
 
 export function isRelatedProcess(process: AgentProcess): boolean {
   const name = process.processName.toLowerCase();
+  if (process.agent !== "unknown") return true;
+  if (isHelperProcessRole(process.processRole)) return true;
   if (relatedNames.has(name)) return true;
-  const haystack = `${process.commandLine ?? ""} ${process.executablePath ?? ""}`.toLowerCase();
-  if (name === "node.exe" || name === "node") return relatedMarkers.some((marker) => haystack.includes(marker));
-  if (haystack.includes("daemon") && (haystack.includes("codex") || haystack.includes("claude"))) return true;
-  return relatedMarkers.some((marker) => haystack.includes(marker));
+  const commandLine = (process.commandLine ?? "").toLowerCase();
+  const executablePath = (process.executablePath ?? "").toLowerCase();
+  const haystack = `${name} ${commandLine} ${executablePath}`;
+  if (isCodexAppServer(name, commandLine, executablePath)) return true;
+  if (isCodexMcpTool(name, haystack)) return true;
+  if (isCodexToolKernel(name, commandLine)) return true;
+  if (hasCodexPathMarker(haystack) || hasClaudePathMarker(haystack) || isCodexExtensionHost(name, haystack)) return true;
+  return haystack.includes("daemon") && (hasCodexPathMarker(haystack) || hasClaudePathMarker(haystack));
+}
+
+export function selectRelatedProcesses(processes: AgentProcess[]): AgentProcess[] {
+  const byPid = new Map(processes.map((process) => [process.pid, process]));
+  const keep = new Set<number>();
+  for (const process of processes) {
+    if (isRelatedProcess(process)) keep.add(process.pid);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const process of processes) {
+      if (keep.has(process.pid)) continue;
+      const parent = process.ppid === undefined ? undefined : byPid.get(process.ppid);
+      if (!parent || !keep.has(parent.pid)) continue;
+      if (!shouldKeepRelatedChild(process, parent)) continue;
+      keep.add(process.pid);
+      changed = true;
+    }
+  }
+  return processes.filter((process) => keep.has(process.pid));
 }
 
 function processFromRow(row: Win32ProcessRow): AgentProcess {
@@ -202,9 +247,16 @@ export function annotateProcessTree(processes: AgentProcess[]): AgentProcess[] {
         field: "--session-id,--working-dir"
       });
     }
-    const role = classifyProcessRole(process, byPid);
-    process.processRole = role.role;
-    process.processRoleDetail = role.detail;
+  }
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (const process of processes) {
+      const role = classifyProcessRole(process, byPid);
+      process.processRole = role.role;
+      process.processRoleDetail = role.detail;
+    }
+  }
+  inferAgentKindsFromProcessTree(processes, byPid);
+  for (const process of processes) {
     if (process.ppid !== undefined && byPid.has(process.ppid) && isRelatedProcess(byPid.get(process.ppid)!)) {
       process.parentAgentPid = process.ppid;
     }
@@ -213,7 +265,7 @@ export function annotateProcessTree(processes: AgentProcess[]): AgentProcess[] {
       ...process.evidence,
       {
         source: "process.role",
-        detail: role.detail,
+        detail: process.processRoleDetail ?? "No specific agent process role identified.",
         field: "Name,ExecutablePath,CommandLine,ParentProcessId"
       }
     ];
@@ -231,19 +283,24 @@ function classifyProcessRole(
   const haystack = `${name} ${commandLine} ${executablePath}`;
   const pathAndName = `${name} ${executablePath}`;
   const parent = process.ppid === undefined ? undefined : byPid.get(process.ppid);
+  const parentRole = parent?.processRole;
+
+  if (isClaudeCli(name, commandLine, executablePath)) {
+    return { role: "claude_cli", detail: "Claude CLI process identified from name or Anthropic Claude Code entrypoint markers." };
+  }
 
   if (process.agent === "claude" || (process.agent === "unknown" && pathAndName.includes("claude"))) {
     if (haystack.includes("daemon")) {
       return { role: "claude_daemon", detail: "Claude daemon or background helper identified from command line/path markers." };
     }
-    return { role: "claude_cli", detail: "Claude CLI process identified from name or command line/path markers." };
+    return { role: "agent_helper", detail: "Claude-related helper process identified from command line/path markers; it is not treated as a Claude CLI root." };
   }
 
   if (name === "node_repl.exe" || name === "node_repl") {
     return { role: "codex_node_repl", detail: "Codex node_repl runtime helper; it belongs to a Codex process tree and is not a standalone session." };
   }
 
-  if (haystack.includes("app-server") && haystack.includes("codex")) {
+  if (isCodexAppServer(name, commandLine, executablePath)) {
     return { role: "codex_app_server", detail: "Codex app-server helper; it belongs to a Codex process tree and should not be treated as a root task." };
   }
 
@@ -251,8 +308,12 @@ function classifyProcessRole(
     return { role: "codex_tool_kernel", detail: "Codex runtime tool kernel identified by --session-id and --working-dir helper arguments; it is not a standalone Codex thread." };
   }
 
-  if (isCodexMcpTool(haystack)) {
+  if (isCodexMcpTool(name, haystack)) {
     return { role: "codex_mcp_tool", detail: "Codex-launched MCP/tool helper identified from command line markers." };
+  }
+
+  if (parentRole === "codex_mcp_tool" && isMcpToolChildProcess(name, haystack)) {
+    return { role: "codex_mcp_tool", detail: "Child process of a Codex MCP/tool helper; kept as part of the tool process tree." };
   }
 
   if ((name === "node.exe" || name === "node") && haystack.includes("@openai\\codex") && haystack.includes("\\bin\\codex")) {
@@ -260,33 +321,111 @@ function classifyProcessRole(
   }
 
   if (name === "codex.exe" || name === "codex") {
-    const parentRole = parent?.processRole ?? (parent ? classifyProcessRole(parent, byPid).role : undefined);
     if (parentRole === "codex_cli" || executablePath.includes("@openai\\codex-win32")) {
       return { role: "codex_engine", detail: "Codex native engine process under the CLI tree." };
     }
     return { role: "codex_engine", detail: "Codex native process identified by process name." };
   }
 
-  if (haystack.includes("codex") || haystack.includes("node_repl")) {
+  if (hasCodexPathMarker(haystack) || hasClaudePathMarker(haystack) || isCodexExtensionHost(name, haystack)) {
     return { role: "agent_helper", detail: "Agent-related helper process identified by Codex/node_repl markers." };
   }
 
   return { role: "unknown", detail: "No specific agent process role identified." };
 }
 
-function isCodexMcpTool(haystack: string): boolean {
+function isCodexMcpTool(name: string, haystack: string): boolean {
+  if (name.includes("mcp") && (haystack.includes("ida-pro-mcp") || haystack.includes("\\.codex\\") || haystack.includes("/.codex/"))) return true;
+  if ((name === "node.exe" || name === "node") && !isNodeMcpEntrypoint(haystack)) return false;
+  if (name === "powershell.exe" || name === "powershell" || name === "cmd.exe" || name === "cmd") return false;
   return [
     "@playwright/mcp",
+    "@playwright\\mcp",
     "chrome-devtools-mcp",
+    "ida-pro-mcp",
     "\\.codex\\mcp",
+    "/.codex/mcp",
     "mcp-server",
     "modelcontextprotocol"
   ].some((marker) => haystack.includes(marker));
 }
 
+function isNodeMcpEntrypoint(haystack: string): boolean {
+  return (
+    haystack.includes("\\.codex\\mcp-node\\") ||
+    haystack.includes("/.codex/mcp-node/") ||
+    haystack.includes("@playwright\\mcp\\cli") ||
+    haystack.includes("@playwright/mcp/cli") ||
+    haystack.includes("chrome-devtools-mcp") ||
+    haystack.includes("mcp-server") ||
+    haystack.includes("modelcontextprotocol")
+  );
+}
+
+function isCodexExtensionHost(name: string, haystack: string): boolean {
+  return name === "extension-host.exe" && (haystack.includes("\\.codex\\plugins\\") || haystack.includes("/.codex/plugins/"));
+}
+
 function isCodexToolKernel(name: string, commandLine: string): boolean {
   if (name !== "node.exe" && name !== "node") return false;
   return commandLine.includes("--session-id") && commandLine.includes("--working-dir");
+}
+
+function isCodexAppServer(name: string, commandLine: string, executablePath: string): boolean {
+  if (name !== "codex.exe" && name !== "codex") return false;
+  if (!commandLine.includes("app-server")) return false;
+  return commandLine.includes("app-server") || executablePath.includes("\\openai\\codex\\") || executablePath.includes("/openai/codex/");
+}
+
+function isClaudeCli(name: string, commandLine: string, executablePath: string): boolean {
+  if (name === "claude.exe" || name === "claude") return true;
+  const haystack = `${name} ${commandLine} ${executablePath}`;
+  if (name !== "node.exe" && name !== "node") return false;
+  return haystack.includes("@anthropic-ai\\claude-code") || haystack.includes("@anthropic-ai/claude-code");
+}
+
+function hasCodexPathMarker(haystack: string): boolean {
+  return codexPathMarkers.some((marker) => haystack.includes(marker));
+}
+
+function hasClaudePathMarker(haystack: string): boolean {
+  return claudePathMarkers.some((marker) => haystack.includes(marker));
+}
+
+function isMcpToolChildProcess(name: string, haystack: string): boolean {
+  if (name === "python.exe" || name === "python" || name.endsWith("python.exe")) return true;
+  return haystack.includes("ida-pro-mcp") || haystack.includes("modelcontextprotocol") || haystack.includes("mcp");
+}
+
+function isHelperProcessRole(role?: AgentProcessRole): boolean {
+  return role === "codex_node_repl" || role === "codex_app_server" || role === "codex_mcp_tool" || role === "codex_tool_kernel" || role === "agent_helper";
+}
+
+function shouldKeepRelatedChild(process: AgentProcess, parent: AgentProcess): boolean {
+  if (isRelatedProcess(process)) return true;
+  if (isHelperProcessRole(process.processRole)) return true;
+  if (parent.processRole === "codex_mcp_tool" && process.processRole === "codex_mcp_tool") return true;
+  if (parent.agent !== "unknown" && process.agent === parent.agent && isHelperProcessRole(parent.processRole)) return true;
+  return false;
+}
+
+function inferAgentKindsFromProcessTree(processes: AgentProcess[], byPid: Map<number, AgentProcess>): void {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const process of processes) {
+      if (process.agent !== "unknown" || !isHelperProcessRole(process.processRole)) continue;
+      const parent = process.ppid === undefined ? undefined : byPid.get(process.ppid);
+      if (!parent || parent.agent === "unknown") continue;
+      process.agent = parent.agent;
+      process.evidence.push({
+        source: "process.parent_tree",
+        detail: "Agent kind inferred from a Win32 parent process and helper role. This is process-tree evidence only, not an exact session association.",
+        field: "ParentProcessId,processRole,agent"
+      });
+      changed = true;
+    }
+  }
 }
 
 function parseRuntimeArgs(commandLine?: string): { sessionId?: string; workingDir?: string } {

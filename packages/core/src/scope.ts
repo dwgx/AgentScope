@@ -311,7 +311,7 @@ function scoreSessionForProcess(process: AgentProcess, session: AgentSession): S
     scoreParts.push({ ...evidence, points });
   };
 
-  if (session.pid !== undefined && session.pid === process.pid) {
+  if (session.pid !== undefined && session.pid === process.pid && canAttachExactPid(session, process)) {
     add(1000, {
       source: "process.match.pid",
       detail: "Session PID exactly matches the active Win32 process PID.",
@@ -433,6 +433,7 @@ function canAttachHeuristicProcess(candidate: SessionCandidate): boolean {
 function canAttachExactPid(session: AgentSession, process: AgentProcess): boolean {
   if (session.agent === "unknown") return false;
   if (process.agent !== "unknown" && process.agent !== session.agent) return false;
+  if (isHelperProcess(process)) return false;
   return true;
 }
 

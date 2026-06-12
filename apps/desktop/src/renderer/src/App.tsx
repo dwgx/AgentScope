@@ -1908,6 +1908,7 @@ function ProcessList(props: {
             onChange={(value) =>
               reorder(() => setSortMode(value as ProcessSortMode))
             }
+            testId="process-sort-control"
           />
         </ToolbarControl>
         <ToolbarControl label={t("views.processes.group.label")}>
@@ -1918,6 +1919,7 @@ function ProcessList(props: {
             onChange={(value) =>
               reorder(() => setGroupMode(value as ProcessGroupMode))
             }
+            testId="process-group-control"
           />
         </ToolbarControl>
       </div>
@@ -1942,8 +1944,8 @@ function ProcessList(props: {
           : groups.map((group) => {
           const isCollapsed = collapsed.has(group.key);
           return (
-            <section className="processGroup" key={group.key}>
-              <button className="groupHeader" onClick={() => toggleGroup(group.key)}>
+            <section className="processGroup" key={group.key} data-testid="process-group" data-group-key={group.key}>
+              <button className="groupHeader" data-testid="process-group-toggle" onClick={() => toggleGroup(group.key)}>
                 <ChevronRight size={15} className={isCollapsed ? "" : "open"} />
                 <strong>{group.label}</strong>
                 {group.summary && <em>{group.summary}</em>}
@@ -2008,6 +2010,15 @@ function ProcessRow(props: {
     <button
       className={`processRow ${props.selected ? "selected" : ""}`}
       style={{ "--process-depth": props.depth } as CSSProperties}
+      data-testid="process-row"
+      data-agent={process.agent}
+      data-depth={props.depth}
+      data-has-candidate={!!top}
+      data-parent-agent-pid={process.parentAgentPid ?? ""}
+      data-pid={process.pid}
+      data-ppid={process.ppid ?? ""}
+      data-process-role={process.processRole ?? "unknown"}
+      data-root-pid={process.rootPid ?? ""}
       onClick={props.onSelect}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -2088,6 +2099,7 @@ function ProcessContextMenu(props: {
     <div
       ref={menuRef}
       className="contextMenu"
+      data-testid="process-context-menu"
       style={{ left: position.left, top: position.top } as CSSProperties}
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -2095,12 +2107,12 @@ function ProcessContextMenu(props: {
       <p>
         {processRoleDetail(props.process, tr)}
       </p>
-      <button onClick={props.onInspect}>{t("views.processes.context.inspect")}</button>
+      <button data-testid="process-context-inspect" onClick={props.onInspect}>{t("views.processes.context.inspect")}</button>
       <div className="menuDivider" />
       <span>{t("views.processes.context.directSessionEvidence")}</span>
       {candidates.length ? (
         candidates.map((candidate) => (
-          <button className="candidateMenuItem" key={`${candidate.agent}:${candidate.sessionId}`} onClick={() => props.onSelectSession(candidate)}>
+          <button className="candidateMenuItem" data-testid="process-candidate-item" key={`${candidate.agent}:${candidate.sessionId}`} onClick={() => props.onSelectSession(candidate)}>
             <AgentPill agent={candidate.agent} />
             <strong>{candidateTitle(candidate)}</strong>
             <em>{candidateExplanation(candidate)}</em>
@@ -5225,21 +5237,21 @@ function RelationInspector(props: {
   const { t } = useTranslation();
   if (props.loadError) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-testid="inspector">
         <LoadErrorState message={props.loadError} compact />
       </aside>
     );
   }
   if (props.loading) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-testid="inspector">
         <LoadingState compact />
       </aside>
     );
   }
   if (!props.selected) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-testid="inspector">
         <EmptyState
           icon={<Network size={22} />}
           title={t("views.relations.filteredEmptyTitle")}
@@ -5250,7 +5262,7 @@ function RelationInspector(props: {
   }
   const relation = props.selected.value;
   return (
-    <aside className="inspector">
+    <aside className="inspector" data-testid="inspector">
       <InspectorHeader
         title={t(`relations.kind.${relation.kind}`)}
         subtitle={`${short(relation.sourceId)} -> ${short(relation.targetId)}`}
@@ -5335,21 +5347,21 @@ function Inspector(props: {
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
   if (props.loadError) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-testid="inspector">
         <LoadErrorState message={props.loadError} compact />
       </aside>
     );
   }
   if (props.loading) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-testid="inspector">
         <LoadingState compact />
       </aside>
     );
   }
   if (!props.selected) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-testid="inspector">
         <EmptyState
           icon={<FileText size={22} />}
           title={t("inspector.nothingTitle")}
@@ -5362,7 +5374,7 @@ function Inspector(props: {
   if (props.selected.type === "process") {
     const process = props.selected.value;
     return (
-      <aside className="inspector">
+      <aside className="inspector" data-testid="inspector">
         <InspectorHeader
           title={processDisplayTitle(process, tr)}
           subtitle={`PID ${process.pid}`}
@@ -6654,9 +6666,10 @@ function processRoleOrder(process: AgentProcess): number {
     claude_daemon: 1,
     codex_node_repl: 2,
     codex_app_server: 3,
-    codex_mcp_tool: 4,
-    agent_helper: 5,
-    unknown: 6
+    codex_tool_kernel: 4,
+    codex_mcp_tool: 5,
+    agent_helper: 6,
+    unknown: 7
   };
   return order[process.processRole ?? "unknown"] ?? 6;
 }

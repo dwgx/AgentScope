@@ -4,6 +4,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import type {
   AgentKind,
+  AgentProcess,
   AgentSession,
   Evidence,
   QuarantinedSession,
@@ -26,6 +27,7 @@ export interface SessionOperationOptions {
   now?: Date | undefined;
   allowActive?: boolean | undefined;
   includeProcesses?: boolean | undefined;
+  processProvider?: (() => Promise<AgentProcess[]>) | undefined;
 }
 
 interface OperationDirectories {
@@ -146,7 +148,7 @@ export async function planSessionDelete(
   agent?: AgentKind,
   options: SessionOperationOptions = {}
 ): Promise<SessionOperationPlan> {
-  const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses);
+  const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses, options.processProvider);
   const plan = await buildSessionPlan("delete", session, options);
   plan.notes.push("This plan is a preview. Executing deleteSession writes an AgentScope backup and quarantine journal before row-level deletes, file moves, or reference patches.");
   return plan;
@@ -172,7 +174,7 @@ export async function backupSession(
   agent?: AgentKind,
   options: SessionOperationOptions = {}
 ): Promise<SessionBackupResult> {
-  const session = await resolveSession(sessionId, agent, options.home);
+  const session = await resolveSession(sessionId, agent, options.home, undefined, options.processProvider);
   const plan = await buildSessionPlan("backup", session, options);
   const { backupDir } = operationDirectories(plan, options);
   const filesRoot = path.join(backupDir, "files");
@@ -226,7 +228,7 @@ export async function deleteSession(
   agent?: AgentKind,
   options: SessionOperationOptions = {}
 ): Promise<SessionDeleteResult> {
-  const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses ?? true);
+  const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses ?? true, options.processProvider);
   const plan = await buildSessionPlan("delete", session, options);
   if (plan.blockers.length && !canBypassDeleteBlockers(plan.blockers, options)) {
     throw new Error(plan.blockers.join(" "));
@@ -748,12 +750,14 @@ async function resolveSession(
   sessionId: string,
   agent?: AgentKind,
   home?: string,
-  includeProcesses = false
+  includeProcesses = false,
+  processProvider?: (() => Promise<AgentProcess[]>) | undefined
 ): Promise<AgentSession> {
   const snapshot = await buildSnapshot(home, {
     includeProcesses,
     includeRolloutActivity: false,
-    includeCodexLogMetadata: false
+    includeCodexLogMetadata: false,
+    processProvider
   });
   const exact = findSession(snapshot, sessionId, agent);
   if (exact) return exact;

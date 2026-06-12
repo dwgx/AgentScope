@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentProcess, AgentSession, ScopeSnapshot } from "@agentscope/shared";
-import { annotateProcessTree, classifyProcess, isRelatedProcess } from "./processes.js";
+import { annotateProcessTree, classifyProcess, isRelatedProcess, selectRelatedProcesses } from "./processes.js";
 import { readRolloutMetadata } from "./codex.js";
 import { buildSnapshot, heuristicSessionsForProcess, mergeSessions, sessionCandidatesForProcess, sessionsForPid } from "./scope.js";
 
@@ -385,6 +385,164 @@ describe("process role classification", () => {
     ]);
     expect(processes.map((process) => process.rootPid)).toEqual([100, 100, 100, 100]);
     expect(processes[2]?.parentAgentPid).toBe(110);
+  });
+
+  it("retains Codex-launched IDA MCP and Python helper descendants with tree evidence", () => {
+    const processes = annotateProcessTree([
+      {
+        pid: 100,
+        ppid: 10,
+        processName: "node.exe",
+        commandLine: String.raw`"node" "C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"`,
+        agent: "codex",
+        evidence: []
+      },
+      {
+        pid: 110,
+        ppid: 100,
+        processName: "codex.exe",
+        executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
+        commandLine: String.raw`C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
+        agent: "codex",
+        evidence: []
+      },
+      {
+        pid: 120,
+        ppid: 110,
+        processName: "ida-pro-mcp.exe",
+        executablePath: String.raw`C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe`,
+        commandLine: String.raw`"C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe"`,
+        agent: "unknown",
+        evidence: []
+      },
+      {
+        pid: 130,
+        ppid: 120,
+        processName: "python.exe",
+        executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
+        commandLine: String.raw`"C:\Users\dwgx1\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe" "C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe"`,
+        agent: "unknown",
+        evidence: []
+      }
+    ]);
+    const selected = selectRelatedProcesses(processes);
+
+    expect(selected.map((process) => process.pid)).toEqual([100, 110, 120, 130]);
+    expect(processes[2]).toMatchObject({
+      agent: "codex",
+      processRole: "codex_mcp_tool",
+      parentAgentPid: 110,
+      rootPid: 100
+    });
+    expect(processes[3]).toMatchObject({
+      agent: "codex",
+      processRole: "codex_mcp_tool",
+      parentAgentPid: 120,
+      rootPid: 100
+    });
+    expect(processes[2]?.evidence.map((item) => item.source)).toContain("process.parent_tree");
+  });
+
+  it("retains Codex tool kernels from the parent tree without requiring Codex text in the command", () => {
+    const processes = annotateProcessTree([
+      {
+        pid: 200,
+        ppid: 10,
+        processName: "codex.exe",
+        executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
+        commandLine: "codex.exe",
+        agent: "codex",
+        evidence: []
+      },
+      {
+        pid: 210,
+        ppid: 200,
+        processName: "node.exe",
+        executablePath: String.raw`C:\Program Files\nodejs\node.exe`,
+        commandLine: String.raw`"C:\Program Files\nodejs\node.exe" "C:\Temp\kernel.js" --session-id rt-123 --working-dir "D:\Project\AgentScope"`,
+        agent: "unknown",
+        evidence: []
+      }
+    ]);
+
+    expect(selectRelatedProcesses(processes).map((process) => process.pid)).toEqual([200, 210]);
+    expect(processes[1]).toMatchObject({
+      agent: "codex",
+      processRole: "codex_tool_kernel",
+      parentAgentPid: 200,
+      rootPid: 200,
+      runtimeSessionId: "rt-123",
+      runtimeWorkingDir: String.raw`D:\Project\AgentScope`
+    });
+  });
+
+  it("does not classify arbitrary commands containing app-server text as Codex app servers", () => {
+    const [process] = annotateProcessTree([
+      {
+        pid: 300,
+        ppid: 10,
+        processName: "powershell.exe",
+        commandLine: String.raw`powershell -Command "Write-Output 'codex.exe app-server --listen stdio://'"`,
+        agent: classifyProcess(
+          "powershell.exe",
+          String.raw`powershell -Command "Write-Output 'codex.exe app-server --listen stdio://'"`,
+          String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+        ),
+        evidence: []
+      }
+    ]);
+
+    expect(process?.agent).toBe("unknown");
+    expect(process?.processRole).toBe("unknown");
+    expect(isRelatedProcess(process!)).toBe(false);
+  });
+
+  it("classifies Claude browser native hosts as helpers rather than CLI roots", () => {
+    const [process] = annotateProcessTree([
+      {
+        pid: 400,
+        ppid: 390,
+        processName: "chrome-native-host.exe",
+        executablePath: String.raw`C:\Users\dwgx1\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe`,
+        commandLine: String.raw`"C:\Users\dwgx1\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe"`,
+        agent: classifyProcess(
+          "chrome-native-host.exe",
+          String.raw`"C:\Users\dwgx1\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe"`,
+          String.raw`C:\Users\dwgx1\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe`
+        ),
+        evidence: []
+      }
+    ]);
+
+    expect(process?.agent).toBe("claude");
+    expect(process?.processRole).toBe("agent_helper");
+  });
+
+  it("does not promote helper PID matches to exact session associations", () => {
+    const [process] = annotateProcessTree([
+      {
+        pid: 500,
+        ppid: 100,
+        processName: "codex.exe",
+        commandLine: String.raw`codex.exe app-server --listen stdio://`,
+        agent: "codex",
+        evidence: []
+      }
+    ]);
+    const session = baseSession("helper-pid-thread", "indexed");
+    session.pid = 500;
+    session.cwd = String.raw`D:\Project\AgentScope`;
+    const snapshot: ScopeSnapshot = {
+      processes: [process!],
+      sessions: [session],
+      transcripts: [],
+      indexRecords: [],
+      relations: []
+    };
+
+    expect(process?.processRole).toBe("codex_app_server");
+    expect(sessionsForPid(snapshot, 500).some((match) => match.candidate.confidence === "exact")).toBe(false);
+    expect(sessionCandidatesForProcess(snapshot, process!, 5)).toHaveLength(0);
   });
 
   it("does not classify a Codex command prompt containing Claude text as Claude", () => {
