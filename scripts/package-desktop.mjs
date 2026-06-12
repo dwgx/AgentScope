@@ -14,7 +14,7 @@ const npxCommand = "npx.cmd";
 const args = new Set(process.argv.slice(2));
 const mode = args.has("--pre") || args.has("--dist") || args.has("--beta") ? "pre" : "dir";
 const startedAt = new Date();
-const preVersion = process.env.AGENTSCOPE_PRE_VERSION || `${readDesktopVersion()}-pre.${formatStamp(startedAt)}`;
+const preVersion = process.env.AGENTSCOPE_PRE_VERSION || `${readDesktopVersion()}-pre`;
 
 try {
   run(npmCommand, ["run", "native:rebuild"], root);
@@ -87,17 +87,6 @@ function readDesktopVersion() {
     throw new Error("apps/desktop/package.json is missing a string version.");
   }
   return parsed.version;
-}
-
-function formatStamp(date) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return [
-    date.getUTCFullYear(),
-    pad(date.getUTCMonth() + 1),
-    pad(date.getUTCDate()),
-    pad(date.getUTCHours()),
-    pad(date.getUTCMinutes())
-  ].join("");
 }
 
 function writePrebuildManifest(version, createdAt) {

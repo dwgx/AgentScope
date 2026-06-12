@@ -371,11 +371,13 @@ async function editCodexSurface(page, surfaceId, marker, readFile, label) {
   await editor.waitFor();
   await waitForEditorContent(editor, readFile, label);
   const before = await editor.inputValue();
-  await editor.fill(`${before.trimEnd()}\n${marker}\n`);
+  const nextValue = `${before.trimEnd()}\n${marker}\n`;
+  await editor.fill(nextValue);
+  await waitForEditorValue(editor, nextValue, label);
   await waitForEnabled(page.locator('[data-testid="codex-control-file-save"]'), `${label} save`);
   await page.locator('[data-testid="codex-control-file-save"]').click();
-  await waitForFilePredicate(label, () => readFile().includes(marker), `${label} to contain smoke marker`);
   await waitForNotification(page, /已保存|Saved/i);
+  await waitForFilePredicate(label, () => readFile().includes(marker), `${label} to contain smoke marker`);
   await page.screenshot({ path: path.join(outputRoot, `codex-control-${safeScreenshotName(surfaceId)}-edit.png`), fullPage: true });
 }
 
@@ -588,6 +590,16 @@ async function waitForEditorContent(editor, readFile, label) {
   const expected = readFile();
   const value = await editor.inputValue();
   throw new Error(`Timed out waiting for ${label} editor to load target document. editor=${JSON.stringify(value.slice(0, 160))} file=${JSON.stringify(expected.slice(0, 160))}`);
+}
+
+async function waitForEditorValue(editor, expected, label) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if ((await editor.inputValue()) === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const value = await editor.inputValue();
+  throw new Error(`Timed out waiting for ${label} editor edit to settle. editor=${JSON.stringify(value.slice(0, 160))}`);
 }
 
 function readCodexConfig() {
