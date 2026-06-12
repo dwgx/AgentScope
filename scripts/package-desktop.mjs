@@ -122,7 +122,13 @@ function collectArtifacts() {
   if (!fs.existsSync(outDir)) return [];
   const artifacts = [];
   for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
-    if (entry.isFile() && /\.(exe|zip|yml|yaml|blockmap|json)$/i.test(entry.name)) {
+    if (
+      entry.isFile() &&
+      (/^AgentScope-.*(?:Setup-x64|Portable-x64)\.exe$/i.test(entry.name) ||
+        /^AgentScope-.*-win-x64\.zip$/i.test(entry.name) ||
+        /^AgentScope-.*\.(?:exe|zip)\.blockmap$/i.test(entry.name) ||
+        entry.name === "agentscope-prebuild.json")
+    ) {
       artifacts.push(path.relative(root, path.join(outDir, entry.name)));
     }
   }

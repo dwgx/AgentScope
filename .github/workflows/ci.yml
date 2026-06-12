@@ -21,11 +21,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run i18n:check
       - run: npm test
+      - run: npm run smoke:agentscope
       - run: npm run build
       - run: npm run package:pre
         env:
           AGENTSCOPE_PRE_VERSION: 0.1.0-pre
-      - run: npm run verify:desktop-artifacts
+      - run: npm run verify:desktop-artifacts -- --strict-head
+      - run: npm run audit:artifacts
       - run: npm run smoke:desktop:packaged
       - run: npm run smoke:desktop:portable
       - uses: actions/upload-artifact@v7
@@ -38,6 +40,5 @@ jobs:
             apps/desktop/out/AgentScope-*-Portable-x64.exe
             apps/desktop/out/AgentScope-*-win-x64.zip
             apps/desktop/out/*.blockmap
-            apps/desktop/out/latest.yml
             apps/desktop/out/agentscope-prebuild.json
             apps/desktop/out/win-unpacked/**

@@ -78,14 +78,37 @@ Packaging smoke test:
 npm run package
 ```
 
+Release/prebuild verification:
+
+```powershell
+npm run check:release
+```
+
+`npm run package` builds the unpacked app for local iteration. `npm run package:pre`
+builds the installer, portable executable, portable zip, and prebuild manifest.
+`npm run check:release` matches the CI release path: repo audit, typecheck,
+i18n check, tests, synthetic smoke, `package:pre`, artifact verification, and
+packaged/portable desktop smoke.
+
+Artifact inspection and cleanup:
+
+```powershell
+npm run audit:artifacts
+npm run clean:artifacts
+```
+
+`clean:artifacts` is a dry run by default. Pass `-- --apply` only after checking
+the listed paths; it is restricted to `apps/desktop/out`.
+
 The unpacked Windows app is written to:
 
 ```text
 apps/desktop/out/win-unpacked/AgentScope.exe
 ```
 
-CI runs on `windows-latest` and verifies install, typecheck, tests, production
-build, repository audit, and an unpacked Electron package artifact.
+CI runs on `windows-latest` and verifies install, repository audit, typecheck,
+i18n, tests, synthetic smoke, production build, prebuild packaging, artifact
+manifest integrity, and packaged/portable desktop smoke.
 
 ## Safety Boundaries
 

@@ -166,8 +166,9 @@ describe("session operations", () => {
     expect(result.movedFiles.some((file) => file.role === "claude.job_state")).toBe(true);
     expect(result.patchedFiles).toHaveLength(0);
     expect(fs.existsSync(result.journalPath)).toBe(true);
-    const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as Record<string, unknown>;
+    const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as { kind?: string; steps?: Array<Record<string, unknown>> };
     expect(journal.kind).toBe("AgentScope Session Delete Journal");
+    expect(journal.steps?.some((step) => step.phase === "operation" && step.action === "deleteSession" && step.status === "succeeded")).toBe(true);
   });
 
   it("records the actual backup directory in delete journals when now is not fixed", async () => {
@@ -298,6 +299,46 @@ describe("session operations", () => {
     const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
     expect(journal.steps?.some((step) => step.phase === "file" && step.status === "started")).toBe(true);
     expect(journal.steps?.some((step) => step.phase === "sqlite_delete" && step.action === "rollback_restore" && step.status === "succeeded")).toBe(true);
+  });
+
+  it("moves already quarantined files back when a later file quarantine fails", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-claude-file-rollback-"));
+    const sessionId = "78787878-5555-4555-8555-787878787878";
+    const encoded = "D--Project-AgentScope";
+    const transcript = path.join(home, ".claude", "projects", encoded, `${sessionId}.jsonl`);
+    const sidecar = path.join(home, ".claude", "projects", encoded, sessionId);
+    const jobState = path.join(home, ".claude", "jobs", "rollback-job", "state.json");
+    fs.mkdirSync(path.join(sidecar, "tool-results"), { recursive: true });
+    fs.mkdirSync(path.dirname(jobState), { recursive: true });
+    fs.writeFileSync(transcript, "{}\n");
+    fs.writeFileSync(path.join(sidecar, "tool-results", "1.txt"), "tool");
+    fs.writeFileSync(jobState, JSON.stringify({ sessionId, state: "stopped" }));
+    const quarantineDir = path.join(outputRoot, "quarantine", `2026-06-07T04-51-00-000Z-claude-${sessionId}`);
+    const jobTarget = path.join(quarantineDir, relativeBackupPathForTest(jobState));
+    fs.mkdirSync(path.dirname(path.dirname(jobTarget)), { recursive: true });
+    fs.writeFileSync(path.dirname(jobTarget), "not a directory\n");
+
+    await expect(
+      deleteSession(sessionId, "claude", {
+        home,
+        outputRoot,
+        now: new Date("2026-06-07T04:51:00Z")
+      })
+    ).rejects.toThrow(/backupDir=.*quarantineDir=.*journalPath=/);
+
+    expect(fs.existsSync(transcript)).toBe(true);
+    expect(fs.existsSync(path.join(sidecar, "tool-results", "1.txt"))).toBe(true);
+    expect(fs.existsSync(jobState)).toBe(true);
+    const transcriptTarget = path.join(quarantineDir, relativeBackupPathForTest(transcript));
+    const sidecarTarget = path.join(quarantineDir, relativeBackupPathForTest(sidecar));
+    expect(fs.existsSync(transcriptTarget)).toBe(false);
+    expect(fs.existsSync(sidecarTarget)).toBe(false);
+    const journal = JSON.parse(fs.readFileSync(path.join(quarantineDir, "journal.json"), "utf8")) as { steps?: Array<Record<string, unknown>> };
+    expect(journal.steps?.some((step) => step.phase === "file" && step.action === "move" && step.status === "succeeded" && step.role === "transcript")).toBe(true);
+    expect(journal.steps?.some((step) => step.phase === "file" && step.action === "rollback_move" && step.status === "succeeded" && step.role === "transcript")).toBe(true);
+    expect(journal.steps?.some((step) => step.phase === "file" && step.action === "rollback_move" && step.status === "succeeded" && step.role === "claude.session_sidecar")).toBe(true);
+    expect(journal.steps?.some((step) => step.phase === "operation" && step.action === "deleteSession" && step.status === "failed")).toBe(true);
   });
 
   it("imports an AgentScope backup when target files are absent", async () => {
@@ -889,7 +930,8 @@ function sha256(filePath: string): string {
 }
 
 function relativeBackupPathForTest(filePath: string): string {
-  const normalized = path.resolve(filePath);
+  let normalized = path.resolve(filePath).replaceAll("/", "\\");
+  if (/^[a-zA-Z]:/.test(normalized)) normalized = normalized[0]!.toUpperCase() + normalized.slice(1);
   const withoutRoot = normalized.replace(/^([A-Za-z]):\\/, "$1/").replace(/^\\\\/, "UNC/");
   return withoutRoot.replace(/[<>:"|?*]/g, "_");
 }

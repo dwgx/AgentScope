@@ -1,6 +1,6 @@
 # AgentScope Next-AI Handoff
 
-Last updated: 2026-06-09.
+Last updated: 2026-06-13.
 
 Read order for the next AI:
 
@@ -33,26 +33,11 @@ The user expects:
 
 ## Current Baseline
 
-Latest known commit before this maintenance batch:
+Use `git log --oneline -8` for the current commit list before changing code.
 
-```text
-c9a0e61 Polish Codex control UI and quarantine loading
-```
-
-Recent important commits:
-
-```text
-c9a0e61 Polish Codex control UI and quarantine loading
-c792db3 Improve diagnostics and Codex control navigation
-8bdc332 Unblock initial snapshot loading
-36160a4 Add safe Codex control center
-8cca167 Align Codex SQLite home and archived rollout indexing
-f660fca Improve Codex subagent evidence tracking
-97cab1c Harden review audit safety gaps
-70d322e Add Codex local storage metadata surfaces
-```
-
-The current maintenance batch is adding repository hygiene, redacted exports, stricter open-path rules, Codex Control document sensitive scanning, and updated handoff workflow.
+The current maintenance batch focuses on release/artifact hygiene, stronger
+delete/Codex Control journaling, synthetic smoke coverage, and avoiding local
+debug artifacts in prebuild manifests.
 
 ## Commands
 
@@ -64,6 +49,12 @@ npm run typecheck
 npm test
 npm run i18n:check
 npm run package
+```
+
+For release/prebuild handoff:
+
+```powershell
+npm run check:release
 ```
 
 Before commit:

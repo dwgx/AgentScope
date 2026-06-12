@@ -682,11 +682,12 @@ input {
   grid-template-rows: 1fr;
   opacity: 1;
   padding-bottom: 9px;
+  max-height: min(42vh, 360px);
 }
 
 .recycleBody > * {
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .recycleRow {
@@ -894,6 +895,36 @@ input {
   border-bottom: 1px solid var(--border-soft);
   border-bottom-left-radius: 6px;
   pointer-events: none;
+}
+
+.processNodeToggle {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface2) 78%, transparent);
+  cursor: pointer;
+}
+
+.processNodeToggle:hover {
+  color: var(--text);
+  background: var(--surface2);
+}
+
+.processNodeToggle svg {
+  transition: transform 150ms ease;
+}
+
+.processNodeToggle svg.open {
+  transform: rotate(90deg);
 }
 
 .sessionRow {

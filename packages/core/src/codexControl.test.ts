@@ -106,9 +106,13 @@ describe("Codex control surfaces", () => {
     const saved = await saveCodexControlDocument("agents.global", "new\n", doc.sha256, home);
 
     expect(saved.backupPath).toBeDefined();
+    expect(saved.journalPath).toBeDefined();
+    expect(saved.changedKeys).toEqual(["agents.global"]);
     expect(await readFile(agentsPath, "utf8")).toBe("new\n");
     expect(await readFile(saved.backupPath!, "utf8")).toBe("old\n");
+    expect(await readFile(saved.journalPath!, "utf8")).toContain("codex-control-document-save");
     expect(saved.evidence.map((item) => item.source)).toContain("codex.control.backup");
+    expect(saved.evidence.map((item) => item.source)).toContain("codex.control.journal");
   });
 
   it("reveals only id-resolved user Codex control documents", async () => {
@@ -377,6 +381,27 @@ describe("Codex control surfaces", () => {
     expect(snapshot.items.find((item) => item.id === "config.windows.sandbox")?.value).toBe("unelevated");
   });
 
+  it("reports auth.json symlink metadata without following the target", async () => {
+    const home = await tempHome();
+    const outside = path.join(home, "outside-auth.json");
+    const linkPath = path.join(home, ".codex", "auth.json");
+    await writeFile(path.join(home, ".codex", "config.toml"), 'cli_auth_credentials_store = "file"\n');
+    await writeFile(outside, '{"tokens":"secret-token-value"}\n');
+    try {
+      fs.symlinkSync(outside, linkPath, "file");
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "EPERM") return;
+      throw error;
+    }
+
+    const snapshot = await getCodexControlCenterSnapshot(home);
+
+    expect(snapshot.auth.exists).toBe(true);
+    expect(snapshot.auth.sha256).toBeUndefined();
+    expect(snapshot.auth.warnings.join("\n")).toContain("symlink");
+    expect(JSON.stringify(snapshot)).not.toContain("secret-token-value");
+  });
+
   it("does not echo sensitive-looking config values in structured controls", async () => {
     const home = await tempHome();
     await writeFile(
@@ -441,6 +466,16 @@ describe("Codex control surfaces", () => {
     expect(blocked.blockers.join("\n")).toContain("explicit confirmation");
     const sensitivePlanValue = "secret-model-value-for-agentscope-plan";
     expect(JSON.stringify(blocked)).not.toContain(sensitivePlanValue);
+
+    const windowsSandboxBlocked = await planCodexControlMutation(
+      {
+        expectedSha256: snapshot.configSha256,
+        mutations: [{ itemId: "config.windows.sandbox", keyPath: "windows.sandbox", value: "elevated" }]
+      },
+      home
+    );
+    expect(windowsSandboxBlocked.highRisk).toBe(true);
+    expect(windowsSandboxBlocked.blockers.join("\n")).toContain("explicit confirmation");
 
     const sensitiveBlocked = await planCodexControlMutation(
       {

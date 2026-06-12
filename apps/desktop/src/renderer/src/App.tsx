@@ -75,6 +75,7 @@ type ProcessGroupMode = "task" | "role" | "agent" | "parent" | "cwd" | "none";
 interface ProcessTreeRow {
   process: AgentProcess;
   depth: number;
+  hasChildren?: boolean | undefined;
 }
 
 interface ProcessGroupView {
@@ -1840,6 +1841,7 @@ function ProcessList(props: {
   const [, startProcessListTransition] = useTransition();
   const [isReordering, setIsReordering] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [collapsedPids, setCollapsedPids] = useState<Set<number>>(() => new Set());
   const [contextMenu, setContextMenu] = useState<{
     process: AgentProcess;
     x: number;
@@ -1866,6 +1868,14 @@ function ProcessList(props: {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  };
+  const toggleProcessNode = (pid: number) => {
+    setCollapsedPids((current) => {
+      const next = new Set(current);
+      if (next.has(pid)) next.delete(pid);
+      else next.add(pid);
       return next;
     });
   };
@@ -1933,9 +1943,12 @@ function ProcessList(props: {
                 key={process.pid}
                 process={process}
                 depth={0}
+                hasChildren={false}
+                collapsed={false}
                 selected={props.selectedPid === process.pid}
                 locale={locale}
                 onSelect={() => props.onSelect(process)}
+                onToggleNode={() => undefined}
                 onContextMenu={(event) =>
                   setContextMenu({ process, x: event.clientX, y: event.clientY })
                 }
@@ -1952,14 +1965,17 @@ function ProcessList(props: {
                 <span>{t("views.processes.groupCount", { count: group.items.length })}</span>
               </button>
               {!isCollapsed &&
-                group.rows.map(({ process, depth }) => (
+                visibleProcessRows(group.rows, collapsedPids).map(({ process, depth, hasChildren }) => (
                   <ProcessRow
                     key={process.pid}
                     process={process}
                     depth={depth}
+                    hasChildren={!!hasChildren}
+                    collapsed={collapsedPids.has(process.pid)}
                     selected={props.selectedPid === process.pid}
                     locale={locale}
                     onSelect={() => props.onSelect(process)}
+                    onToggleNode={() => toggleProcessNode(process.pid)}
                     onContextMenu={(event) =>
                       setContextMenu({ process, x: event.clientX, y: event.clientY })
                     }
@@ -1994,9 +2010,12 @@ function ProcessList(props: {
 function ProcessRow(props: {
   process: AgentProcess;
   depth: number;
+  hasChildren: boolean;
+  collapsed: boolean;
   selected: boolean;
   locale?: string;
   onSelect: () => void;
+  onToggleNode: () => void;
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const { t } = useTranslation();
@@ -2026,6 +2045,21 @@ function ProcessRow(props: {
       }}
     >
       {props.depth > 0 && <span className="processTreeLine" aria-hidden="true" />}
+      {props.hasChildren && (
+        <span
+          className="processNodeToggle"
+          data-testid="process-node-toggle"
+          data-collapsed={props.collapsed ? "true" : "false"}
+          onClick={(event) => {
+            event.stopPropagation();
+            props.onToggleNode();
+          }}
+          role="button"
+          tabIndex={-1}
+        >
+          <ChevronRight size={13} className={props.collapsed ? "" : "open"} />
+        </span>
+      )}
       <AgentTile agent={process.agent} />
       <div className="rowMain">
         <div className="rowTop">
@@ -2409,7 +2443,7 @@ function RecycleBinPanel(props: {
   onOpenPath: (targetPath: string) => void;
 }) {
   const { t } = useTranslation();
-  const visible = props.items.slice(0, 6);
+  const visible = props.items;
   const restorable = props.items.filter((item) => item.restorePossible).length;
   return (
     <section className="recyclePanel" data-testid="recycle-panel" data-open={props.open ? "true" : "false"}>
@@ -6517,11 +6551,25 @@ function processTreeRows(processes: AgentProcess[]): ProcessTreeRow[] {
     .sort(compareProcessTreeOrder);
   const rows: ProcessTreeRow[] = [];
   const visit = (process: AgentProcess, depth: number) => {
-    rows.push({ process, depth });
+    rows.push({ process, depth, hasChildren: (children.get(process.pid) ?? []).length > 0 });
     for (const child of children.get(process.pid) ?? []) visit(child, depth + 1);
   };
   for (const root of roots) visit(root, 0);
   return rows;
+}
+
+function visibleProcessRows(rows: ProcessTreeRow[], collapsedPids: Set<number>): ProcessTreeRow[] {
+  const visible: ProcessTreeRow[] = [];
+  let hiddenDepth: number | undefined;
+  for (const row of rows) {
+    if (hiddenDepth !== undefined) {
+      if (row.depth > hiddenDepth) continue;
+      hiddenDepth = undefined;
+    }
+    visible.push(row);
+    if (row.hasChildren && collapsedPids.has(row.process.pid)) hiddenDepth = row.depth;
+  }
+  return visible;
 }
 
 function processTaskGroupLabel(processes: AgentProcess[]): string {

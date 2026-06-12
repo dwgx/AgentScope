@@ -525,15 +525,14 @@ export async function executeCodexControlMutation(
   const validation = validateTomlShape(next);
   if (validation) throw new Error(`config.toml validation failed: ${validation}`);
   const backupPath = current.length ? await writeBackup(resolved, current, home) : undefined;
-  await writeTextAtomically(resolved.path, next);
   const nextBytes = Buffer.from(next, textEncoding);
-  const journalPath = await writeCodexControlJournal(
+  const nextHash = sha256(nextBytes);
+  const journal = await createCodexControlJournal(
     {
       action: "codex-control-mutation",
       targetPath: resolved.path,
       expectedSha256: request.expectedSha256,
       previousSha256: currentHash,
-      nextSha256: sha256(nextBytes),
       backupPath,
       changedKeys: plan.changedKeys,
       highRisk: plan.highRisk,
@@ -542,13 +541,23 @@ export async function executeCodexControlMutation(
     },
     home
   );
+  try {
+    await writeTextAtomically(resolved.path, next);
+    await finishCodexControlJournal(journal, { status: "succeeded", nextSha256: nextHash });
+  } catch (error) {
+    await finishCodexControlJournal(journal, {
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error)
+    }).catch(() => undefined);
+    throw error;
+  }
   return {
     id: "config.controlCenter",
     path: resolved.path,
     backupPath,
-    journalPath,
+    journalPath: journal.journalPath,
     changedKeys: plan.changedKeys,
-    sha256: sha256(nextBytes),
+    sha256: nextHash,
     bytes: nextBytes.length,
     evidence: [
       {
@@ -569,7 +578,7 @@ export async function executeCodexControlMutation(
       {
         source: "codex.control.journal",
         detail: "Mutation journal records paths, hashes, changed keys, risk, warnings, and evidence only.",
-        path: journalPath
+        path: journal.journalPath
       }
     ]
   };
@@ -655,7 +664,6 @@ export async function saveCodexModeConfig(
   const validation = validateTomlShape(next);
   if (validation) throw new Error(`config.toml validation failed: ${validation}`);
   const backupPath = current.length ? await writeBackup(resolved, current, home) : undefined;
-  await writeTextAtomically(resolved.path, next);
   const nextBytes = Buffer.from(next, textEncoding);
   const nextHash = sha256(nextBytes);
   const changedKeys = changedModeKeyPaths(patch);
@@ -676,13 +684,12 @@ export async function saveCodexModeConfig(
         ]
       : [])
   ];
-  const journalPath = await writeCodexControlJournal(
+  const journal = await createCodexControlJournal(
     {
       action: "codex-mode-config-save",
       targetPath: resolved.path,
       expectedSha256,
       previousSha256: currentHash,
-      nextSha256: nextHash,
       backupPath,
       changedKeys,
       highRisk: false,
@@ -691,12 +698,22 @@ export async function saveCodexModeConfig(
     },
     home
   );
+  try {
+    await writeTextAtomically(resolved.path, next);
+    await finishCodexControlJournal(journal, { status: "succeeded", nextSha256: nextHash });
+  } catch (error) {
+    await finishCodexControlJournal(journal, {
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error)
+    }).catch(() => undefined);
+    throw error;
+  }
   const evidence: Evidence[] = [
     ...baseEvidence,
     {
       source: "codex.control.journal",
-      detail: "Codex mode config save journal was written after the atomic write completed.",
-      path: journalPath
+      detail: "Codex mode config save journal records started and succeeded states for the atomic write.",
+      path: journal.journalPath
     }
   ];
   const snapshot = modeConfigSnapshot(
@@ -709,7 +726,7 @@ export async function saveCodexModeConfig(
     id: "config.modeDefaults",
     path: resolved.path,
     backupPath,
-    journalPath,
+    journalPath: journal.journalPath,
     sha256: snapshot.sha256,
     bytes: nextBytes.length,
     modes: snapshot.modes,
@@ -752,12 +769,45 @@ export async function saveCodexControlDocument(
     throw new Error(`Codex control document changed on disk; reload before saving: ${resolved.path}`);
   }
   const backupPath = current.length ? await writeBackup(resolved, current, home) : undefined;
-  await writeTextAtomically(resolved.path, content);
+  const nextHash = sha256(content);
+  const journal = await createCodexControlJournal(
+    {
+      action: "codex-control-document-save",
+      targetPath: resolved.path,
+      expectedSha256,
+      previousSha256: currentHash,
+      backupPath,
+      changedKeys: [id],
+      highRisk: false,
+      warnings: [],
+      evidence: [
+        {
+          source: "codex.control.save",
+          detail: "Allowlisted Codex control document save was journaled after backup, conflict check, and atomic write.",
+          path: resolved.path,
+          field: id
+        }
+      ]
+    },
+    home
+  );
+  try {
+    await writeTextAtomically(resolved.path, content);
+    await finishCodexControlJournal(journal, { status: "succeeded", nextSha256: nextHash });
+  } catch (error) {
+    await finishCodexControlJournal(journal, {
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error)
+    }).catch(() => undefined);
+    throw error;
+  }
   return {
     id,
     path: resolved.path,
     backupPath,
-    sha256: sha256(content),
+    journalPath: journal.journalPath,
+    changedKeys: [id],
+    sha256: nextHash,
     bytes: Buffer.byteLength(content, textEncoding),
     evidence: [
       {
@@ -773,7 +823,12 @@ export async function saveCodexControlDocument(
               path: backupPath
             }
           ]
-        : [])
+        : []),
+      {
+        source: "codex.control.journal",
+        detail: "Codex control document save journal records started and succeeded states for the atomic write.",
+        path: journal.journalPath
+      }
     ]
   };
 }
@@ -1357,7 +1412,7 @@ function surfaceCenterItem(surface: CodexControlSurface): CodexControlCenterItem
 
 async function authSnapshot(root: string, configText: string): Promise<CodexControlCenterSnapshot["auth"]> {
   const authPath = path.join(root, "auth.json");
-  const stat = await statFile(authPath);
+  const stat = await statFile(authPath, { followSymlink: false });
   const storageMode = authStorageMode(configText);
   return {
     path: authPath,
@@ -1367,7 +1422,10 @@ async function authSnapshot(root: string, configText: string): Promise<CodexCont
     sha256: undefined,
     storageMode,
     warnings: [
-      "auth.json is credential material. AgentScope shows metadata only and never opens, edits, or displays token fields."
+      "auth.json is credential material. AgentScope shows metadata only and never opens, edits, or displays token fields.",
+      ...(stat.isSymbolicLink
+        ? ["auth.json is a symlink; AgentScope reports link metadata only and does not follow the target."]
+        : [])
     ],
     evidence: [
       {
@@ -1377,7 +1435,9 @@ async function authSnapshot(root: string, configText: string): Promise<CodexCont
       },
       {
         source: "codex.control.local_inventory",
-        detail: stat.exists
+        detail: stat.isSymbolicLink
+          ? "AgentScope checked auth.json symlink metadata without following the target."
+          : stat.exists
           ? "AgentScope checked file existence, size, and mtime without reading JSON content."
           : "AgentScope checked that auth.json is not present at CODEX_HOME.",
         path: authPath
@@ -1479,7 +1539,8 @@ function isHighRiskMutation(
     (descriptor.keyPath === "show_raw_agent_reasoning" && value === true) ||
     (descriptor.keyPath === "web_search" && value === "live") ||
     (descriptor.keyPath === "approval_policy" && value === "never") ||
-    (descriptor.keyPath === "sandbox_mode" && value === "danger-full-access")
+    (descriptor.keyPath === "sandbox_mode" && value === "danger-full-access") ||
+    (descriptor.keyPath === "windows.sandbox" && value === "elevated")
   );
 }
 
@@ -2010,13 +2071,15 @@ async function readSmallText(filePath: string): Promise<string | undefined> {
   }
 }
 
-async function statFile(filePath: string): Promise<FileSnapshot> {
+async function statFile(filePath: string, options: { followSymlink?: boolean } = {}): Promise<FileSnapshot & { isSymbolicLink?: boolean }> {
   try {
-    const stat = await fs.promises.stat(filePath);
+    const stat = options.followSymlink === false ? await fs.promises.lstat(filePath) : await fs.promises.stat(filePath);
+    const isSymbolicLink = stat.isSymbolicLink();
     return {
       exists: true,
-      bytes: stat.isFile() ? stat.size : undefined,
-      updatedAt: stat.mtime.toISOString()
+      bytes: isSymbolicLink ? undefined : stat.isFile() ? stat.size : undefined,
+      updatedAt: stat.mtime.toISOString(),
+      isSymbolicLink
     };
   } catch {
     return { exists: false };
@@ -2126,38 +2189,70 @@ async function writeTextAtomically(filePath: string, content: string): Promise<v
   }
 }
 
-async function writeCodexControlJournal(
-  payload: {
-    action: string;
-    targetPath: string;
-    expectedSha256: string;
-    previousSha256: string;
-    nextSha256: string;
-    backupPath?: string | undefined;
-    changedKeys: string[];
-    highRisk: boolean;
-    warnings: string[];
-    evidence: Evidence[];
-  },
+interface CodexControlJournal extends Record<string, unknown> {
+  schemaVersion: 1;
+  createdAt: string;
+  updatedAt: string;
+  status: "started" | "succeeded" | "failed";
+  action: string;
+  targetPath: string;
+  expectedSha256: string;
+  previousSha256: string;
+  nextSha256?: string | undefined;
+  backupPath?: string | undefined;
+  changedKeys: string[];
+  highRisk: boolean;
+  warnings: string[];
+  evidence: Evidence[];
+  journalPath: string;
+  error?: string | undefined;
+}
+
+type CodexControlJournalStart = {
+  action: string;
+  targetPath: string;
+  expectedSha256: string;
+  previousSha256: string;
+  backupPath?: string | undefined;
+  changedKeys: string[];
+  highRisk: boolean;
+  warnings: string[];
+  evidence: Evidence[];
+};
+
+async function createCodexControlJournal(
+  payload: CodexControlJournalStart,
   home: string
-): Promise<string> {
+): Promise<CodexControlJournal> {
   const journalDir = path.join(home, ".agentscope", "codex-control", new Date().toISOString().replace(/[:.]/g, "-"));
   await fs.promises.mkdir(journalDir, { recursive: true });
   const journalPath = path.join(journalDir, "journal.json");
-  await fs.promises.writeFile(
-    journalPath,
-    `${JSON.stringify(
-      {
-        schemaVersion: 1,
-        createdAt: new Date().toISOString(),
-        ...payload
-      },
-      null,
-      2
-    )}\n`,
-    { encoding: textEncoding, flag: "wx" }
-  );
-  return journalPath;
+  const now = new Date().toISOString();
+  const journal: CodexControlJournal = {
+    schemaVersion: 1,
+    createdAt: now,
+    updatedAt: now,
+    status: "started",
+    ...payload,
+    journalPath
+  };
+  await fs.promises.writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`, { encoding: textEncoding, flag: "wx" });
+  return journal;
+}
+
+async function finishCodexControlJournal(
+  journal: CodexControlJournal,
+  result: { status: "succeeded"; nextSha256: string } | { status: "failed"; error: string }
+): Promise<void> {
+  journal.updatedAt = new Date().toISOString();
+  journal.status = result.status;
+  if (result.status === "succeeded") {
+    journal.nextSha256 = result.nextSha256;
+    delete journal.error;
+  } else {
+    journal.error = result.error;
+  }
+  await fs.promises.writeFile(journal.journalPath, `${JSON.stringify(journal, null, 2)}\n`, { encoding: textEncoding });
 }
 
 function safeBackupName(id: string): string {

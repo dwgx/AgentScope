@@ -32,6 +32,19 @@ npm run i18n:check
 npm run package
 ```
 
+For release/prebuild handoff, run the CI-aligned release check instead:
+
+```powershell
+npm run check:release
+```
+
+Use artifact helpers before sharing local builds:
+
+```powershell
+npm run audit:artifacts
+npm run clean:artifacts
+```
+
 For desktop iteration:
 
 ```powershell

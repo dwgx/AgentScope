@@ -1,16 +1,17 @@
 # Repository Hygiene And Leak Audit
 
-Last updated: 2026-06-09.
+Last updated: 2026-06-13.
 
 This document records repository-level hygiene rules for AgentScope handoff work. It covers repository contents, generated artifacts, screenshots, and accidental sensitive data exposure. It does not replace runtime security checks in Electron main or `packages/core`.
 
 ## Current Audit Result
 
-Source: local repository inspection and subagent read-only audit on 2026-06-09.
+Source: local repository inspection, artifact audit, and subagent read-only audit on 2026-06-13.
 
 - No real credential/API key/PAT/JWT leak was found in tracked or untracked non-ignored files, or targeted git-history scans.
 - No tracked `node_modules`, `dist`, `out`, real `.jsonl`, or real `.sqlite` files were found.
 - Ignored `apps/desktop/out/` contains build output and smoke screenshots with local paths, session titles, PIDs, and session IDs. These are local-only and must not be shared or committed.
+- `apps/desktop/out/builder-debug.yml` is a local Electron Builder debug file and can contain machine-local paths. It must not be included in release manifests or uploaded artifacts.
 - Some tests still use realistic Windows paths and fake tokens as fixtures. They are allowed but should be gradually migrated to clearly synthetic values.
 - Documentation should prefer `%USERPROFILE%` and `%WORKSPACE%` over real user names and project roots.
 
@@ -37,10 +38,40 @@ npm run typecheck
 npm test
 npm run i18n:check
 npm run package
+npm run audit:artifacts
 git diff --check
 git status --short
 git diff --stat
 ```
+
+For a CI-aligned release/prebuild handoff, run:
+
+```powershell
+npm run check:release
+```
+
+`npm run package` builds the unpacked app. `npm run package:pre` builds the
+installer, portable executable, portable zip, and `agentscope-prebuild.json`.
+`npm run verify:desktop-artifacts -- --strict-head` verifies that the manifest
+references current-HEAD, non-empty release files and excludes local debug files.
+
+## Local Artifact Cleanup
+
+Audit before deleting:
+
+```powershell
+npm run audit:artifacts
+npm run clean:artifacts
+```
+
+`clean:artifacts` is dry-run by default and only targets `apps/desktop/out`.
+With `-- --apply`, the default cleanup removes local-only `ci-pre/` and
+`builder-debug.yml`. It does not remove smoke screenshots or current release
+files unless `-- --smoke` or `-- --releasables` is explicitly passed.
+
+Do not clean user data through repository scripts. Real `%USERPROFILE%\.codex`,
+`%USERPROFILE%\.claude`, `%USERPROFILE%\.agentscope\backups`, and
+`%USERPROFILE%\.agentscope\quarantine` are runtime state, not repository junk.
 
 `npm run audit:repo` checks tracked files and untracked non-ignored files for:
 

@@ -18,6 +18,8 @@
     "typecheck": "npm --workspace @agentscope/shared run typecheck && npm --workspace @agentscope/i18n run typecheck && npm --workspace @agentscope/core run typecheck && npm --workspace @agentscope/desktop run typecheck",
     "i18n:check": "npm --workspace @agentscope/i18n run build && npm --workspace @agentscope/i18n run check",
     "audit:repo": "node scripts/audit-repository.mjs",
+    "audit:artifacts": "node scripts/audit-artifacts.mjs",
+    "clean:artifacts": "node scripts/clean-artifacts.mjs",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
     "smoke:agentscope": "node scripts/smoke-agentscope.mjs",
@@ -35,7 +37,8 @@
     "package:dir": "node scripts/package-desktop.mjs --dir",
     "package:pre": "node scripts/package-desktop.mjs --pre",
     "package:beta": "node scripts/package-desktop.mjs --pre",
-    "verify:desktop-artifacts": "node scripts/verify-desktop-artifacts.mjs"
+    "verify:desktop-artifacts": "node scripts/verify-desktop-artifacts.mjs",
+    "check:release": "npm run audit:repo && npm run typecheck && npm run i18n:check && npm test && npm run smoke:agentscope && npm run package:pre && npm run verify:desktop-artifacts -- --strict-head && npm run smoke:desktop:packaged && npm run smoke:desktop:portable"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

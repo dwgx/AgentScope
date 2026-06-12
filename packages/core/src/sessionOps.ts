@@ -67,6 +67,12 @@ interface DeleteJournal extends Record<string, unknown> {
   steps: DeleteJournalStep[];
 }
 
+interface MovedFileTarget {
+  file: SessionOperationFile;
+  sourcePath: string;
+  targetPath: string;
+}
+
 interface RestoreJournal {
   schemaVersion: 1;
   kind: "AgentScope Session Restore Journal";
@@ -237,6 +243,7 @@ export async function deleteSession(
   await fs.promises.mkdir(quarantineDir, { recursive: true });
   const journal = await createDeleteJournal(plan, backupDir, quarantineDir, journalPath);
   const movedFiles: SessionOperationFile[] = [];
+  const movedFileTargets: MovedFileTarget[] = [];
   const patchedFiles: SessionOperationFile[] = [];
   let backup: SessionBackupResult | undefined;
   const databaseChanges: SessionOperationDatabaseChange[] = [];
@@ -276,6 +283,7 @@ export async function deleteSession(
         await movePath(file.path, target);
         const moved: SessionOperationFile = { ...file, action: "move", sha256: await hashPath(target) };
         movedFiles.push(moved);
+        movedFileTargets.push({ file: moved, sourcePath: file.path, targetPath: target });
         await appendJournalStep(journal, {
           phase: "file",
           action: "move",
@@ -299,8 +307,15 @@ export async function deleteSession(
         throw new Error(`Patch action is disabled until reversible restore is implemented: ${file.role}`);
       }
   }
+    await appendJournalStep(journal, {
+      phase: "operation",
+      action: "deleteSession",
+      status: "succeeded",
+      detail: `Moved ${movedFiles.length} file(s); applied ${databaseChanges.length} database change(s).`
+    });
     return { plan, backup, quarantineDir, journalPath, movedFiles, patchedFiles, databaseChanges };
   } catch (error) {
+    await rollbackMovedFiles(movedFileTargets, journal);
     if (session.agent === "codex" && databaseChanges.some((change) => change.action === "delete" && (change.estimatedRows ?? 0) > 0)) {
       try {
         rollbackCodexDatabaseDeletes(databaseChanges, quarantineDir, journal, "Restoring SQLite database from delete-time backup after file quarantine failed.");
@@ -1376,6 +1391,73 @@ function appendJournalStepSync(journal: DeleteJournal | undefined, step: DeleteJ
   journal.steps.push({ ...step, at: step.at ?? journal.updatedAt });
   fs.mkdirSync(path.dirname(journal.journalPath), { recursive: true });
   fs.writeFileSync(journal.journalPath, `${JSON.stringify(journal, null, 2)}\n`, "utf8");
+}
+
+async function rollbackMovedFiles(movedFiles: MovedFileTarget[], journal: DeleteJournal): Promise<void> {
+  for (const moved of [...movedFiles].reverse()) {
+    await appendJournalStep(journal, {
+      phase: "file",
+      action: "rollback_move",
+      status: "started",
+      role: moved.file.role,
+      path: moved.targetPath,
+      targetPath: moved.sourcePath,
+      evidence: moved.file.evidence
+    }).catch(() => undefined);
+    try {
+      const targetExists = await pathExists(moved.targetPath);
+      const sourceExists = await pathExists(moved.sourcePath);
+      if (!targetExists) {
+        await appendJournalStep(journal, {
+          phase: "file",
+          action: "rollback_move",
+          status: "skipped",
+          role: moved.file.role,
+          path: moved.targetPath,
+          targetPath: moved.sourcePath,
+          detail: "Quarantined file is already missing; no rollback move was possible.",
+          evidence: moved.file.evidence
+        });
+        continue;
+      }
+      if (sourceExists) {
+        await appendJournalStep(journal, {
+          phase: "file",
+          action: "rollback_move",
+          status: "skipped",
+          role: moved.file.role,
+          path: moved.targetPath,
+          targetPath: moved.sourcePath,
+          detail: "Original path already exists; AgentScope did not overwrite it during rollback.",
+          evidence: moved.file.evidence
+        });
+        continue;
+      }
+      await fs.promises.mkdir(path.dirname(moved.sourcePath), { recursive: true });
+      await movePath(moved.targetPath, moved.sourcePath);
+      await appendJournalStep(journal, {
+        phase: "file",
+        action: "rollback_move",
+        status: "succeeded",
+        role: moved.file.role,
+        path: moved.targetPath,
+        targetPath: moved.sourcePath,
+        sha256: await hashPath(moved.sourcePath),
+        evidence: moved.file.evidence
+      });
+    } catch (rollbackError) {
+      await appendJournalStep(journal, {
+        phase: "file",
+        action: "rollback_move",
+        status: "failed",
+        role: moved.file.role,
+        path: moved.targetPath,
+        targetPath: moved.sourcePath,
+        error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        evidence: moved.file.evidence
+      }).catch(() => undefined);
+    }
+  }
 }
 
 async function appendRestoreJournalStep(journal: RestoreJournal | undefined, step: RestoreJournalStep): Promise<void> {
