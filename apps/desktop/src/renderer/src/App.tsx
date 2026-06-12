@@ -139,6 +139,11 @@ interface SearchSuggestion {
   targetView?: View;
 }
 
+interface SearchHistoryItem {
+  query: string;
+  updatedAt: number;
+}
+
 interface NoticeAction {
   label: string;
   onClick: () => void;
@@ -224,6 +229,7 @@ interface AppSettings {
   uiLineHeight: "compact" | "normal" | "spacious";
   searchLimit: number;
   includeSqlitePreviewSearch: boolean;
+  searchHistoryEnabled: boolean;
   suggestionsEnabled: boolean;
   transcriptPreviewEnabled: boolean;
   showUnknownCandidates: boolean;
@@ -232,6 +238,8 @@ interface AppSettings {
 
 const settingsKey = "agentscope.settings.v2";
 const seenDiagnosticKey = "agentscope.seenDiagnostics.v1";
+const searchHistoryKey = "agentscope.searchHistory.v1";
+const maxSearchHistoryItems = 16;
 const defaultSettings: AppSettings = {
   language: "system",
   theme: "graphite",
@@ -256,6 +264,7 @@ const defaultSettings: AppSettings = {
   uiLineHeight: "normal",
   searchLimit: 24,
   includeSqlitePreviewSearch: false,
+  searchHistoryEnabled: true,
   suggestionsEnabled: true,
   transcriptPreviewEnabled: true,
   showUnknownCandidates: true,
@@ -304,6 +313,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResultRecord[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(() => loadSearchHistory());
   const [highlightTarget, setHighlightTarget] = useState<SearchResultRecord | null>(null);
   const searchDebounceRef = useRef<number | undefined>(undefined);
   const searchRequestIdRef = useRef(0);
@@ -469,6 +479,12 @@ function App() {
   }, [settings.language, appInfo?.locale]);
 
   useEffect(() => {
+    if (settings.searchHistoryEnabled || searchHistory.length === 0) return;
+    setSearchHistory([]);
+    saveSearchHistory([]);
+  }, [settings.searchHistoryEnabled, searchHistory.length]);
+
+  useEffect(() => {
     const openGlobalSearch = (event: KeyboardEvent) => {
       const isFind = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f";
       if (isFind) {
@@ -516,6 +532,7 @@ function App() {
     });
     if (requestId !== searchRequestIdRef.current) return;
     setResults(nextResults.map((result) => ({ ...result, query: trimmed })));
+    rememberSearchQuery(trimmed);
   }
 
   function clearSearchState() {
@@ -524,7 +541,26 @@ function App() {
     setQuery("");
     setResults([]);
     setHighlightTarget(null);
-    setSearchOpen(false);
+  }
+
+  function rememberSearchQuery(value: string) {
+    if (!settings.searchHistoryEnabled) return;
+    const cleaned = value.trim();
+    if (!cleaned) return;
+    setSearchHistory((current) => {
+      const key = cleaned.toLowerCase();
+      const next = [
+        { query: cleaned, updatedAt: Date.now() },
+        ...current.filter((item) => item.query.trim().toLowerCase() !== key)
+      ].slice(0, maxSearchHistoryItems);
+      saveSearchHistory(next);
+      return next;
+    });
+  }
+
+  function clearSearchHistory() {
+    setSearchHistory([]);
+    saveSearchHistory([]);
   }
 
   async function exportCurrentSnapshot() {
@@ -1126,6 +1162,8 @@ function App() {
             runSearch={() => void runSearch()}
             runSearchText={(value) => void runSearchText(value)}
             clearSearch={clearSearchState}
+            searchHistory={settings.searchHistoryEnabled ? searchHistory : []}
+            clearSearchHistory={clearSearchHistory}
             results={results}
             suggestions={settings.suggestionsEnabled ? suggestions : []}
             currentView={view}
@@ -1238,6 +1276,8 @@ function App() {
                 onNotice={showNotice}
                 onConfirm={setConfirmDialog}
                 noticePathActions={noticePathActions}
+                searchHistoryCount={searchHistory.length}
+                onClearSearchHistory={clearSearchHistory}
               />
             )}
             {view === "settings" && (
@@ -1263,6 +1303,8 @@ function App() {
                 onNotice={showNotice}
                 onConfirm={setConfirmDialog}
                 noticePathActions={noticePathActions}
+                searchHistoryCount={searchHistory.length}
+                onClearSearchHistory={clearSearchHistory}
               />
             )}
           </section>
@@ -2923,6 +2965,8 @@ function SettingsPanel(props: {
   onNotice: (notice: Omit<NoticeState, "id">) => void;
   onConfirm: (confirm: ConfirmState) => void;
   noticePathActions: (targetPath?: string, role?: NoticePathRole) => NoticeAction[];
+  searchHistoryCount: number;
+  onClearSearchHistory: () => void;
 }) {
   const { t } = useTranslation();
   const [section, setSection] = useState<SettingsSection>(
@@ -3368,6 +3412,36 @@ function SettingsPanel(props: {
                     ]}
                     onChange={(value) => props.updateSettings({ notificationTtlMs: Number(value) })}
                   />
+                </SettingRow>
+                <SettingRow
+                  label={t("settings.searchHistory.label")}
+                  detail={t("settings.searchHistory.detail")}
+                >
+                  <div className="settingInlineActions">
+                    <button
+                      className={`toggleButton ${props.settings.searchHistoryEnabled ? "on" : ""}`}
+                      onClick={() => {
+                        const enabled = !props.settings.searchHistoryEnabled;
+                        props.updateSettings({ searchHistoryEnabled: enabled });
+                        if (!enabled) props.onClearSearchHistory();
+                      }}
+                    >
+                      {props.settings.searchHistoryEnabled
+                        ? t("common.action.show")
+                        : t("common.action.hide")}
+                    </button>
+                    <Badge
+                      text={t("settings.searchHistory.clearDetail", {
+                        count: props.searchHistoryCount
+                      })}
+                      tone={props.searchHistoryCount > 0 ? "warn" : "ok"}
+                    />
+                    <ActionButton
+                      label={t("settings.searchHistory.clearLabel")}
+                      onClick={props.onClearSearchHistory}
+                      disabled={props.searchHistoryCount === 0}
+                    />
+                  </div>
                 </SettingRow>
                 <SettingRow
                   label={t("settings.suggestions.label")}
@@ -5871,6 +5945,8 @@ function CommandPalette(props: {
   runSearch: () => void;
   runSearchText: (value: string) => void;
   clearSearch: () => void;
+  searchHistory: SearchHistoryItem[];
+  clearSearchHistory: () => void;
   results: SearchResultRecord[];
   suggestions: SearchSuggestion[];
   currentView: View;
@@ -5891,12 +5967,23 @@ function CommandPalette(props: {
       props.runSearchText(suggestion.query);
     }
   };
+  const useHistory = (item: SearchHistoryItem) => {
+    props.setQuery(item.query);
+    props.runSearchText(item.query);
+  };
+  const hasQuery = props.query.trim().length > 0;
+  const clearCurrentSearch = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    props.clearSearch();
+  };
   return (
     <div className="paletteOverlay" onMouseDown={props.close}>
       <section className="commandPalette" onMouseDown={(event) => event.stopPropagation()}>
         <div className="paletteSearch">
           <Search size={19} />
           <input
+            data-testid="command-palette-input"
             autoFocus
             value={props.query}
             onChange={(event) => props.setQuery(event.target.value)}
@@ -5928,14 +6015,25 @@ function CommandPalette(props: {
           <section>
             <div className="paletteSectionTitle">
               <span>
-                {props.query.trim()
+                {hasQuery
                   ? t("command.results")
                   : t("command.contextTitle", { view: t(`nav.${props.currentView}`) })}
               </span>
-              {props.query.trim() && <em>{t("command.autoSearch")}</em>}
+              {hasQuery ? (
+                <button
+                  type="button"
+                  data-testid="command-clear-current"
+                  onClick={clearCurrentSearch}
+                >
+                  {t("command.clearSearch")}
+                </button>
+              ) : (
+                <em>{t("command.autoSearch")}</em>
+              )}
             </div>
             <SearchResults
               results={props.results}
+              active={hasQuery}
               onPick={(result) => {
                 props.selectResult(result);
                 props.close();
@@ -5944,18 +6042,41 @@ function CommandPalette(props: {
           </section>
           <section>
             <div className="paletteSectionTitle">
-              <span>{t("command.suggestions")}</span>
+              <span>{t("command.history")}</span>
               <button
                 type="button"
-                disabled={!props.query && props.results.length === 0}
+                data-testid="command-clear-history"
+                disabled={props.searchHistory.length === 0}
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  props.clearSearch();
+                  props.clearSearchHistory();
                 }}
               >
-                {t("command.clearSearch")}
+                {t("settings.searchHistory.clearLabel")}
               </button>
+            </div>
+            <div className="suggestionList" data-testid="command-history-list">
+              {props.searchHistory.length ? (
+                props.searchHistory.map((item) => (
+                  <button
+                    key={`${item.query}:${item.updatedAt}`}
+                    data-testid="command-history-item"
+                    onClick={() => useHistory(item)}
+                  >
+                    <Search size={14} />
+                    <span>{item.query}</span>
+                    <em>{t("command.suggestion.query", { kind: "history" })}</em>
+                  </button>
+                ))
+              ) : (
+                <p className="muted" data-testid="command-no-history">{t("command.noHistory")}</p>
+              )}
+            </div>
+          </section>
+          <section>
+            <div className="paletteSectionTitle">
+              <span>{t("command.suggestions")}</span>
             </div>
             <div className="suggestionList">
               {props.suggestions.length ? (
@@ -6000,18 +6121,24 @@ function MetadataSummary(props: { metadata?: Record<string, unknown> | undefined
 
 function SearchResults(props: {
   results: SearchResultRecord[];
+  active: boolean;
   onPick: (result: SearchResultRecord) => void;
 }) {
+  const { t } = useTranslation();
   return (
-    <section className="results">
-      {props.results.map((result, index) => (
-        <button className="result" key={index} onClick={() => props.onPick(result)}>
-          <AgentPill agent={String(result.agent ?? "unknown")} />
-          <span>{String(result.source ?? "")}</span>
-          <span className="mono">{short(String(result.sessionId ?? ""))}</span>
-          <strong>{searchResultTitle(result)}</strong>
-        </button>
-      ))}
+    <section className="results" data-testid="command-search-results" data-active={props.active}>
+      {props.results.length ? (
+        props.results.map((result, index) => (
+          <button className="result" key={index} data-testid="command-search-result" onClick={() => props.onPick(result)}>
+            <AgentPill agent={String(result.agent ?? "unknown")} />
+            <span>{String(result.source ?? "")}</span>
+            <span className="mono">{short(String(result.sessionId ?? ""))}</span>
+            <strong>{searchResultTitle(result)}</strong>
+          </button>
+        ))
+      ) : (
+        <p className="muted">{props.active ? t("command.noResults") : t("command.typeToSearch")}</p>
+      )}
     </section>
   );
 }
@@ -7313,6 +7440,39 @@ function saveSettings(settings: AppSettings): void {
   localStorage.setItem(settingsKey, JSON.stringify(normalizeSettings(settings)));
 }
 
+function loadSearchHistory(): SearchHistoryItem[] {
+  try {
+    const raw = localStorage.getItem(searchHistoryKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => ({
+        query: typeof item?.query === "string" ? item.query.trim() : "",
+        updatedAt: typeof item?.updatedAt === "number" ? item.updatedAt : 0
+      }))
+      .filter((item) => item.query.length > 0)
+      .slice(0, maxSearchHistoryItems);
+  } catch {
+    return [];
+  }
+}
+
+function saveSearchHistory(history: SearchHistoryItem[]): void {
+  const normalized = history
+    .map((item) => ({
+      query: item.query.trim(),
+      updatedAt: item.updatedAt
+    }))
+    .filter((item) => item.query.length > 0)
+    .slice(0, maxSearchHistoryItems);
+  if (normalized.length) {
+    localStorage.setItem(searchHistoryKey, JSON.stringify(normalized));
+  } else {
+    localStorage.removeItem(searchHistoryKey);
+  }
+}
+
 function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
   return {
     language: pickEnum(settings.language, languageValues, defaultSettings.language),
@@ -7349,6 +7509,10 @@ function normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     includeSqlitePreviewSearch: pickBoolean(
       settings.includeSqlitePreviewSearch,
       defaultSettings.includeSqlitePreviewSearch
+    ),
+    searchHistoryEnabled: pickBoolean(
+      settings.searchHistoryEnabled,
+      defaultSettings.searchHistoryEnabled
     ),
     suggestionsEnabled: pickBoolean(settings.suggestionsEnabled, defaultSettings.suggestionsEnabled),
     transcriptPreviewEnabled: pickBoolean(

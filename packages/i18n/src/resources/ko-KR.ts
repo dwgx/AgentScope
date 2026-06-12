@@ -121,6 +121,8 @@ export const koKR = {
     warn: "경고",
     refreshTitle: "새로 고침",
     results: "검색 결과",
+    noResults: "일치하는 안전 메타데이터가 없습니다",
+    typeToSearch: "키워드를 입력해 인덱싱된 세션과 안전 메타데이터 검색",
     clearSearch: "검색 지우기",
     history: "최근 검색",
     noHistory: "최근 검색이 없습니다",

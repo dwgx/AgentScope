@@ -3325,6 +3325,12 @@ input {
   padding: 12px;
 }
 
+.paletteBody > section + section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
 .paletteSectionTitle {
   display: flex;
   align-items: center;
@@ -3355,11 +3361,18 @@ input {
 }
 
 .results {
-  max-height: 300px;
+  min-height: 42px;
+  max-height: 260px;
   overflow: auto;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface);
+}
+
+.results > .muted {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
 }
 
 .result {

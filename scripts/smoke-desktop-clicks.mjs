@@ -70,6 +70,7 @@ try {
   await smokeRecycleAndNotification(page);
   await smokeRelationsFilter(page);
   await smokeResumeFork(page);
+  await smokeCommandSearch(page);
   await smokeCodexControlInteractions(page);
 
   await page.screenshot({ path: path.join(outputRoot, "desktop-clicks-final.png"), fullPage: true });
@@ -177,6 +178,23 @@ async function smokeResumeFork(page) {
   await waitForNotification(page, /fork|分叉|启动/i);
   await page.screenshot({ path: path.join(outputRoot, "resume-fork-notification.png"), fullPage: true });
   await page.locator('[data-testid="notification-close"]').click();
+}
+
+async function smokeCommandSearch(page) {
+  await ensureSessionsView(page);
+  await page.keyboard.press("Control+F");
+  await page.locator('[data-testid="command-palette-input"]').waitFor();
+  await page.locator('[data-testid="command-palette-input"]').fill("AgentScope smoke parent");
+  await page.locator('[data-testid="command-search-result"]').first().waitFor();
+  await page.locator('[data-testid="command-clear-current"]').click();
+  await page.locator('[data-testid="command-no-history"]').waitFor({ state: "detached" });
+  const historyItem = page.locator('[data-testid="command-history-item"]').filter({ hasText: "AgentScope smoke parent" });
+  await historyItem.waitFor();
+  await page.screenshot({ path: path.join(outputRoot, "command-search-history.png"), fullPage: true });
+  await page.locator('[data-testid="command-clear-history"]').click();
+  await page.locator('[data-testid="command-no-history"]').waitFor();
+  await page.screenshot({ path: path.join(outputRoot, "command-search-cleared.png"), fullPage: true });
+  await page.keyboard.press("Escape");
 }
 
 async function smokeCodexControlInteractions(page) {

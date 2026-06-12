@@ -137,6 +137,8 @@ export const enUS = {
     warn: "Warn",
     refreshTitle: "Refresh",
     results: "Results",
+    noResults: "No matching safe metadata",
+    typeToSearch: "Type to search indexed sessions and safe metadata",
     clearSearch: "Clear search",
     history: "Recent searches",
     noHistory: "No recent searches",

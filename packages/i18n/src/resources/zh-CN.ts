@@ -121,6 +121,8 @@ export const zhCN = {
     warn: "警告",
     refreshTitle: "刷新",
     results: "搜索结果",
+    noResults: "没有匹配的安全元数据",
+    typeToSearch: "输入关键词搜索已索引会话和安全元数据",
     clearSearch: "清除搜索",
     history: "最近搜索",
     noHistory: "暂无搜索历史",

@@ -121,6 +121,8 @@ export const jaJP = {
     warn: "警告",
     refreshTitle: "更新",
     results: "検索結果",
+    noResults: "一致する安全なメタデータはありません",
+    typeToSearch: "キーワードを入力してインデックス済みセッションと安全なメタデータを検索",
     clearSearch: "検索をクリア",
     history: "最近の検索",
     noHistory: "最近の検索はありません",
