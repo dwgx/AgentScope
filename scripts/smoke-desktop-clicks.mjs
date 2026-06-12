@@ -316,6 +316,7 @@ async function editCodexSurface(page, surfaceId, marker, readFile, label) {
   await page.locator(`[data-testid="codex-control-detail"][data-surface-id="${surfaceId}"]`).waitFor();
   const editor = page.locator('[data-testid="codex-control-editor"]');
   await editor.waitFor();
+  await waitForEditorContent(editor, readFile, label);
   const before = await editor.inputValue();
   await editor.fill(`${before.trimEnd()}\n${marker}\n`);
   await waitForEnabled(page.locator('[data-testid="codex-control-file-save"]'), `${label} save`);
@@ -515,12 +516,25 @@ async function assertReadOnlyDirectIpcBlocked(page) {
 }
 
 async function waitForFilePredicate(name, predicate, label) {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`Timed out waiting for ${label || name}.`);
+}
+
+async function waitForEditorContent(editor, readFile, label) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const expected = readFile();
+    const value = await editor.inputValue();
+    if (value === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const expected = readFile();
+  const value = await editor.inputValue();
+  throw new Error(`Timed out waiting for ${label} editor to load target document. editor=${JSON.stringify(value.slice(0, 160))} file=${JSON.stringify(expected.slice(0, 160))}`);
 }
 
 function readCodexConfig() {
