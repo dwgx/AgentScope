@@ -15,7 +15,9 @@
     "dev:electron": "npm run build && electron .",
     "build": "tsc -b && vite build --config vite.renderer.config.ts",
     "typecheck": "tsc -b --pretty false",
-    "package": "npm run build && electron-builder --dir"
+    "package": "npm run package:dir",
+    "package:dir": "npm run build && electron-builder --dir --publish never",
+    "package:dist": "npm run build && electron-builder --win --x64 --publish never"
   },
   "dependencies": {
     "@agentscope/core": "0.1.0",
@@ -53,9 +55,38 @@
       "**/*.node"
     ],
     "npmRebuild": true,
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-${version}-Setup-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-Portable-${arch}.${ext}"
     }
   }
 }

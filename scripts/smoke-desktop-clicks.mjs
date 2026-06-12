@@ -7,10 +7,12 @@ import Database from "better-sqlite3";
 
 const root = process.cwd();
 const cliArgs = process.argv.slice(2);
-const usePackaged = cliArgs.includes("--packaged") || process.env.AGENTSCOPE_SMOKE_CLICK_PACKAGED === "1";
+const executableArg = cliArgs.find((arg) => arg.startsWith("--executable="));
+const customExecutable = executableArg ? path.resolve(executableArg.slice("--executable=".length)) : process.env.AGENTSCOPE_SMOKE_EXECUTABLE ? path.resolve(process.env.AGENTSCOPE_SMOKE_EXECUTABLE) : null;
+const usePackaged = Boolean(customExecutable) || cliArgs.includes("--packaged") || process.env.AGENTSCOPE_SMOKE_CLICK_PACKAGED === "1";
 const outputArg = cliArgs.find((arg) => !arg.startsWith("--"));
 const outputRoot = outputArg ? path.resolve(outputArg) : path.join(root, "apps", "desktop", "out", "smoke", smokeStamp(), "clicks");
-const packagedExe = path.join(root, "apps", "desktop", "out", "win-unpacked", "AgentScope.exe");
+const packagedExe = customExecutable || path.join(root, "apps", "desktop", "out", "win-unpacked", "AgentScope.exe");
 const fixturesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-desktop-click-smoke-"));
 const home = path.join(fixturesRoot, "home");
 const appData = path.join(fixturesRoot, "AppData", "Roaming");

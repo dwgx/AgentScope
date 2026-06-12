@@ -25,11 +25,17 @@
     "smoke:codex:strict": "node scripts/smoke-local-codex.mjs --strict-boundaries",
     "smoke:desktop": "node scripts/smoke-desktop.mjs",
     "smoke:desktop:clicks": "npm run build && node scripts/smoke-desktop-clicks.mjs",
+    "smoke:desktop:packaged": "node scripts/smoke-desktop-clicks.mjs --packaged apps/desktop/out/smoke/packaged-clicks",
+    "smoke:desktop:portable": "node scripts/smoke-desktop-portable.mjs",
     "electron:repair": "node scripts/repair-electron.mjs",
     "native:rebuild": "node scripts/rebuild-native.mjs",
     "native:restore": "node scripts/rebuild-native.mjs node",
     "desktop": "npm --workspace @agentscope/desktop run dev",
-    "package": "node scripts/package-desktop.mjs"
+    "package": "node scripts/package-desktop.mjs --dir",
+    "package:dir": "node scripts/package-desktop.mjs --dir",
+    "package:pre": "node scripts/package-desktop.mjs --pre",
+    "package:beta": "node scripts/package-desktop.mjs --pre",
+    "verify:desktop-artifacts": "node scripts/verify-desktop-artifacts.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
