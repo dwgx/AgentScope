@@ -23,6 +23,8 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run package:pre
+        env:
+          AGENTSCOPE_PRE_VERSION: 0.1.0-pre
       - run: npm run verify:desktop-artifacts
       - run: npm run smoke:desktop:packaged
       - run: npm run smoke:desktop:portable
