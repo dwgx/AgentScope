@@ -11,14 +11,23 @@ Copy this prompt into the next AI session when handing off AgentScope.
 
 1. AGENTS.md
 2. docs/handoff-next-ai.md
-3. docs/research-local-agent-stores.md
-4. docs/repository-hygiene.md
-5. README.md
-6. packages/core/src/sessionOps.ts
-7. packages/core/src/codexControl.ts
-8. packages/core/src/scope.ts
-9. apps/desktop/src/main/main.ts
-10. apps/desktop/src/renderer/src/App.tsx
+3. docs/project-state-and-next-agent-workflow-2026-06-13.md
+4. docs/research-local-agent-stores.md
+5. docs/repository-hygiene.md
+6. README.md
+7. packages/core/src/sessionOps.ts
+8. packages/core/src/codexControl.ts
+9. packages/core/src/scope.ts
+10. apps/desktop/src/main/main.ts
+11. apps/desktop/src/renderer/src/App.tsx
+
+上一轮已验证实现提交：
+
+9d774dc Harden release hygiene and operation journals
+
+该实现提交的 GitHub CI 已通过：
+
+https://github.com/dwgx/AgentScope/actions/runs/27447351810
 
 项目定位：
 
@@ -49,9 +58,10 @@ AgentScope 是 Windows-only 本地 AI coding agent control + trace layer，用 T
    git diff --stat
    git log --oneline -8
 
-3. 如果继续 UI 或 Electron main 改动，最后还要跑：
-   npm run package
-   并尽量用真实窗口截图复核新 UI 状态。
+3. 如果继续 UI 或 Electron main 改动，最后还要跑 packaged/dev smoke，并尽量用真实窗口截图复核新 UI 状态。
+
+4. 发布/prebuild 交接跑：
+   npm run check:release
 
 工作方式：
 
@@ -62,6 +72,7 @@ AgentScope 是 Windows-only 本地 AI coding agent control + trace layer，用 T
 - 如果用户要求 subagent，可以开；线程满了就本地继续并记录你验证了什么。
 - 修改核心逻辑必须补测试。
 - 提交前检查 git status、git diff --stat、git diff --check。
+- 打包产物在 apps/desktop/out/，默认 ignored；用 npm run audit:artifacts 检查，用 npm run clean:artifacts dry-run 清理。
 
 当前大目标：
 
@@ -74,7 +85,10 @@ AgentScope 是 Windows-only 本地 AI coding agent control + trace layer，用 T
 
 优先未完成事项：
 
-- 增加 Electron/Playwright smoke harness，覆盖 Settings、Codex Control、Sessions recycle、context menu、notification、Relations、resume/fork。
+- Electron IPC sender/origin 鉴权：所有 high-risk IPC handler 应检查 sender ownership 和 app/dev URL。
+- backup/quarantine import/restore/open/reveal 入口要做 realpath/lstat，拒绝 Windows junction/symlink/reparse point 指向外部。
+- JSONL metadata value redaction：safe field 名不等于 safe value，source/thread_source/agent_* 等要过滤 token-like/secret-like/过长正文。
+- 继续增强 Electron/Playwright smoke harness，覆盖 Settings、Codex Control、Sessions recycle、context menu delete、notification、Relations、resume/fork、process tree collapse。
 - 增强 restore journal，记录每个文件和 DB rollback 步骤。
 - 移除或隔离 sessionOps.ts 中旧 Claude patch helper，除非实现完整 reversible restore。
 - 设计 child-session delete 模式：block/include/detach，不能默认静默 detach。

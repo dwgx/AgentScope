@@ -6,9 +6,10 @@ Read order for the next AI:
 
 1. `AGENTS.md`
 2. this file
-3. `docs/research-local-agent-stores.md`
-4. `docs/repository-hygiene.md`
-5. `README.md`
+3. `docs/project-state-and-next-agent-workflow-2026-06-13.md`
+4. `docs/research-local-agent-stores.md`
+5. `docs/repository-hygiene.md`
+6. `README.md`
 
 ## Product Identity
 
@@ -38,6 +39,20 @@ Use `git log --oneline -8` for the current commit list before changing code.
 The current maintenance batch focuses on release/artifact hygiene, stronger
 delete/Codex Control journaling, synthetic smoke coverage, and avoiding local
 debug artifacts in prebuild manifests.
+
+Latest verified implementation snapshot before this handoff refresh:
+
+```text
+commit: 9d774dc Harden release hygiene and operation journals
+github ci: https://github.com/dwgx/AgentScope/actions/runs/27447351810
+ci conclusion: success
+artifact: AgentScope-win-pre
+```
+
+If this document is committed after the snapshot above, treat GitHub Actions for
+the new HEAD as the current release evidence. Local `apps/desktop/out` can be
+stale after any commit because `agentscope-prebuild.json` records the HEAD that
+existed when `npm run package:pre` ran.
 
 ## Commands
 
@@ -93,6 +108,8 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 - `apps/desktop/src/renderer/src/styles.css`: layout, menus, notifications, recycle panel, dropdowns, font controls.
 - `packages/i18n/src/resources/*.ts`: UI strings for en-US, zh-CN, ja-JP, ko-KR.
 - `scripts/audit-repository.mjs`: tracked and untracked non-ignored repository hygiene and secret scan.
+- `scripts/audit-artifacts.mjs`: local desktop artifact inventory and cleanup candidates.
+- `scripts/clean-artifacts.mjs`: dry-run-first cleanup limited to `apps/desktop/out`.
 
 ## Current Safety State
 
@@ -164,6 +181,8 @@ Current hygiene rules:
 - Do not commit `node_modules`, `dist`, `out`, `tmp`, `.codex`, `.claude`, `.agentscope`, real `.jsonl`, or real `.sqlite` files.
 - Smoke screenshots may exist locally under ignored `apps/desktop/out/smoke`, but must not be committed or shared as evidence unless sanitized.
 - `npm run audit:repo` checks tracked and untracked non-ignored files for high-confidence secrets, hard-coded local paths, and real local artifacts.
+- `npm run audit:artifacts` inventories ignored desktop outputs and identifies local-only cleanup candidates.
+- `npm run clean:artifacts` is dry-run by default; `-- --apply` is required to delete and is restricted to `apps/desktop/out`.
 - If a real credential is found in git history, do not rewrite history automatically. Report, rotate/revoke, and ask before `filter-repo`/BFG.
 
 ## Known Residual Risks

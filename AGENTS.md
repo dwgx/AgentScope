@@ -99,5 +99,6 @@ The next AI should read these before changing the project:
 
 - `README.md`
 - `docs/handoff-next-ai.md`
+- `docs/project-state-and-next-agent-workflow-2026-06-13.md`
 - `docs/research-local-agent-stores.md`
 - `docs/repository-hygiene.md`
