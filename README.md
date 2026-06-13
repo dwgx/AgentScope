@@ -168,3 +168,7 @@ Future agents should read:
 - `AGENTS.md`
 - `docs/handoff-next-ai.md`
 - `docs/research-local-agent-stores.md`
+
+## Repository Governance
+
+This repository is maintained as an active project. Avoid committing local credentials, transcript exports, private logs, or machine-specific paths. Public use rights and licensing should be clarified before redistribution beyond repository visibility.
