@@ -136,22 +136,22 @@ smoke 证据：
 
 这里的“独特”不是市场宣传，而是当前实现相对普通文件管理器、聊天 UI、任务看板的实际差异。
 
-1. Evidence-first association  
+1. Evidence-first association
    进程和会话不是“看起来像”就直接绑定。所有关联都要显示 evidence 和 confidence，heuristic 不得冒充 exact。
 
-2. Local-only trace/control  
+2. Local-only trace/control
    核心对象是本机 Codex/Claude 的进程、SQLite、JSONL、session map、quarantine、backup 和 config surface，不依赖云端会话 API。
 
-3. Destructive action 可审计  
+3. Destructive action 可审计
    delete/import/restore 不是普通删除文件，而是有 plan、backup、quarantine、journal、DB backup、row-level allowlist、rollback evidence。
 
-4. Codex Control 是结构化安全控制面  
+4. Codex Control 是结构化安全控制面
    不直接暴露 auth/config/log/history 正文；高风险 key 需要确认；raw config 编辑默认禁用；rules/skills 只走 allowlist。
 
-5. Electron open/reveal 边界明确  
+5. Electron open/reveal 边界明确
    不是“路径能打开就打开”。transcript/history/log/db/auth/config/plugins/skills/rules 等高风险正文默认不 open。
 
-6. workflow 可复刻  
+6. workflow 可复刻
    `check:release` 和 CI 把 audit、typecheck、tests、synthetic smoke、package:pre、artifact verification、packaged/portable smoke 串成一条发布链路。
 
 ## 当前准确工作流
@@ -299,28 +299,28 @@ npm run clean:artifacts -- --apply
 
 按优先级：
 
-1. Electron IPC sender/origin boundary  
+1. Electron IPC sender/origin boundary
    给所有 high-risk IPC handler 加统一 `assertTrustedIpcSender(event)`，限定 sender ownership 和 app URL/dev URL。配套测试非可信 sender 不能调 `session:delete`、`session:import`、`codexControl:executeMutation`。
 
-2. backup/quarantine realpath/junction hardening  
+2. backup/quarantine realpath/junction hardening
    `isAllowedAgentScopeOperationPath()`、import/restore/reveal/open 入口需要 lstat/realpath，拒绝 Windows symlink/junction/reparse point 指向外部路径。
 
-3. JSONL metadata value redaction  
+3. JSONL metadata value redaction
    `source/thread_source/agent_*` 等 metadata 字段值要做 token-like、secret-like、过长正文过滤。字段名安全不等于字段值安全。
 
-4. session delete child modes  
+4. session delete child modes
    当前 parent with children 默认 block 是对的。下一步要设计明确模式：`block`、`include children`、`detach`，不能默认静默 detach。
 
-5. restore journal 细化  
+5. restore journal 细化
    当前已有 restore journal 和 rollback steps，但还应记录每个文件和每个 DB rollback 细节，让失败恢复更可审计。
 
-6. 旧 Claude patch helper 隔离  
+6. 旧 Claude patch helper 隔离
    旧 patch helper 仍在 `sessionOps.ts` 中。除非实现完整 reversible restore，否则应移除或隔离，保持 execution path inspect-only。
 
-7. smoke 补洞  
+7. smoke 补洞
    继续补真正可点击 smoke：session context delete confirm/cancel/execute、read-only session UI 阻断、notification body click 不关闭、process node collapse、Settings 保存阻断。
 
-8. process/subagent/MCP role 识别  
+8. process/subagent/MCP role 识别
    继续改进 Codex subagent、MCP、tool kernel、app-server 识别，但每一步都必须保留 evidence/confidence，不要为了 UI 好看升级 confidence。
 
 ## 低价值或不要优先做
