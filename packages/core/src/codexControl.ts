@@ -435,7 +435,8 @@ export async function planCodexControlMutation(
   home = userHome()
 ): Promise<CodexControlMutationPlan> {
   const plan = await planCodexControlMutationInternal(request, home);
-  const { rawMutations: _rawMutations, ...publicPlan } = plan;
+  const publicPlan = { ...plan } as CodexControlMutationPlan & { rawMutations?: InternalMutationPlan["rawMutations"] };
+  delete publicPlan.rawMutations;
   return publicPlan;
 }
 
@@ -865,7 +866,6 @@ function resolveDocument(id: string, home: string): ResolvedDocument {
 }
 
 function resolveDocumentForReveal(id: string, home: string): CodexControlRevealResult {
-  const root = codexHome(home);
   const blocked = (reason: string): CodexControlRevealResult => ({
     id,
     path: "",
@@ -1883,12 +1883,6 @@ function validateModePatch(patch: CodexModeConfigPatch): void {
   ) {
     throw new Error("Invalid Codex reasoning effort for planReasoningEffort.");
   }
-}
-
-function changedPatchKeys(patch: CodexModeConfigPatch): string[] {
-  return Object.entries(patch)
-    .filter(([, value]) => value !== undefined)
-    .map(([key]) => key);
 }
 
 function changedModeKeyPaths(patch: CodexModeConfigPatch): string[] {

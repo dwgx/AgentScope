@@ -10,6 +10,7 @@ import {
   type IpcSenderLike,
   type TrustedWindowLike
 } from "./security.js";
+import { launcherRuntimeTestInternals } from "./launcherRuntime.js";
 
 const tempRoots: string[] = [];
 
@@ -141,6 +142,26 @@ describe("main process security helpers", () => {
 
     await expect(isSafeOperationPath(link, [backupRoot])).resolves.toBe(false);
   });
+
+  it("uses AGENTSCOPE_LAUNCHER_APPDATA before APPDATA for trusted npm launchers", () => {
+    const oldLauncherAppData = process.env.AGENTSCOPE_LAUNCHER_APPDATA;
+    const oldAppData = process.env.APPDATA;
+    const launcherAppData = tempDir("launcher-appdata");
+    const appData = tempDir("appdata");
+    try {
+      process.env.AGENTSCOPE_LAUNCHER_APPDATA = launcherAppData;
+      process.env.APPDATA = appData;
+
+      const roots = launcherRuntimeTestInternals.trustedLauncherRoots().map((item) => path.resolve(item).toLowerCase());
+
+      expect(launcherRuntimeTestInternals.npmAppDataRoot()).toBe(launcherAppData);
+      expect(roots).toContain(path.resolve(path.join(launcherAppData, "npm")).toLowerCase());
+      expect(roots).not.toContain(path.resolve(path.join(appData, "npm")).toLowerCase());
+    } finally {
+      restoreEnv("AGENTSCOPE_LAUNCHER_APPDATA", oldLauncherAppData);
+      restoreEnv("APPDATA", oldAppData);
+    }
+  });
 });
 
 function tempDir(name: string): string {
@@ -172,5 +193,13 @@ function createDirectoryLink(target: string, linkPath: string): boolean {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "EPERM" || code === "EACCES" || code === "EINVAL") return false;
     throw error;
+  }
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
   }
 }

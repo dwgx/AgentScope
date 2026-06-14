@@ -145,6 +145,183 @@ describe("session operations", () => {
     expect(childSteps.map((step) => step.status)).toEqual(["started", "succeeded"]);
   });
 
+  it("restores completed child deletes when parent delete fails after includeChildren child succeeds", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-child-parent-fail-"));
+    const parentId = "88888888-4444-4888-8888-888888888888";
+    const childId = "99999999-4444-4999-8999-999999999999";
+    const parentRollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${parentId}.jsonl`);
+    const childRollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${childId}.jsonl`);
+    fs.mkdirSync(path.dirname(parentRollout), { recursive: true });
+    fs.writeFileSync(parentRollout, JSON.stringify({ type: "session_meta", payload: { id: parentId, cwd: String.raw`D:\Parent` } }) + "\n");
+    fs.writeFileSync(childRollout, JSON.stringify({ type: "session_meta", payload: { id: childId, cwd: String.raw`D:\Child`, parent_thread_id: parentId } }) + "\n");
+    createCodexBundleFixture(home, parentId, parentRollout);
+    addCodexChildFixture(home, parentId, childId, childRollout, String.raw`D:\Child`);
+    const goals = new Database(path.join(home, ".codex", "goals_1.sqlite"));
+    goals.exec(`
+      CREATE TRIGGER agentscope_fail_parent_goals_delete BEFORE DELETE ON thread_goals
+      WHEN OLD.thread_id = '${parentId}'
+      BEGIN
+        SELECT RAISE(FAIL, 'parent goals delete failed');
+      END;
+    `);
+    goals.close();
+
+    await expect(
+      deleteSession(parentId, "codex", {
+        home,
+        outputRoot,
+        includeProcesses: false,
+        childMode: "includeChildren",
+        now: new Date("2026-06-07T07:30:00Z")
+      })
+    ).rejects.toThrow(/parent goals delete failed/);
+
+    expect(fs.existsSync(parentRollout)).toBe(true);
+    expect(fs.existsSync(childRollout)).toBe(true);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    expect(countRowsForTest(state, "threads", "id = ?", [parentId])).toBe(1);
+    expect(countRowsForTest(state, "threads", "id = ?", [childId])).toBe(1);
+    expect(countRowsForTest(state, "thread_spawn_edges", "parent_thread_id = ? AND child_thread_id = ?", [parentId, childId])).toBe(1);
+    state.close();
+    const parentJournalPath = path.join(outputRoot, "quarantine", `2026-06-07T07-30-00-000Z-codex-${parentId}`, "journal.json");
+    const parentJournal = JSON.parse(fs.readFileSync(parentJournalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
+    expect(parentJournal.steps?.some((step) => step.phase === "child_delete" && step.childSessionId === childId && step.status === "succeeded")).toBe(true);
+    expect(parentJournal.steps?.some((step) => step.phase === "child_restore" && step.action === "rollback_child_delete" && step.childSessionId === childId && step.status === "succeeded")).toBe(true);
+    expect(fs.existsSync(path.join(outputRoot, "quarantine", `2026-06-07T07-30-00-000Z-codex-${childId}`, "restore-journal.json"))).toBe(true);
+  });
+
+  it("rolls back earlier child deletes when a later includeChildren child fails", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-child-sibling-fail-"));
+    const parentId = "88888888-4545-4888-8888-888888888888";
+    const childA = "99999999-4545-4999-8999-999999999991";
+    const childB = "99999999-4545-4999-8999-999999999992";
+    const parentRollout = codexRolloutPath(home, parentId);
+    const childRolloutA = codexRolloutPath(home, childA);
+    const childRolloutB = codexRolloutPath(home, childB);
+    fs.mkdirSync(path.dirname(parentRollout), { recursive: true });
+    fs.writeFileSync(parentRollout, JSON.stringify({ type: "session_meta", payload: { id: parentId, cwd: String.raw`D:\Parent` } }) + "\n");
+    fs.writeFileSync(childRolloutA, JSON.stringify({ type: "session_meta", payload: { id: childA, cwd: String.raw`D:\ChildA`, parent_thread_id: parentId } }) + "\n");
+    fs.writeFileSync(childRolloutB, JSON.stringify({ type: "session_meta", payload: { id: childB, cwd: String.raw`D:\ChildB`, parent_thread_id: parentId } }) + "\n");
+    createCodexBundleFixture(home, parentId, parentRollout);
+    addCodexChildFixture(home, parentId, childA, childRolloutA, String.raw`D:\ChildA`);
+    addCodexChildFixture(home, parentId, childB, childRolloutB, String.raw`D:\ChildB`);
+    const goals = new Database(path.join(home, ".codex", "goals_1.sqlite"));
+    goals.exec(`
+      CREATE TRIGGER agentscope_fail_child_b_goals_delete BEFORE DELETE ON thread_goals
+      WHEN OLD.thread_id = '${childB}'
+      BEGIN
+        SELECT RAISE(FAIL, 'child b goals delete failed');
+      END;
+    `);
+    goals.close();
+
+    await expect(
+      deleteSession(parentId, "codex", {
+        home,
+        outputRoot,
+        includeProcesses: false,
+        childMode: "includeChildren",
+        now: new Date("2026-06-07T07:40:00Z")
+      })
+    ).rejects.toThrow(/child b goals delete failed/);
+
+    expect(fs.existsSync(parentRollout)).toBe(true);
+    expect(fs.existsSync(childRolloutA)).toBe(true);
+    expect(fs.existsSync(childRolloutB)).toBe(true);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    expect(countRowsForTest(state, "threads", "id = ?", [parentId])).toBe(1);
+    expect(countRowsForTest(state, "threads", "id = ?", [childA])).toBe(1);
+    expect(countRowsForTest(state, "threads", "id = ?", [childB])).toBe(1);
+    expect(countRowsForTest(state, "thread_spawn_edges", "parent_thread_id = ? AND child_thread_id = ?", [parentId, childA])).toBe(1);
+    expect(countRowsForTest(state, "thread_spawn_edges", "parent_thread_id = ? AND child_thread_id = ?", [parentId, childB])).toBe(1);
+    state.close();
+    const parentJournal = JSON.parse(fs.readFileSync(path.join(outputRoot, "quarantine", `2026-06-07T07-40-00-000Z-codex-${parentId}`, "journal.json"), "utf8")) as { steps?: Array<Record<string, unknown>> };
+    expect(parentJournal.steps?.some((step) => step.phase === "child_delete" && step.childSessionId === childA && step.status === "succeeded")).toBe(true);
+    expect(parentJournal.steps?.some((step) => step.phase === "child_delete" && step.childSessionId === childB && step.status === "failed")).toBe(true);
+    expect(parentJournal.steps?.some((step) => step.phase === "child_restore" && step.childSessionId === childA && step.status === "succeeded")).toBe(true);
+  });
+
+  it("deletes nested includeChildren descendants before their parents", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-child-nested-"));
+    const parentId = "88888888-4646-4888-8888-888888888888";
+    const childId = "99999999-4646-4999-8999-999999999991";
+    const grandchildId = "aaaaaaa1-4646-4aaa-8aaa-aaaaaaaaaaa1";
+    const parentRollout = codexRolloutPath(home, parentId);
+    const childRollout = codexRolloutPath(home, childId);
+    const grandchildRollout = codexRolloutPath(home, grandchildId);
+    fs.mkdirSync(path.dirname(parentRollout), { recursive: true });
+    fs.writeFileSync(parentRollout, JSON.stringify({ type: "session_meta", payload: { id: parentId, cwd: String.raw`D:\Parent` } }) + "\n");
+    fs.writeFileSync(childRollout, JSON.stringify({ type: "session_meta", payload: { id: childId, cwd: String.raw`D:\Child`, parent_thread_id: parentId } }) + "\n");
+    fs.writeFileSync(grandchildRollout, JSON.stringify({ type: "session_meta", payload: { id: grandchildId, cwd: String.raw`D:\Grandchild`, parent_thread_id: childId } }) + "\n");
+    createCodexBundleFixture(home, parentId, parentRollout);
+    addCodexChildFixture(home, parentId, childId, childRollout, String.raw`D:\Child`);
+    addCodexChildFixture(home, childId, grandchildId, grandchildRollout, String.raw`D:\Grandchild`);
+
+    const result = await deleteSession(parentId, "codex", {
+      home,
+      outputRoot,
+      includeProcesses: false,
+      childMode: "includeChildren",
+      now: new Date("2026-06-07T07:50:00Z")
+    });
+
+    expect(result.childResults?.map((child) => child.sessionId)).toEqual([grandchildId, childId]);
+    expect(fs.existsSync(parentRollout)).toBe(false);
+    expect(fs.existsSync(childRollout)).toBe(false);
+    expect(fs.existsSync(grandchildRollout)).toBe(false);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    expect(countRowsForTest(state, "threads", "id = ?", [parentId])).toBe(0);
+    expect(countRowsForTest(state, "threads", "id = ?", [childId])).toBe(0);
+    expect(countRowsForTest(state, "threads", "id = ?", [grandchildId])).toBe(0);
+    state.close();
+  });
+
+  it("blocks includeChildren delete when a descendant is active", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-child-active-"));
+    const parentId = "88888888-4747-4888-8888-888888888888";
+    const childId = "99999999-4747-4999-8999-999999999999";
+    const parentRollout = codexRolloutPath(home, parentId);
+    const childRollout = codexRolloutPath(home, childId);
+    fs.mkdirSync(path.dirname(parentRollout), { recursive: true });
+    fs.writeFileSync(parentRollout, JSON.stringify({ type: "session_meta", payload: { id: parentId, cwd: String.raw`D:\Parent` } }) + "\n");
+    fs.writeFileSync(childRollout, JSON.stringify({ type: "session_meta", payload: { id: childId, cwd: String.raw`D:\Child`, parent_thread_id: parentId } }) + "\n");
+    createCodexBundleFixture(home, parentId, parentRollout);
+    addCodexChildFixture(home, parentId, childId, childRollout, String.raw`D:\Child`);
+
+    await expect(
+      deleteSession(parentId, "codex", {
+        home,
+        outputRoot,
+        includeProcesses: true,
+        childMode: "includeChildren",
+        now: new Date("2026-06-07T08:00:00Z"),
+        processProvider: async () => annotateProcessTree([
+          {
+            pid: 7470,
+            ppid: process.pid,
+            processName: "node.exe",
+            executablePath: String.raw`C:\Program Files\nodejs\node.exe`,
+            commandLine: String.raw`"node" "C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js" resume ${childId} --cwd "D:\Child"`,
+            startTime: "2026-06-07T08:00:00.000Z",
+            agent: "codex",
+            evidence: []
+          }
+        ])
+      })
+    ).rejects.toThrow(/active Codex process candidate/);
+
+    expect(fs.existsSync(parentRollout)).toBe(true);
+    expect(fs.existsSync(childRollout)).toBe(true);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    expect(countRowsForTest(state, "threads", "id = ?", [parentId])).toBe(1);
+    expect(countRowsForTest(state, "threads", "id = ?", [childId])).toBe(1);
+    state.close();
+  });
+
   it("detaches reversible Codex child edges before deleting only the parent", async () => {
     const home = tempHome();
     const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-child-detach-"));
@@ -231,7 +408,6 @@ describe("session operations", () => {
     const home = tempHome();
     const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-backup-"));
     const sessionId = "22222222-2222-4222-8222-222222222222";
-    const cwd = String.raw`D:\Project\AgentScope`;
     const encoded = "D--Project-AgentScope";
     fs.mkdirSync(path.join(home, ".claude", "projects", encoded), { recursive: true });
     fs.writeFileSync(path.join(home, ".claude", "projects", encoded, `${sessionId}.jsonl`), "{\"type\":\"user\"}\n");
@@ -1034,6 +1210,33 @@ function createCodexBundleFixture(home: string, sessionId: string, rollout: stri
   logs.close();
 }
 
+function addCodexChildFixture(
+  home: string,
+  parentId: string,
+  childId: string,
+  rollout: string,
+  cwd: string,
+  sqliteRoot = path.join(home, ".codex")
+): void {
+  const state = new Database(path.join(sqliteRoot, "state_5.sqlite"));
+  state.prepare("INSERT INTO threads (id, rollout_path, cwd, title) VALUES (?, ?, ?, ?)").run(childId, rollout, cwd, `child ${childId}`);
+  state.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id) VALUES (?, ?)").run(parentId, childId);
+  state.prepare("INSERT INTO thread_dynamic_tools (thread_id, name, value) VALUES (?, ?, ?)").run(childId, "shell", "enabled");
+  state.close();
+
+  const goals = new Database(path.join(sqliteRoot, "goals_1.sqlite"));
+  goals.prepare("INSERT INTO thread_goals (thread_id, goal) VALUES (?, ?)").run(childId, "ship child");
+  goals.close();
+
+  const memories = new Database(path.join(sqliteRoot, "memories_1.sqlite"));
+  memories.prepare("INSERT INTO stage1_outputs (thread_id, output) VALUES (?, ?)").run(childId, "child memory");
+  memories.close();
+
+  const logs = new Database(path.join(sqliteRoot, "logs_2.sqlite"));
+  logs.prepare("INSERT INTO logs (thread_id, level, ts, body) VALUES (?, ?, ?, ?)").run(childId, "INFO", "2026-06-07T00:00:00Z", "child log body");
+  logs.close();
+}
+
 function recreateCodexEmptySchema(home: string, sqliteRoot = path.join(home, ".codex")): void {
   fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
   fs.mkdirSync(sqliteRoot, { recursive: true });
@@ -1056,6 +1259,15 @@ function recreateCodexEmptySchema(home: string, sqliteRoot = path.join(home, ".c
   const logs = new Database(path.join(sqliteRoot, "logs_2.sqlite"));
   logs.exec("CREATE TABLE logs (thread_id TEXT, level TEXT, ts TEXT, body TEXT);");
   logs.close();
+}
+
+function codexRolloutPath(home: string, sessionId: string): string {
+  return path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
+}
+
+function countRowsForTest(db: Database.Database, table: string, where: string, params: unknown[]): number {
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`).get(...params) as { count: number };
+  return Number(row.count);
 }
 
 function sha256(filePath: string): string {

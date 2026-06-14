@@ -73,7 +73,7 @@ import { EvidenceList, Field, FieldGroup, InspectorHeader } from "./components/i
 import { PaneHeader } from "./components/panes.js";
 import { StatusPill } from "./components/sessions.js";
 import { SettingGroup, SettingRow } from "./components/settings.js";
-import { compactPath, displayPath, formatBytes, formatDate, formatMaybeDate, formatNumber, shortHash } from "./utils/display.js";
+import { compactPath, displayPath, formatBytes, formatDate, formatMaybeDate, formatNumber } from "./utils/display.js";
 import claudeLogoUrl from "./assets/claude-color.svg";
 import codexLogoUrl from "./assets/codex-color.svg";
 import "./styles.css";
@@ -332,7 +332,7 @@ function App() {
   const [quarantinedSessions, setQuarantinedSessions] = useState<QuarantinedSession[]>([]);
   const [quarantineLoading, setQuarantineLoading] = useState(false);
   const [quarantineError, setQuarantineError] = useState<string | undefined>();
-  const [quarantineLoaded, setQuarantineLoaded] = useState(false);
+  const [, setQuarantineLoaded] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | undefined>();
   const [doctorLoading, setDoctorLoading] = useState(true);
   const [doctorError, setDoctorError] = useState<string | undefined>();
@@ -788,10 +788,6 @@ function App() {
     } catch (error) {
       showNotice({ message: t("toast.operationFailed", { message: errorMessage(error) }) });
     }
-  }
-
-  async function executeDeleteSession(session: AgentSession, planResult?: SessionOperationPlanResult) {
-    await executeDeleteSessions([{ session, planResult }]);
   }
 
   async function executeDeleteSessions(

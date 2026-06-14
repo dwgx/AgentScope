@@ -48,7 +48,7 @@ interface OperationDirectories {
 
 interface DeleteJournalStep {
   at?: string | undefined;
-  phase: "backup" | "file" | "patch" | "sqlite_backup" | "sqlite_delete" | "relation" | "child_delete" | "operation";
+  phase: "backup" | "file" | "patch" | "sqlite_backup" | "sqlite_delete" | "relation" | "child_delete" | "child_restore" | "operation";
   action: string;
   status: "started" | "succeeded" | "failed" | "skipped";
   role?: string | undefined;
@@ -283,6 +283,12 @@ async function deleteSessionInternal(
   const journal = await createDeleteJournal(plan, backupDir, quarantineDir, journalPath);
   let detachedRelationTargets: DetachedRelationTarget[] = [];
   let detachedRelations: SessionDetachedRelation[] = [];
+  const movedFiles: SessionOperationFile[] = [];
+  const movedFileTargets: MovedFileTarget[] = [];
+  const patchedFiles: SessionOperationFile[] = [];
+  let backup: SessionBackupResult | undefined;
+  const databaseChanges: SessionOperationDatabaseChange[] = [];
+  const backupOptions = { ...options, now: new Date(plan.createdAt) };
   try {
     if (plan.blockers.length && !canBypassDeleteBlockers(plan.blockers, options)) {
       throw new Error(plan.blockers.join(" "));
@@ -330,7 +336,7 @@ async function deleteSessionInternal(
             status: "failed",
             parentSessionId: session.sessionId,
             childSessionId: child.sessionId,
-            error: error instanceof Error ? error.message : String(error)
+            error: errorText(error)
           });
           throw error;
         }
@@ -355,16 +361,7 @@ async function deleteSessionInternal(
         });
       }
     }
-  } finally {
-    context.stack.delete(sessionKey);
-  }
-  const movedFiles: SessionOperationFile[] = [];
-  const movedFileTargets: MovedFileTarget[] = [];
-  const patchedFiles: SessionOperationFile[] = [];
-  let backup: SessionBackupResult | undefined;
-  const databaseChanges: SessionOperationDatabaseChange[] = [];
-  const backupOptions = { ...options, now: new Date(plan.createdAt) };
-  try {
+
     await appendJournalStep(journal, { phase: "backup", action: "backupSession", status: "started", path: backupDir });
     backup = await backupSession(session.sessionId, session.agent, backupOptions);
     journal.backupDir = backup.backupDir;
@@ -450,13 +447,17 @@ async function deleteSessionInternal(
         // rollbackCodexDatabaseDeletes already journals the rollback failure; preserve the original operation error.
       }
     }
+    const childRollbackErrors = await rollbackCompletedChildDeletes(childResults, options, journal);
+    const operationError = withChildRollbackErrors(error, childRollbackErrors);
     await appendJournalStep(journal, {
       phase: "operation",
       action: "deleteSession",
       status: "failed",
-      error: error instanceof Error ? error.message : String(error)
+      error: errorText(operationError)
     }).catch(() => undefined);
-    throw withOperationPaths(error, backupDir, quarantineDir, journalPath);
+    throw withOperationPaths(operationError, backupDir, quarantineDir, journalPath);
+  } finally {
+    context.stack.delete(sessionKey);
   }
 }
 
@@ -1517,8 +1518,16 @@ function rollbackDetachedRelations(detachedRelations: DetachedRelationTarget[], 
 }
 
 function publicDetachedRelation(relation: DetachedRelationTarget): SessionDetachedRelation {
-  const { rows: _rows, ...publicRelation } = relation;
-  return publicRelation;
+  return {
+    agent: relation.agent,
+    parentSessionId: relation.parentSessionId,
+    childSessionId: relation.childSessionId,
+    source: relation.source,
+    database: relation.database,
+    table: relation.table,
+    removedRows: relation.removedRows,
+    evidence: relation.evidence
+  };
 }
 
 function applyCodexDatabaseDelete(
@@ -1624,19 +1633,17 @@ function rollbackCodexDatabaseDeletes(
   journal?: DeleteJournal | undefined,
   detail = "Restoring SQLite database from delete-time backup after a later Codex DB delete failed."
 ): void {
-  const seen = new Set<string>();
   for (const change of [...applied].reverse()) {
     if (change.action !== "delete" || !change.estimatedRows) continue;
     const database = path.resolve(change.database);
-    const key = database.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
     const backupPath = path.join(quarantineDir, "sqlite-backup", path.basename(database));
     appendJournalStepSync(journal, {
       phase: "sqlite_delete",
       action: "rollback_restore",
       status: "started",
       database,
+      table: change.table,
+      where: change.where,
       path: backupPath,
       targetPath: database,
       detail
@@ -1648,6 +1655,8 @@ function rollbackCodexDatabaseDeletes(
         action: "rollback_restore",
         status: "succeeded",
         database,
+        table: change.table,
+        where: change.where,
         path: backupPath,
         targetPath: database,
         estimatedRows: restoredRows,
@@ -1659,6 +1668,8 @@ function rollbackCodexDatabaseDeletes(
         action: "rollback_restore",
         status: "failed",
         database,
+        table: change.table,
+        where: change.where,
         path: backupPath,
         targetPath: database,
         error: error instanceof Error ? error.message : String(error)
@@ -1895,6 +1906,69 @@ async function rollbackMovedFiles(movedFiles: MovedFileTarget[], journal: Delete
       }).catch(() => undefined);
     }
   }
+}
+
+async function rollbackCompletedChildDeletes(
+  childResults: SessionChildDeleteResult[],
+  options: SessionOperationOptions,
+  journal: DeleteJournal
+): Promise<Error[]> {
+  const errors: Error[] = [];
+  const seen = new Set<string>();
+  for (const child of [...childResults].reverse()) {
+    const key = `${child.agent}:${child.sessionId}:${path.resolve(child.quarantineDir).toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await appendJournalStep(journal, {
+      phase: "child_restore",
+      action: "rollback_child_delete",
+      status: "started",
+      path: child.quarantineDir,
+      targetPath: child.backupDir,
+      childSessionId: child.sessionId,
+      detail: `Restoring child session deleted earlier in this includeChildren cascade: ${child.journalPath}`
+    }).catch(() => undefined);
+    try {
+      const restored = await restoreQuarantinedSession(child.quarantineDir, {
+        home: options.home,
+        outputRoot: options.outputRoot
+      });
+      await appendJournalStep(journal, {
+        phase: "child_restore",
+        action: "rollback_child_delete",
+        status: "succeeded",
+        path: child.quarantineDir,
+        targetPath: child.backupDir,
+        childSessionId: child.sessionId,
+        detail: restored.restoreJournalPath
+      });
+    } catch (error) {
+      const rollbackError = error instanceof Error ? error : new Error(String(error));
+      errors.push(rollbackError);
+      await appendJournalStep(journal, {
+        phase: "child_restore",
+        action: "rollback_child_delete",
+        status: "failed",
+        path: child.quarantineDir,
+        targetPath: child.backupDir,
+        childSessionId: child.sessionId,
+        error: rollbackError.message
+      }).catch(() => undefined);
+    }
+  }
+  return errors;
+}
+
+function withChildRollbackErrors(error: unknown, rollbackErrors: Error[]): Error | unknown {
+  if (!rollbackErrors.length) return error;
+  const message = `${errorText(error)} Child delete rollback failed: ${rollbackErrors.map((item) => item.message).join(" | ")}`;
+  const wrapped = new Error(message);
+  if (error instanceof Error && error.stack) wrapped.stack = error.stack;
+  return wrapped;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function appendRestoreJournalStep(journal: RestoreJournal | undefined, step: RestoreJournalStep): Promise<void> {

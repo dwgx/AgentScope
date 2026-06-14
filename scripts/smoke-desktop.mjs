@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +6,6 @@ import path from "node:path";
 const root = process.cwd();
 const outputRoot = path.join(root, "apps", "desktop", "out", "smoke", smokeStamp());
 const packagedExe = path.join(root, "apps", "desktop", "out", "win-unpacked", "AgentScope.exe");
-const desktopApp = path.join(root, "apps", "desktop");
 const fixturesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-desktop-smoke-"));
 const home = path.join(fixturesRoot, "home");
 const appData = path.join(fixturesRoot, "AppData", "Roaming");

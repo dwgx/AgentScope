@@ -48,6 +48,7 @@ try {
   });
 
   await waitForScreenshot(child, screenshotPath, timeoutMs);
+  await waitForExit(child, 20_000);
   fs.mkdirSync(path.dirname(savedScreenshotPath), { recursive: true });
   fs.copyFileSync(screenshotPath, savedScreenshotPath);
   console.log(`Portable desktop smoke passed. Screenshot: ${path.relative(root, savedScreenshotPath)}`);
@@ -55,6 +56,7 @@ try {
   cleanupSmokeProcesses(markerArg);
   throw error;
 } finally {
+  cleanupSmokeProcesses(markerArg);
   if (fs.existsSync(screenshotPath)) {
     removeFixtureRoot(fixturesRoot);
   } else {
@@ -95,6 +97,20 @@ async function waitForScreenshot(child, targetPath, maxMs) {
   }
 
   throw new Error(`Timed out waiting for portable smoke screenshot after ${maxMs}ms.`);
+}
+
+async function waitForExit(child, maxMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exit = new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+  });
+  const timeout = new Promise((resolve) => {
+    setTimeout(() => resolve(undefined), maxMs);
+  });
+  const result = await Promise.race([exit, timeout]);
+  if (!result && child.exitCode === null && child.signalCode === null) {
+    throw new Error(`Portable process did not exit within ${maxMs}ms after smoke screenshot.`);
+  }
 }
 
 function cleanupSmokeProcesses(marker) {

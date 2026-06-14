@@ -241,6 +241,8 @@ async function whereCommand(command: string): Promise<LaunchFileCandidate[]> {
 }
 
 function npmAppDataRoot(): string | undefined {
+  const launcherOverride = process.env.AGENTSCOPE_LAUNCHER_APPDATA?.trim();
+  if (launcherOverride) return launcherOverride;
   const fromEnv = process.env.APPDATA;
   if (fromEnv) return fromEnv;
   return path.join(os.homedir(), "AppData", "Roaming");
@@ -254,3 +256,8 @@ function normalizeFsPath(candidate: string | undefined): string | undefined {
     return undefined;
   }
 }
+
+export const launcherRuntimeTestInternals = {
+  npmAppDataRoot,
+  trustedLauncherRoots
+};

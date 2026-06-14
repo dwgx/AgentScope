@@ -26,6 +26,7 @@ Run these before handoff after code changes:
 
 ```powershell
 npm run audit:repo
+npm run lint
 npm run typecheck
 npm test
 npm run i18n:check

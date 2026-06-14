@@ -9,7 +9,8 @@ Read order for the next AI:
 3. `docs/project-state-and-next-agent-workflow-2026-06-13.md`
 4. `docs/research-local-agent-stores.md`
 5. `docs/repository-hygiene.md`
-6. `README.md`
+6. `docs/session-delete-cascade-recovery-2026-06-15.md`
+7. `README.md`
 
 ## Product Identity
 
@@ -54,12 +55,20 @@ the new HEAD as the current release evidence. Local `apps/desktop/out` can be
 stale after any commit because `agentscope-prebuild.json` records the HEAD that
 existed when `npm run package:pre` ran.
 
+The 2026-06-15 local recovery batch hardened `childMode="includeChildren"`
+delete rollback, fixed SQLite multi-table rollback, restored launcher
+`AGENTSCOPE_LAUNCHER_APPDATA` handling, and aligned local/CI gates with lint
+plus IPC-negative smoke.
+See `docs/session-delete-cascade-recovery-2026-06-15.md` for the evidence,
+plan, implementation summary, and local verification record.
+
 ## Commands
 
 Run after code changes:
 
 ```powershell
 npm run audit:repo
+npm run lint
 npm run typecheck
 npm test
 npm run i18n:check
@@ -199,14 +208,12 @@ Current hygiene rules:
 
 Highest-value next tasks:
 
-1. Finish this maintenance batch: run all required checks, package, inspect `git diff --stat`, commit.
-2. Add a real Electron/Playwright smoke harness for Settings, Codex Control, Sessions recycle panel, context menus, notifications, Relations filters, and launch notifications.
-3. Make restore journals more granular for file copy and DB rollback evidence.
-4. Remove or isolate old Claude patch helpers unless reversible patch/restore is implemented.
-5. Add explicit child-session delete modes: block, include children, or detach. Do not silently detach.
-6. Add keyboard access to row context menus with `Shift+F10`.
-7. Keep improving Codex subagent/process role classification, but never upgrade heuristic to exact without evidence.
-8. Continue Codex Control expansion only with safe structured controls and protected credentials.
+1. After manual desktop testing, regenerate `package:pre` artifacts for the final HEAD, verify with `--strict-head`, then push and monitor GitHub Actions.
+2. Add broader Electron/Playwright smoke coverage for Settings, Relations filters, context menus, notifications, and launch notifications.
+3. Remove or isolate old Claude patch helpers unless reversible patch/restore is implemented.
+4. Add keyboard access to row context menus with `Shift+F10`.
+5. Keep improving Codex subagent/process role classification, but never upgrade heuristic to exact without evidence.
+6. Continue Codex Control expansion only with safe structured controls and protected credentials.
 
 ## Source Research Summary
 

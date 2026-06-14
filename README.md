@@ -54,6 +54,7 @@ and React/TypeScript renderer for the control surface.
 ```powershell
 npm install
 npm run audit:repo
+npm run lint
 npm run typecheck
 npm test
 npm run i18n:check
@@ -86,9 +87,9 @@ npm run check:release
 
 `npm run package` builds the unpacked app for local iteration. `npm run package:pre`
 builds the installer, portable executable, portable zip, and prebuild manifest.
-`npm run check:release` matches the CI release path: repo audit, typecheck,
-i18n check, tests, synthetic smoke, `package:pre`, artifact verification, and
-packaged/portable desktop smoke.
+`npm run check:release` matches the CI release path: repo audit, lint,
+typecheck, i18n check, tests, synthetic smoke, `package:pre`, artifact
+verification, and packaged/portable desktop smoke.
 
 Artifact inspection and cleanup:
 

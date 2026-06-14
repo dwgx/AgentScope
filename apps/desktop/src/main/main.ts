@@ -701,11 +701,6 @@ function agentScopeDataRoot(): string {
   return process.env.AGENTSCOPE_DATA_HOME?.trim() || path.join(appHome(), ".agentscope");
 }
 
-function npmAppDataRoot(): string | undefined {
-  if (process.env.AGENTSCOPE_LAUNCHER_APPDATA?.trim()) return process.env.AGENTSCOPE_LAUNCHER_APPDATA.trim();
-  return process.env.APPDATA;
-}
-
 function isSmokeNoShell(): boolean {
   return isSmoke && process.env.AGENTSCOPE_SMOKE_NO_SHELL === "1";
 }

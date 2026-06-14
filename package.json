@@ -39,7 +39,7 @@
     "package:pre": "node scripts/package-desktop.mjs --pre",
     "package:beta": "node scripts/package-desktop.mjs --pre",
     "verify:desktop-artifacts": "node scripts/verify-desktop-artifacts.mjs",
-    "check:release": "npm run audit:repo && npm run typecheck && npm run i18n:check && npm test && npm run smoke:agentscope && npm run package:pre && npm run verify:desktop-artifacts -- --strict-head && npm run smoke:desktop:packaged && npm run smoke:desktop:ipc-negative && npm run smoke:desktop:portable"
+    "check:release": "npm run audit:repo && npm run lint && npm run typecheck && npm run i18n:check && npm test && npm run smoke:agentscope && npm run package:pre && npm run verify:desktop-artifacts -- --strict-head && npm run smoke:desktop:packaged && npm run smoke:desktop:ipc-negative && npm run smoke:desktop:portable"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
