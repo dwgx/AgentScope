@@ -91,6 +91,8 @@ interface RestoreJournal {
   kind: "AgentScope Session Restore Journal";
   createdAt: string;
   updatedAt: string;
+  operationId: string;
+  lifecycle: "prepared" | "committing" | "committed" | "rolling_back" | "rolled_back" | "rollback_failed" | "failed";
   agent: AgentKind;
   sessionId: string;
   backupDir: string;
@@ -106,7 +108,7 @@ interface RestoreJournal {
 
 interface RestoreJournalStep {
   at?: string | undefined;
-  phase: "plan" | "preflight" | "file" | "sqlite_import" | "rollback" | "operation";
+  phase: "plan" | "preflight" | "file" | "sqlite_import" | "rollback" | "operation" | "lifecycle";
   action: string;
   status: "started" | "succeeded" | "failed" | "skipped";
   role?: string | undefined;
@@ -276,6 +278,9 @@ async function deleteSessionInternal(
   const plan = await buildSessionPlan("delete", session, options);
   const childMode = normalizedChildMode(options);
   const childResults: SessionChildDeleteResult[] = [];
+  const { backupDir, quarantineDir, journalPath } = operationDirectories(plan, options);
+  await fs.promises.mkdir(quarantineDir, { recursive: true });
+  const journal = await createDeleteJournal(plan, backupDir, quarantineDir, journalPath);
   let detachedRelationTargets: DetachedRelationTarget[] = [];
   let detachedRelations: SessionDetachedRelation[] = [];
   try {
@@ -290,14 +295,45 @@ async function deleteSessionInternal(
         const completed = context.completedChildren.get(childKey);
         if (completed) {
           childResults.push(completed);
+          await appendJournalStep(journal, {
+            phase: "child_delete",
+            action: "include_child_delete",
+            status: "skipped",
+            parentSessionId: session.sessionId,
+            childSessionId: child.sessionId,
+            path: completed.backupDir,
+            targetPath: completed.quarantineDir,
+            detail: `Child session was already deleted in this cascade: ${completed.journalPath}`
+          });
           continue;
         }
-        const result = await deleteSessionInternal(
-          child.sessionId,
-          child.agent,
-          { ...options, childMode: "includeChildren" },
-          { stack: new Set(context.stack), completedChildren: context.completedChildren, depth: context.depth + 1 }
-        );
+        await appendJournalStep(journal, {
+          phase: "child_delete",
+          action: "include_child_delete",
+          status: "started",
+          parentSessionId: session.sessionId,
+          childSessionId: child.sessionId,
+          detail: "Deleting child session before parent because childMode=includeChildren."
+        });
+        let result: SessionDeleteResult;
+        try {
+          result = await deleteSessionInternal(
+            child.sessionId,
+            child.agent,
+            { ...options, childMode: "includeChildren" },
+            { stack: new Set(context.stack), completedChildren: context.completedChildren, depth: context.depth + 1 }
+          );
+        } catch (error) {
+          await appendJournalStep(journal, {
+            phase: "child_delete",
+            action: "include_child_delete",
+            status: "failed",
+            parentSessionId: session.sessionId,
+            childSessionId: child.sessionId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          throw error;
+        }
         const summary: SessionChildDeleteResult = {
           agent: result.plan.agent,
           sessionId: result.plan.sessionId,
@@ -307,25 +343,20 @@ async function deleteSessionInternal(
         };
         context.completedChildren.set(childKey, summary);
         childResults.push(summary);
+        await appendJournalStep(journal, {
+          phase: "child_delete",
+          action: "include_child_delete",
+          status: "succeeded",
+          parentSessionId: session.sessionId,
+          childSessionId: child.sessionId,
+          path: summary.backupDir,
+          targetPath: summary.quarantineDir,
+          detail: summary.journalPath
+        });
       }
     }
   } finally {
     context.stack.delete(sessionKey);
-  }
-  const { backupDir, quarantineDir, journalPath } = operationDirectories(plan, options);
-  await fs.promises.mkdir(quarantineDir, { recursive: true });
-  const journal = await createDeleteJournal(plan, backupDir, quarantineDir, journalPath);
-  for (const childResult of childResults) {
-    await appendJournalStep(journal, {
-      phase: "child_delete",
-      action: "include_child_delete",
-      status: "succeeded",
-      parentSessionId: session.sessionId,
-      childSessionId: childResult.sessionId,
-      path: childResult.backupDir,
-      targetPath: childResult.quarantineDir,
-      detail: childResult.journalPath
-    });
   }
   const movedFiles: SessionOperationFile[] = [];
   const movedFileTargets: MovedFileTarget[] = [];
@@ -576,6 +607,9 @@ export async function importSessionBackup(
       const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home, restoreJournal) : [];
       return { plan, backupDir, importedFiles, databaseChanges };
     } catch (error) {
+      if (restoreJournal) {
+        await setRestoreJournalLifecycle(restoreJournal, "rolling_back", "started", "Import failed; removing copied files before reporting failure.").catch(() => undefined);
+      }
       await appendRestoreJournalStep(restoreJournal, {
         phase: "rollback",
         action: "rollback_remove_imported_files",
@@ -590,6 +624,9 @@ export async function importSessionBackup(
           status: "succeeded",
           detail: `Removed ${importedFiles.length} copied file(s).`
         }).catch(() => undefined);
+        if (restoreJournal) {
+          await setRestoreJournalLifecycle(restoreJournal, "rolled_back", "succeeded", "Copied files were removed after import failure.").catch(() => undefined);
+        }
       } catch (rollbackError) {
         await appendRestoreJournalStep(restoreJournal, {
           phase: "rollback",
@@ -598,6 +635,9 @@ export async function importSessionBackup(
           detail: `Failed to remove all copied file(s) after import failure.`,
           error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
         }).catch(() => undefined);
+        if (restoreJournal) {
+          await setRestoreJournalLifecycle(restoreJournal, "rollback_failed", "failed", rollbackError instanceof Error ? rollbackError.message : String(rollbackError)).catch(() => undefined);
+        }
       }
       throw error;
     }
@@ -708,6 +748,8 @@ export async function restoreQuarantinedSession(
       kind: restoreJournalKind,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      operationId: operationId("restore", journal.agent, journal.sessionId, new Date().toISOString()),
+      lifecycle: "prepared",
       agent: journal.agent,
       sessionId: journal.sessionId,
       backupDir: journal.backupDir,
@@ -720,6 +762,7 @@ export async function restoreQuarantinedSession(
       steps: []
     };
     await writeJson(restoreJournalPath, restoreJournal);
+    await setRestoreJournalLifecycle(restoreJournal, "prepared", "succeeded", "Restore journal was created before executing import.");
     await appendRestoreJournalStep(restoreJournal, { phase: "plan", action: "planSessionRestore", status: "started", path: journal.journalPath });
     const planResult = await planSessionRestore(journal.journalPath, options);
     await appendRestoreJournalStep(restoreJournal, {
@@ -730,12 +773,15 @@ export async function restoreQuarantinedSession(
       detail: planResult.plan.blockers.length ? planResult.plan.blockers.join(" ") : undefined
     });
     if (planResult.plan.blockers.length) throw new Error(planResult.plan.blockers.join(" "));
+    await setRestoreJournalLifecycle(restoreJournal, "committing", "started", "Restore passed preflight and is applying copied files and database rows.");
     const imported = await importSessionBackup(journal.backupDir, options, restoreJournal);
     const databaseChanges = imported.databaseChanges ?? [];
     restoreJournal.status = "succeeded";
+    restoreJournal.lifecycle = "committed";
     restoreJournal.updatedAt = new Date().toISOString();
     restoreJournal.importedFiles = imported.importedFiles;
     restoreJournal.databaseChanges = databaseChanges;
+    await setRestoreJournalLifecycle(restoreJournal, "committed", "succeeded", "Restore committed all file and database changes.");
     await appendRestoreJournalStep(restoreJournal, {
       phase: "operation",
       action: "restoreQuarantinedSession",
@@ -760,6 +806,8 @@ export async function restoreQuarantinedSession(
         kind: restoreJournalKind,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        operationId: operationId("restore", journal.agent, journal.sessionId, new Date().toISOString()),
+        lifecycle: "failed",
         agent: journal.agent,
         sessionId: journal.sessionId,
         backupDir: journal.backupDir,
@@ -772,8 +820,14 @@ export async function restoreQuarantinedSession(
         steps: []
       };
       restoreJournal.status = "failed";
+      if (restoreJournal.lifecycle === "rolling_back") {
+        restoreJournal.lifecycle = restoreJournal.steps.some((step) => step.phase === "rollback" && step.status === "failed") ? "rollback_failed" : "rolled_back";
+      } else if (restoreJournal.lifecycle !== "rolled_back" && restoreJournal.lifecycle !== "rollback_failed") {
+        restoreJournal.lifecycle = "failed";
+      }
       restoreJournal.updatedAt = new Date().toISOString();
       restoreJournal.error = error instanceof Error ? error.message : String(error);
+      await setRestoreJournalLifecycle(restoreJournal, restoreJournal.lifecycle, "failed", restoreJournal.error).catch(() => undefined);
       await appendRestoreJournalStep(restoreJournal, {
         phase: "operation",
         action: "restoreQuarantinedSession",
@@ -1322,55 +1376,51 @@ function detachChildRelations(
         database: statePath,
         table: "thread_spawn_edges"
       });
-      const rows = db
-        .prepare("SELECT * FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?")
-        .all(session.sessionId, childId) as Record<string, unknown>[];
-      if (!rows.length) {
-        appendJournalStepSync(journal, {
-          phase: "relation",
-          action: "detach_child_relation",
-          status: "failed",
+    }
+    const transaction = db.transaction(() => {
+      for (const childId of session.childSessionIds) {
+        const rows = db
+          .prepare("SELECT * FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?")
+          .all(session.sessionId, childId) as Record<string, unknown>[];
+        if (!rows.length) {
+          throw new Error(`No reversible Codex parent/child edge exists for child session: ${childId}`);
+        }
+        const result = db
+          .prepare("DELETE FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?")
+          .run(session.sessionId, childId);
+        const removedRows = Number(result.changes ?? 0);
+        detached.push({
+          agent: "codex",
           parentSessionId: session.sessionId,
           childSessionId: childId,
+          source: "codex.sqlite.thread_spawn_edges",
           database: statePath,
           table: "thread_spawn_edges",
-          error: "No reversible Codex parent/child edge exists for this child session."
+          removedRows,
+          rows,
+          evidence: [
+            {
+              source: "codex.sqlite.thread_spawn_edges",
+              detail: "Parent/child edge was detached before deleting the parent session.",
+              path: statePath,
+              field: "parent_thread_id,child_thread_id"
+            }
+          ]
         });
-        throw new Error(`No reversible Codex parent/child edge exists for child session: ${childId}`);
       }
-      const result = db
-        .prepare("DELETE FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?")
-        .run(session.sessionId, childId);
-      const removedRows = Number(result.changes ?? 0);
-      const relation: DetachedRelationTarget = {
-        agent: "codex",
-        parentSessionId: session.sessionId,
-        childSessionId: childId,
-        source: "codex.sqlite.thread_spawn_edges",
-        database: statePath,
-        table: "thread_spawn_edges",
-        removedRows,
-        rows,
-        evidence: [
-          {
-            source: "codex.sqlite.thread_spawn_edges",
-            detail: "Parent/child edge was detached before deleting the parent session.",
-            path: statePath,
-            field: "parent_thread_id,child_thread_id"
-          }
-        ]
-      };
-      detached.push(relation);
+    });
+    transaction();
+    for (const relation of detached) {
       appendJournalStepSync(journal, {
         phase: "relation",
         action: "detach_child_relation",
-        status: removedRows ? "succeeded" : "skipped",
-        parentSessionId: session.sessionId,
-        childSessionId: childId,
+        status: relation.removedRows ? "succeeded" : "skipped",
+        parentSessionId: relation.parentSessionId,
+        childSessionId: relation.childSessionId,
         database: statePath,
         table: "thread_spawn_edges",
-        estimatedRows: removedRows,
-        rollbackRows: safeJournalRows(rows),
+        estimatedRows: relation.removedRows,
+        rollbackRows: safeJournalRows(relation.rows),
         evidence: relation.evidence
       });
     }
@@ -1382,7 +1432,7 @@ function detachChildRelations(
       parentSessionId: session.sessionId,
       database: statePath,
       table: "thread_spawn_edges",
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? `${error.message}; detach transaction was rolled back.` : `${String(error)}; detach transaction was rolled back.`
     });
     throw error;
   } finally {
@@ -1860,6 +1910,25 @@ function appendRestoreJournalStepSync(journal: RestoreJournal | undefined, step:
   journal.steps.push({ ...step, at: step.at ?? journal.updatedAt });
   fs.mkdirSync(path.dirname(journal.restoreJournalPath), { recursive: true });
   fs.writeFileSync(journal.restoreJournalPath, `${JSON.stringify(journal, null, 2)}\n`, "utf8");
+}
+
+async function setRestoreJournalLifecycle(
+  journal: RestoreJournal,
+  lifecycle: RestoreJournal["lifecycle"],
+  status: RestoreJournalStep["status"],
+  detail?: string | undefined
+): Promise<void> {
+  journal.lifecycle = lifecycle;
+  await appendRestoreJournalStep(journal, {
+    phase: "lifecycle",
+    action: lifecycle,
+    status,
+    detail
+  });
+}
+
+function operationId(operation: string, agent: AgentKind, sessionId: string, stamp: string): string {
+  return `${operation}:${agent}:${sessionId}:${safeStamp(stamp)}`;
 }
 
 function withOperationPaths(

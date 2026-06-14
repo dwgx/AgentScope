@@ -141,7 +141,8 @@ describe("session operations", () => {
     expect(fs.existsSync(parentRollout)).toBe(false);
     expect(fs.existsSync(childRollout)).toBe(false);
     const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
-    expect(journal.steps?.some((step) => step.phase === "child_delete" && step.childSessionId === childId)).toBe(true);
+    const childSteps = journal.steps?.filter((step) => step.phase === "child_delete" && step.childSessionId === childId) ?? [];
+    expect(childSteps.map((step) => step.status)).toEqual(["started", "succeeded"]);
   });
 
   it("detaches reversible Codex child edges before deleting only the parent", async () => {
@@ -179,6 +180,51 @@ describe("session operations", () => {
     const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
     expect(journal.steps?.some((step) => step.phase === "relation" && step.action === "detach_child_relation" && step.status === "succeeded")).toBe(true);
     expect(JSON.stringify(journal)).toContain("rollbackRows");
+  });
+
+  it("rolls back all detach edges when one child edge cannot be detached", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-child-detach-rollback-"));
+    const parentId = "88888888-3333-4888-8888-888888888888";
+    const childA = "99999999-3333-4999-8999-999999999991";
+    const childB = "99999999-3333-4999-8999-999999999992";
+    const parentRollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${parentId}.jsonl`);
+    const childRolloutA = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${childA}.jsonl`);
+    const childRolloutB = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${childB}.jsonl`);
+    fs.mkdirSync(path.dirname(parentRollout), { recursive: true });
+    fs.writeFileSync(parentRollout, JSON.stringify({ type: "session_meta", payload: { id: parentId, cwd: String.raw`D:\Parent` } }) + "\n");
+    fs.writeFileSync(childRolloutA, JSON.stringify({ type: "session_meta", payload: { id: childA, cwd: String.raw`D:\ChildA`, parent_thread_id: parentId } }) + "\n");
+    fs.writeFileSync(childRolloutB, JSON.stringify({ type: "session_meta", payload: { id: childB, cwd: String.raw`D:\ChildB`, parent_thread_id: parentId } }) + "\n");
+    createCodexBundleFixture(home, parentId, parentRollout);
+    const dbPath = path.join(home, ".codex", "state_5.sqlite");
+    const state = new Database(dbPath);
+    state.prepare("INSERT INTO threads (id, rollout_path, cwd, title) VALUES (?, ?, ?, ?)").run(childA, childRolloutA, String.raw`D:\ChildA`, "child-a");
+    state.prepare("INSERT INTO threads (id, rollout_path, cwd, title) VALUES (?, ?, ?, ?)").run(childB, childRolloutB, String.raw`D:\ChildB`, "child-b");
+    state.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id) VALUES (?, ?)").run(parentId, childA);
+    state.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id) VALUES (?, ?)").run(parentId, childB);
+    state.close();
+
+    const plan = await planSessionDelete(parentId, "codex", { home, includeProcesses: false, childMode: "detach" });
+    expect(plan.affectedChildSessionIds).toEqual([childA, childB]);
+
+    const sabotage = new Database(dbPath);
+    sabotage.prepare("DELETE FROM thread_spawn_edges WHERE child_thread_id = ?").run(childB);
+    sabotage.close();
+
+    await expect(
+      deleteSession(parentId, "codex", {
+        home,
+        outputRoot,
+        includeProcesses: false,
+        childMode: "detach",
+        now: new Date("2026-06-07T07:20:00Z")
+      })
+    ).rejects.toThrow(/No reversible Codex parent\/child edge exists/);
+
+    const verify = new Database(dbPath, { readonly: true });
+    expect(Number((verify.prepare("SELECT COUNT(*) count FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?").get(parentId, childA) as { count: number }).count)).toBe(1);
+    expect(Number((verify.prepare("SELECT COUNT(*) count FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?").get(parentId, childB) as { count: number }).count)).toBe(0);
+    verify.close();
   });
 
   it("copies a Claude backup manifest and session files", async () => {
@@ -495,7 +541,12 @@ describe("session operations", () => {
     const restoreJournal = JSON.parse(fs.readFileSync(restored.restoreJournalPath, "utf8")) as Record<string, unknown>;
     expect(restoreJournal.kind).toBe("AgentScope Session Restore Journal");
     expect(restoreJournal.status).toBe("succeeded");
+    expect(restoreJournal.lifecycle).toBe("committed");
+    expect(typeof restoreJournal.operationId).toBe("string");
     const steps = restoreJournal.steps as Array<Record<string, unknown>>;
+    expect(steps.some((step) => step.phase === "lifecycle" && step.action === "prepared" && step.status === "succeeded")).toBe(true);
+    expect(steps.some((step) => step.phase === "lifecycle" && step.action === "committing" && step.status === "started")).toBe(true);
+    expect(steps.some((step) => step.phase === "lifecycle" && step.action === "committed" && step.status === "succeeded")).toBe(true);
     expect(steps.some((step) => step.phase === "file" && step.action === "copy_file_succeeded" && step.status === "succeeded")).toBe(true);
     expect(steps.some((step) => step.phase === "file" && step.action === "verify_sha256" && step.status === "succeeded")).toBe(true);
     expect(steps.some((step) => step.phase === "operation" && step.action === "restoreQuarantinedSession" && step.status === "succeeded")).toBe(true);
