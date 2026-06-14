@@ -4,23 +4,20 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import { execFile, spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, session as electronSession, shell } from "electron";
-import type { IpcMainEvent, IpcMainInvokeEvent } from "electron";
+import type { IpcMainInvokeEvent } from "electron";
 import {
-  formatCommandForDisplay,
   isSafeSessionId,
-  resolveSessionLauncher,
-  splitWindowsCommandLine,
-  type LaunchFileCandidate,
   type SessionLaunchAction,
   type SessionLaunchContext,
   type SessionLaunchResolution,
   type SessionLaunchResult
 } from "@agentscope/shared";
-import type { AgentProcess, CodexControlMutationRequest, CodexModeConfigPatch, Evidence, ScopeSnapshot } from "@agentscope/shared";
+import type { AgentProcess, CodexControlMutationRequest, CodexModeConfigPatch, Evidence, IndexRecord, Relation, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
+import { runIpcNegativeSmoke } from "./ipcNegativeSmoke.js";
+import { launchResult, resolveLaunchCommand, waitForLaunchAccepted } from "./launcherRuntime.js";
 import { assertTrustedIpcSender, isSafeOperationPath } from "./security.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +26,6 @@ const isSmoke = process.env.AGENTSCOPE_SMOKE === "1" || process.argv.includes("-
 const isVisibleSmoke = isSmoke && process.env.AGENTSCOPE_SMOKE_VISIBLE === "1";
 const smokeUserData = isSmoke ? process.env.AGENTSCOPE_SMOKE_USER_DATA?.trim() : undefined;
 const execFileAsync = promisify(execFile);
-
 let mainWindow: BrowserWindow | undefined;
 let corePromise: Promise<typeof AgentScopeCore> | undefined;
 let lastCoreError: string | undefined;
@@ -299,8 +295,8 @@ handleTrustedIpc("inspect:session", async (_event, sessionId) => {
   return {
     session,
     process: session?.pid === undefined ? undefined : await findProcess(snapshot, session.pid),
-    relations: snapshot.relations.filter((relation) => relation.sourceId === safeSessionId || relation.targetId === safeSessionId),
-    indexRecords: snapshot.indexRecords.filter((record) => record.sessionId.toLowerCase() === safeSessionId.toLowerCase())
+    relations: snapshot.relations.filter((relation: Relation) => relation.sourceId === safeSessionId || relation.targetId === safeSessionId),
+    indexRecords: snapshot.indexRecords.filter((record: IndexRecord) => record.sessionId.toLowerCase() === safeSessionId.toLowerCase())
   };
 });
 handleTrustedIpc("diagnostic:repair", async (_event, name) => {
@@ -469,7 +465,7 @@ async function bootstrap(): Promise<void> {
     log(`createWindow failed ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
   });
   if (isSmoke && process.env.AGENTSCOPE_SMOKE_IPC_NEGATIVE === "1") {
-    await runIpcNegativeSmoke().catch((error: unknown) => {
+    await runIpcNegativeSmoke({ app, appHome: appHome(), registeredIpcChannels }).catch((error: unknown) => {
       log(`ipc negative smoke failed ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
       app.exit(1);
     });
@@ -482,81 +478,6 @@ function preloadPath(): string {
 
 function rendererIndexPath(): string {
   return app.isPackaged ? path.join(app.getAppPath(), "dist", "renderer", "index.html") : path.join(__dirname, "..", "renderer", "index.html");
-}
-
-async function runIpcNegativeSmoke(): Promise<void> {
-  const outputPath = process.env.AGENTSCOPE_SMOKE_IPC_NEGATIVE_RESULT?.trim();
-  if (!outputPath) throw new Error("AGENTSCOPE_SMOKE_IPC_NEGATIVE_RESULT is required.");
-  const probeDir = path.join(app.getPath("userData"), "ipc-negative-smoke");
-  const preload = path.join(probeDir, "malicious-preload.cjs");
-  const html = path.join(probeDir, "malicious.html");
-  const channels = [
-    ["session:delete", ["codex", "11111111-1111-4111-8111-111111111111"]],
-    ["session:import", [path.join(appHome(), ".agentscope", "backups", "missing")]],
-    ["session:restore", [path.join(appHome(), ".agentscope", "quarantine", "missing")]],
-    ["codexControl:executeMutation", [{ expectedSha256: "0".repeat(64), mutations: [{ itemId: "config.model", keyPath: "model", value: "gpt-5.5" }] }]],
-    ["diagnostic:repair", ["native.better_sqlite3"]],
-    ["shell:openPath", [path.join(appHome(), ".codex", "auth.json")]]
-  ] as const;
-  const missing = channels.map(([channel]) => channel).filter((channel) => !registeredIpcChannels.has(channel));
-  if (missing.length) throw new Error(`IPC negative smoke channel is not registered: ${missing.join(", ")}`);
-  await fs.promises.mkdir(probeDir, { recursive: true });
-  await fs.promises.writeFile(
-    preload,
-    [
-      'const { ipcRenderer } = require("electron");',
-      `const channels = ${JSON.stringify(channels)};`,
-      "(async () => {",
-      "  const results = [];",
-      "  for (const [channel, args] of channels) {",
-      "    try {",
-      "      await ipcRenderer.invoke(channel, ...args);",
-      "      results.push({ channel, ok: true, message: 'unexpected success' });",
-      "    } catch (error) {",
-      "      results.push({ channel, ok: false, message: error && error.message ? String(error.message) : String(error) });",
-      "    }",
-      "  }",
-      "  ipcRenderer.send('agentscope:ipc-negative-result', results);",
-      "})();"
-    ].join("\n"),
-    "utf8"
-  );
-  await fs.promises.writeFile(html, "<!doctype html><title>AgentScope IPC negative smoke</title>\n", "utf8");
-  const result = await new Promise<Array<{ channel: string; ok: boolean; message: string }>>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error("IPC negative smoke timed out."));
-    }, 15_000);
-    const cleanup = () => {
-      clearTimeout(timeout);
-      ipcMain.removeListener("agentscope:ipc-negative-result", onResult);
-    };
-    const onResult = (_event: IpcMainEvent, results: Array<{ channel: string; ok: boolean; message: string }>) => {
-      cleanup();
-      resolve(results);
-    };
-    ipcMain.once("agentscope:ipc-negative-result", onResult);
-    const probe = new BrowserWindow({
-      show: false,
-      webPreferences: {
-        preload,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false
-      }
-    });
-    probe.loadFile(html).catch((error: unknown) => {
-      cleanup();
-      reject(error instanceof Error ? error : new Error(String(error)));
-    });
-  });
-  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
-  await fs.promises.writeFile(outputPath, `${JSON.stringify({ ok: true, results: result }, null, 2)}\n`, "utf8");
-  const failures = result.filter((item) => item.ok || !/IPC sender rejected/i.test(item.message));
-  if (failures.length) {
-    throw new Error(`IPC negative smoke expected sender rejection: ${JSON.stringify(failures)}`);
-  }
-  app.quit();
 }
 
 async function loadCore(): Promise<typeof AgentScopeCore> {
@@ -1135,16 +1056,17 @@ async function launchSessionCommand(
   if (!isSafeSessionId(sessionId)) throw new Error("Session id contains unsupported characters.");
   const workingDirectory = context?.cwd && await isAllowedLocalPath(context.cwd) && fs.existsSync(context.cwd) ? context.cwd : undefined;
   const snapshot = await buildSnapshot();
-  const resolution = resolveSessionLauncher(agent, action as SessionLaunchAction, sessionId, await launchResolverEnvironment(snapshot), context);
-  await assertLaunchResolutionSafe(resolution.filePath);
+  const resolution = await resolveLaunchCommand({
+    agent,
+    action: action as SessionLaunchAction,
+    sessionId,
+    snapshot,
+    context,
+    homeDir: appHome()
+  });
   if (isSmokeFakeLaunch()) {
     await recordSmokeLaunch(resolution, workingDirectory);
-    return {
-      ok: true,
-      ...resolution,
-      command: formatCommandForDisplay(resolution.filePath, resolution.args),
-      ...(workingDirectory ? { cwd: workingDirectory } : {})
-    };
+    return launchResult(resolution, workingDirectory);
   }
   const child = spawn(resolution.filePath, resolution.args, {
     cwd: workingDirectory,
@@ -1154,12 +1076,7 @@ async function launchSessionCommand(
   });
   await waitForLaunchAccepted(child);
   child.unref();
-  return {
-    ok: true,
-    ...resolution,
-    command: formatCommandForDisplay(resolution.filePath, resolution.args),
-    ...(workingDirectory ? { cwd: workingDirectory } : {})
-  };
+  return launchResult(resolution, workingDirectory);
 }
 
 async function recordSmokeLaunch(resolution: SessionLaunchResolution, cwd?: string): Promise<void> {
@@ -1172,206 +1089,12 @@ async function recordSmokeLaunch(resolution: SessionLaunchResolution, cwd?: stri
     sessionId: resolution.sessionId,
     filePath: resolution.filePath,
     args: resolution.args,
-    command: formatCommandForDisplay(resolution.filePath, resolution.args),
+    command: launchResult(resolution).command,
     source: resolution.source,
     ...(cwd ? { cwd } : {})
   };
   await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
   await fs.promises.appendFile(logPath, `${JSON.stringify(entry)}\n`, "utf8");
-}
-
-async function assertLaunchResolutionSafe(filePath: string): Promise<void> {
-  if (!fs.existsSync(filePath)) throw new Error("Resolved launcher does not exist.");
-  const ext = path.extname(filePath).toLowerCase();
-  if ([".ps1", ".bat"].includes(ext)) throw new Error("Refusing to launch script entrypoints.");
-  if (![".exe", ".cmd"].includes(ext)) throw new Error("Resolved launcher must be an executable or cmd shim.");
-  if (!(await isTrustedLauncherPath(filePath))) throw new Error("Resolved launcher is not in a trusted realpath-safe install root.");
-}
-
-async function waitForLaunchAccepted(child: ChildProcess): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const done = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.off("error", onError);
-      child.off("exit", onExit);
-      if (error) reject(error);
-      else resolve();
-    };
-    const onError = (error: Error) => done(error);
-    const onExit = (code: number | null) => {
-      if (code === null || code === 0) done();
-      else done(new Error(`Launcher exited before startup completed with code ${code}.`));
-    };
-    const timer = setTimeout(() => done(), 350);
-    child.once("error", onError);
-    child.once("exit", onExit);
-  });
-}
-
-async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
-  const existingFiles = new Set<string>();
-  const candidates: Record<string, LaunchFileCandidate[]> = {};
-  const appDataDir = npmAppDataRoot();
-  const addFile = async (candidate: string | undefined) => {
-    if (!candidate) return;
-    if (!fs.existsSync(candidate)) return;
-    if (!(await isTrustedLauncherPath(candidate).catch(() => false)) && !/\.js$/i.test(candidate)) return;
-    existingFiles.add(path.resolve(candidate).toLowerCase());
-  };
-  const addCandidates = async (command: string) => {
-    const trusted: LaunchFileCandidate[] = [];
-    for (const candidate of await whereCommand(command)) {
-      if (!(await isTrustedWhereLauncher(command, candidate.path))) continue;
-      trusted.push(await withLauncherPathMetadata(candidate));
-    }
-    candidates[command] = trusted;
-    for (const candidate of candidates[command] ?? []) await addFile(candidate.path);
-  };
-  const addDirectCandidate = async (command: string, candidatePath: string | undefined, source: string) => {
-    if (!candidatePath || !fs.existsSync(candidatePath)) return;
-    if (!(await isTrustedLauncherPath(candidatePath).catch(() => false))) return;
-    const list = candidates[command] ?? [];
-    list.push(await withLauncherPathMetadata({
-      path: candidatePath,
-      source,
-      evidence: [{ source: "launcher.wellKnown", detail: source, path: candidatePath }]
-    }));
-    candidates[command] = list;
-    await addFile(candidatePath);
-  };
-  for (const item of snapshot.processes) {
-    await addFile(item.executablePath);
-    for (const arg of item.commandLine ? splitWindowsCommandLine(item.commandLine) : []) {
-      if (/\.js$/i.test(arg)) existingFiles.add(path.resolve(arg).toLowerCase());
-    }
-  }
-  const codexJs = appDataDir ? path.join(appDataDir, "npm", "node_modules", "@openai", "codex", "bin", "codex.js") : undefined;
-  if (codexJs && appDataDir && fs.existsSync(codexJs) && (await isPathRealpathSafe(codexJs, [path.join(appDataDir, "npm")]).catch(() => false))) {
-    existingFiles.add(path.resolve(codexJs).toLowerCase());
-  }
-  await addFile(process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "nodejs", "node.exe") : undefined);
-  await addFile(process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "nodejs", "node.exe") : undefined);
-  await Promise.all(["node.exe", "codex.cmd", "codex.exe", "claude.cmd", "claude.exe"].map(addCandidates));
-  const npmBin = appDataDir ? path.join(appDataDir, "npm") : undefined;
-  await addDirectCandidate("codex.cmd", npmBin ? path.join(npmBin, "codex.cmd") : undefined, "appdata.npm.codexCmd");
-  await addDirectCandidate("codex.exe", npmBin ? path.join(npmBin, "codex.exe") : undefined, "appdata.npm.codexExe");
-  await addDirectCandidate("claude.cmd", npmBin ? path.join(npmBin, "claude.cmd") : undefined, "appdata.npm.claudeCmd");
-  await addDirectCandidate("claude.exe", npmBin ? path.join(npmBin, "claude.exe") : undefined, "appdata.npm.claudeExe");
-  return {
-    homeDir: appHome(),
-    ...(appDataDir ? { appDataDir } : {}),
-    ...(process.env.ProgramFiles ? { programFilesDir: process.env.ProgramFiles } : {}),
-    ...(process.env["ProgramFiles(x86)"] ? { programFilesX86Dir: process.env["ProgramFiles(x86)"] } : {}),
-    pathCandidates: candidates,
-    existingFiles,
-    processes: snapshot.processes
-  };
-}
-
-async function isTrustedWhereLauncher(command: string, candidatePath: string): Promise<boolean> {
-  const normalized = normalizeFsPath(candidatePath);
-  if (!normalized) return false;
-  const appDataDir = npmAppDataRoot();
-  const appDataNpm = appDataDir ? normalizeFsPath(path.join(appDataDir, "npm")) : undefined;
-  const programFilesNode = process.env.ProgramFiles ? normalizeFsPath(path.join(process.env.ProgramFiles, "nodejs")) : undefined;
-  const programFilesX86Node = process.env["ProgramFiles(x86)"] ? normalizeFsPath(path.join(process.env["ProgramFiles(x86)"], "nodejs")) : undefined;
-  if (command.toLowerCase() === "node.exe") {
-    return [programFilesNode, programFilesX86Node].some((root) => !!root && (normalized === root || normalized.startsWith(`${root}${path.sep}`))) &&
-      await isPathRealpathSafe(candidatePath, trustedLauncherRoots());
-  }
-  if (/^(?:codex|claude)\.(?:cmd|exe)$/i.test(command)) {
-    return !!appDataNpm && (normalized === appDataNpm || normalized.startsWith(`${appDataNpm}${path.sep}`)) &&
-      await isPathRealpathSafe(candidatePath, trustedLauncherRoots());
-  }
-  return false;
-}
-
-async function withLauncherPathMetadata(candidate: LaunchFileCandidate): Promise<LaunchFileCandidate> {
-  const realPath = await fs.promises.realpath(candidate.path).catch(() => undefined);
-  return {
-    ...candidate,
-    ...(realPath ? { realPath } : {}),
-    hasReparsePoint: await pathContainsReparsePoint(candidate.path)
-  };
-}
-
-async function isTrustedLauncherPath(candidatePath: string): Promise<boolean> {
-  const ext = path.extname(candidatePath).toLowerCase();
-  if (![".exe", ".cmd"].includes(ext)) return false;
-  return isPathRealpathSafe(candidatePath, trustedLauncherRoots());
-}
-
-function trustedLauncherRoots(): string[] {
-  const roots = [
-    process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "nodejs") : undefined,
-    process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "nodejs") : undefined,
-    npmAppDataRoot() ? path.join(npmAppDataRoot()!, "npm") : undefined
-  ].filter((root): root is string => !!root);
-  return roots;
-}
-
-async function isPathRealpathSafe(candidatePath: string, roots: string[]): Promise<boolean> {
-  if (!path.isAbsolute(candidatePath) || /^\\\\/.test(candidatePath) || /^\/\/+/.test(candidatePath)) return false;
-  if (path.normalize(candidatePath).split(/[\\/]+/).includes("..")) return false;
-  const normalizedCandidate = normalizeFsPath(candidatePath);
-  if (!normalizedCandidate) return false;
-  for (const root of roots) {
-    const normalizedRoot = normalizeFsPath(root);
-    if (!normalizedRoot || !(normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}${path.sep}`))) continue;
-    if (await pathContainsReparsePoint(candidatePath, root)) return false;
-    const rootReal = await fs.promises.realpath(root).catch(() => undefined);
-    const candidateReal = await fs.promises.realpath(candidatePath).catch(() => undefined);
-    if (!rootReal || !candidateReal) return false;
-    const normalizedRootReal = normalizeFsPath(rootReal);
-    const normalizedCandidateReal = normalizeFsPath(candidateReal);
-    if (!normalizedRootReal || !normalizedCandidateReal) return false;
-    if (normalizedCandidateReal === normalizedRootReal || normalizedCandidateReal.startsWith(`${normalizedRootReal}${path.sep}`)) return true;
-  }
-  return false;
-}
-
-async function pathContainsReparsePoint(candidatePath: string, rootPath?: string): Promise<boolean> {
-  const resolvedRoot = rootPath ? path.resolve(rootPath) : path.parse(path.resolve(candidatePath)).root;
-  const resolvedCandidate = path.resolve(candidatePath);
-  const relative = path.relative(resolvedRoot, resolvedCandidate);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) return true;
-  let current = resolvedRoot;
-  if (await isReparsePoint(current)) return true;
-  for (const segment of relative.split(path.sep).filter(Boolean)) {
-    current = path.join(current, segment);
-    if (await isReparsePoint(current)) return true;
-  }
-  return false;
-}
-
-async function isReparsePoint(candidatePath: string): Promise<boolean> {
-  const stat = await fs.promises.lstat(candidatePath).catch(() => undefined);
-  if (!stat) return true;
-  return stat.isSymbolicLink();
-}
-
-async function whereCommand(command: string): Promise<LaunchFileCandidate[]> {
-  try {
-    const { stdout } = await execFileAsync("where.exe", [command], {
-      windowsHide: true,
-      timeout: 5000,
-      maxBuffer: 256 * 1024
-    });
-    return stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && fs.existsSync(line))
-      .map((line) => ({
-        path: line,
-        source: `where.${command}`,
-        evidence: [{ source: "launcher.where", detail: `where.exe ${command}`, path: line }]
-      }));
-  } catch {
-    return [];
-  }
 }
 
 function isNativeSqliteDiagnostic(name: string): boolean {
