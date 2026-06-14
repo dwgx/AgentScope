@@ -49,14 +49,14 @@ export async function searchJsonl(filePath: string, query: string, limit: number
 }
 
 function safeEventType(value: Record<string, unknown>): string {
-  const direct = stringValue(value.type);
-  const payloadType = objectValue(value.payload) ? stringValue(objectValue(value.payload)?.type) : undefined;
-  const messageRole = objectValue(value.message) ? stringValue(objectValue(value.message)?.role) : undefined;
+  const direct = safeStringValue(value.type);
+  const payloadType = objectValue(value.payload) ? safeStringValue(objectValue(value.payload)?.type) : undefined;
+  const messageRole = objectValue(value.message) ? safeStringValue(objectValue(value.message)?.role) : undefined;
   return [direct, payloadType, messageRole].filter(Boolean).join(":") || "jsonl";
 }
 
 function safeTimestamp(value: Record<string, unknown>): string | undefined {
-  return stringValue(value.timestamp) ?? stringValue(objectValue(value.payload)?.timestamp);
+  return safeStringValue(value.timestamp, { maxLength: 80 }) ?? safeStringValue(objectValue(value.payload)?.timestamp, { maxLength: 80 });
 }
 
 function findMatchingFields(value: Record<string, unknown>, needle: string): string[] {
@@ -65,7 +65,7 @@ function findMatchingFields(value: Record<string, unknown>, needle: string): str
     if (depth > 4 || matches.size >= 16) return;
     if (isDeniedJsonlField(prefix)) return;
     if (typeof item === "string") {
-      if (isAllowedJsonlField(prefix) && item.toLowerCase().includes(needle)) matches.add(prefix);
+      if (isAllowedJsonlField(prefix) && isSafeJsonlStringValue(item) && item.toLowerCase().includes(needle)) matches.add(prefix);
       return;
     }
     if (typeof item === "number" || typeof item === "boolean") {
@@ -117,10 +117,29 @@ function isDeniedJsonlField(prefix: string): boolean {
   return /(?:^|\.)(reasoning|thinking|internal|hidden|content|text|result|output|delta|message\.content|tool_result)(?:\.|$)/i.test(prefix);
 }
 
-function objectValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+function isSafeJsonlStringValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > 512) return false;
+  if (trimmed.split(/\r?\n/).length > 3) return false;
+  return !looksSensitive(trimmed);
 }
 
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value ? value : undefined;
+function safeStringValue(value: unknown, options: { maxLength?: number } = {}): string | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  const maxLength = options.maxLength ?? 120;
+  if (value.length > maxLength) return undefined;
+  if (looksSensitive(value)) return undefined;
+  return value;
+}
+
+function looksSensitive(value: string): boolean {
+  if (/(?:^|[^a-z0-9])(?:api[-_ ]?key|authorization|bearer|credential|credentials|password|refresh[-_ ]?token|access[-_ ]?token|id[-_ ]?token|secret|token)(?:$|[^a-z0-9])/i.test(value)) return true;
+  if (/\b(?:sk-[A-Za-z0-9_-]{16,}|sk-proj[_-][A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16})\b/.test(value)) return true;
+  if (/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\b/.test(value)) return true;
+  return false;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }

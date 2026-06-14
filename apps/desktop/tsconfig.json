@@ -20,5 +20,5 @@
     { "path": "../../packages/core" }
   ],
   "include": ["src"],
-  "exclude": ["vite.renderer.config.ts"]
+  "exclude": ["vite.renderer.config.ts", "src/**/*.test.ts"]
 }

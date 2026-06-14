@@ -112,6 +112,75 @@ describe("session operations", () => {
     ).rejects.toThrow(/child sessions/);
   });
 
+  it("deletes child sessions first when includeChildren is explicit", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-child-include-"));
+    const parentId = "88888888-1111-4888-8888-888888888888";
+    const childId = "99999999-1111-4999-8999-999999999999";
+    const parentRollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${parentId}.jsonl`);
+    const childRollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${childId}.jsonl`);
+    fs.mkdirSync(path.dirname(parentRollout), { recursive: true });
+    fs.writeFileSync(parentRollout, JSON.stringify({ type: "session_meta", payload: { id: parentId, cwd: String.raw`D:\Parent` } }) + "\n");
+    fs.writeFileSync(childRollout, JSON.stringify({ type: "session_meta", payload: { id: childId, cwd: String.raw`D:\Child` } }) + "\n");
+    createCodexBundleFixture(home, parentId, parentRollout);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"));
+    state.prepare("INSERT INTO threads (id, rollout_path, cwd, title) VALUES (?, ?, ?, ?)").run(childId, childRollout, String.raw`D:\Child`, "child");
+    state.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id) VALUES (?, ?)").run(parentId, childId);
+    state.close();
+
+    const result = await deleteSession(parentId, "codex", {
+      home,
+      outputRoot,
+      includeProcesses: false,
+      childMode: "includeChildren",
+      now: new Date("2026-06-07T07:00:00Z")
+    });
+
+    expect(result.childMode).toBe("includeChildren");
+    expect(result.childResults?.map((child) => child.sessionId)).toContain(childId);
+    expect(fs.existsSync(parentRollout)).toBe(false);
+    expect(fs.existsSync(childRollout)).toBe(false);
+    const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
+    expect(journal.steps?.some((step) => step.phase === "child_delete" && step.childSessionId === childId)).toBe(true);
+  });
+
+  it("detaches reversible Codex child edges before deleting only the parent", async () => {
+    const home = tempHome();
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-child-detach-"));
+    const parentId = "88888888-2222-4888-8888-888888888888";
+    const childId = "99999999-2222-4999-8999-999999999999";
+    const parentRollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${parentId}.jsonl`);
+    const childRollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${childId}.jsonl`);
+    fs.mkdirSync(path.dirname(parentRollout), { recursive: true });
+    fs.writeFileSync(parentRollout, JSON.stringify({ type: "session_meta", payload: { id: parentId, cwd: String.raw`D:\Parent` } }) + "\n");
+    fs.writeFileSync(childRollout, JSON.stringify({ type: "session_meta", payload: { id: childId, cwd: String.raw`D:\Child` } }) + "\n");
+    createCodexBundleFixture(home, parentId, parentRollout);
+    const state = new Database(path.join(home, ".codex", "state_5.sqlite"));
+    state.prepare("INSERT INTO threads (id, rollout_path, cwd, title) VALUES (?, ?, ?, ?)").run(childId, childRollout, String.raw`D:\Child`, "child");
+    state.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id) VALUES (?, ?)").run(parentId, childId);
+    state.close();
+
+    const result = await deleteSession(parentId, "codex", {
+      home,
+      outputRoot,
+      includeProcesses: false,
+      childMode: "detach",
+      now: new Date("2026-06-07T07:10:00Z")
+    });
+
+    expect(result.childMode).toBe("detach");
+    expect(result.detachedRelations?.[0]?.childSessionId).toBe(childId);
+    expect(fs.existsSync(parentRollout)).toBe(false);
+    expect(fs.existsSync(childRollout)).toBe(true);
+    const db = new Database(path.join(home, ".codex", "state_5.sqlite"), { readonly: true });
+    expect(Number((db.prepare("SELECT COUNT(*) count FROM threads WHERE id = ?").get(childId) as { count: number }).count)).toBe(1);
+    expect(Number((db.prepare("SELECT COUNT(*) count FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?").get(parentId, childId) as { count: number }).count)).toBe(0);
+    db.close();
+    const journal = JSON.parse(fs.readFileSync(result.journalPath, "utf8")) as { steps?: Array<Record<string, unknown>> };
+    expect(journal.steps?.some((step) => step.phase === "relation" && step.action === "detach_child_relation" && step.status === "succeeded")).toBe(true);
+    expect(JSON.stringify(journal)).toContain("rollbackRows");
+  });
+
   it("copies a Claude backup manifest and session files", async () => {
     const home = tempHome();
     const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-backup-"));
@@ -427,7 +496,8 @@ describe("session operations", () => {
     expect(restoreJournal.kind).toBe("AgentScope Session Restore Journal");
     expect(restoreJournal.status).toBe("succeeded");
     const steps = restoreJournal.steps as Array<Record<string, unknown>>;
-    expect(steps.some((step) => step.phase === "file" && step.action === "copy" && step.status === "succeeded")).toBe(true);
+    expect(steps.some((step) => step.phase === "file" && step.action === "copy_file_succeeded" && step.status === "succeeded")).toBe(true);
+    expect(steps.some((step) => step.phase === "file" && step.action === "verify_sha256" && step.status === "succeeded")).toBe(true);
     expect(steps.some((step) => step.phase === "operation" && step.action === "restoreQuarantinedSession" && step.status === "succeeded")).toBe(true);
   });
 
@@ -559,6 +629,18 @@ describe("session operations", () => {
     await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/checksum mismatch.*backupDir=/);
   });
 
+  it("rejects imports when copied file checksums are missing", async () => {
+    const home = tempHome();
+    const backupDir = makeBackupFixture(home, "cccccccc-cccc-4ccc-8ccc-cccccccccccd");
+    const manifestPath = path.join(backupDir, "manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    const copiedFiles = manifest.copiedFiles as Array<Record<string, unknown>>;
+    delete copiedFiles[0]!.sha256;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+    await expect(importSessionBackup(backupDir, { home })).rejects.toThrow(/checksum is missing.*backupDir=/);
+  });
+
   it("rejects non-AgentScope backup manifests", async () => {
     const home = tempHome();
     const backupDir = makeBackupFixture(home, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
@@ -679,8 +761,8 @@ describe("session operations", () => {
     const restoreJournal = JSON.parse(fs.readFileSync(path.join(deleted.quarantineDir, "restore-journal.json"), "utf8")) as { steps?: Array<Record<string, unknown>>; status?: string };
     expect(restoreJournal.status).toBe("failed");
     expect(restoreJournal.steps?.some((step) => step.phase === "sqlite_import" && step.status === "failed")).toBe(true);
-    expect(restoreJournal.steps?.some((step) => step.phase === "rollback" && step.action === "sqlite_delete_inserted_rows" && step.status === "succeeded")).toBe(true);
-    expect(restoreJournal.steps?.some((step) => step.phase === "rollback" && step.action === "removeImportedFiles" && step.status === "succeeded")).toBe(true);
+    expect(restoreJournal.steps?.some((step) => step.phase === "rollback" && step.action === "rollback_sqlite_delete_rows" && step.status === "succeeded")).toBe(true);
+    expect(restoreJournal.steps?.some((step) => step.phase === "rollback" && step.action === "rollback_remove_imported_files" && step.status === "succeeded")).toBe(true);
   });
 
   it("rejects Codex SQLite row bundles that target unsupported databases or tables", async () => {

@@ -188,6 +188,8 @@ export type SessionOperationMode = "dry-run" | "execute";
 
 export type SessionOperationRisk = "safe" | "caution" | "blocked";
 
+export type SessionChildDeleteMode = "block" | "includeChildren" | "detach";
+
 export interface SessionOperationFile {
   role: string;
   path: string;
@@ -213,6 +215,8 @@ export interface SessionOperationPlan {
   operation: SessionOperation;
   mode: SessionOperationMode;
   risk: SessionOperationRisk;
+  childMode?: SessionChildDeleteMode | undefined;
+  affectedChildSessionIds?: string[] | undefined;
   agent: AgentKind;
   sessionId: string;
   createdAt: string;
@@ -248,9 +252,31 @@ export interface SessionDeleteResult {
   backup: SessionBackupResult;
   quarantineDir: string;
   journalPath: string;
+  childMode?: SessionChildDeleteMode | undefined;
+  childResults?: SessionChildDeleteResult[] | undefined;
+  detachedRelations?: SessionDetachedRelation[] | undefined;
   movedFiles: SessionOperationFile[];
   patchedFiles: SessionOperationFile[];
   databaseChanges: SessionOperationDatabaseChange[];
+}
+
+export interface SessionChildDeleteResult {
+  agent: AgentKind;
+  sessionId: string;
+  backupDir: string;
+  quarantineDir: string;
+  journalPath: string;
+}
+
+export interface SessionDetachedRelation {
+  agent: AgentKind;
+  parentSessionId: string;
+  childSessionId: string;
+  source: string;
+  database?: string | undefined;
+  table?: string | undefined;
+  removedRows: number;
+  evidence: Evidence[];
 }
 
 export interface SessionImportResult {

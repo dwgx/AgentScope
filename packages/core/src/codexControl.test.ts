@@ -554,4 +554,83 @@ describe("Codex control surfaces", () => {
       )
     ).rejects.toThrow(/changed on disk/);
   });
+
+  it("plans every allowlisted structured mutation fixture and blocks invalid values without leaking secrets", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(configPath, 'model = "gpt-5.5"\n');
+    const snapshot = await getCodexControlCenterSnapshot(home);
+    const validFixtures = [
+      ["config.model", "model", "gpt-5.4-mini"],
+      ["config.review_model", "review_model", "gpt-5.4-mini"],
+      ["config.model_reasoning_effort", "model_reasoning_effort", "medium"],
+      ["config.plan_mode_reasoning_effort", "plan_mode_reasoning_effort", "none"],
+      ["config.approval_policy", "approval_policy", "on-request"],
+      ["config.approvals_reviewer", "approvals_reviewer", "user"],
+      ["config.sandbox_mode", "sandbox_mode", "workspace-write"],
+      ["config.web_search", "web_search", "disabled"],
+      ["config.hide_agent_reasoning", "hide_agent_reasoning", true],
+      ["config.show_raw_agent_reasoning", "show_raw_agent_reasoning", false],
+      ["config.service_tier", "service_tier", "default"],
+      ["config.windows.sandbox", "windows.sandbox", "unelevated"],
+      ["config.features.multi_agent", "features.multi_agent", true],
+      ["config.memories.generate_memories", "memories.generate_memories", false],
+      ["config.memories.use_memories", "memories.use_memories", true]
+    ] as const;
+
+    for (const [itemId, keyPath, value] of validFixtures) {
+      const plan = await planCodexControlMutation(
+        {
+          expectedSha256: snapshot.configSha256,
+          confirmedHighRisk: true,
+          mutations: [{ itemId, keyPath, value }]
+        },
+        home
+      );
+      expect(plan.blockers, `${itemId} should plan cleanly`).toEqual([]);
+      expect(plan.changedKeys).toEqual([keyPath]);
+    }
+
+    const fakeToken = `sk-${"agentscope_control_fixture_token_1234567890"}`;
+    const invalidFixtures = [
+      { itemId: "config.model", keyPath: "model", value: fakeToken, message: /sensitive/ },
+      { itemId: "config.model", keyPath: "model", value: "../escape", message: /must be one of|model-style/ },
+      { itemId: "config.sandbox_mode", keyPath: "sandbox_mode", value: "unsafe", message: /must be one of/ },
+      { itemId: "config.hide_agent_reasoning", keyPath: "hide_agent_reasoning", value: "true", message: /boolean/ },
+      { itemId: "config.web_search", keyPath: "web_search", value: "live".repeat(80), message: /too long/ },
+      { itemId: "config.auth", keyPath: "auth.json", value: "not allowed", message: /Unsupported/ },
+      { itemId: "../config.model", keyPath: "../model", value: "gpt-5.5", message: /Unsupported/ }
+    ] as const;
+
+    for (const fixture of invalidFixtures) {
+      const plan = await planCodexControlMutation(
+        {
+          expectedSha256: snapshot.configSha256,
+          mutations: [{ itemId: fixture.itemId, keyPath: fixture.keyPath, value: fixture.value }]
+        },
+        home
+      );
+      expect(plan.blockers.join("\n"), `${fixture.itemId}/${fixture.keyPath}`).toMatch(fixture.message);
+      expect(JSON.stringify(plan)).not.toContain(fakeToken);
+    }
+  });
+
+  it("blocks structured mutation execution when the plan hash or TOML shape is stale", async () => {
+    const home = await tempHome();
+    const configPath = path.join(home, ".codex", "config.toml");
+    await writeFile(configPath, ['model = "gpt-5.5"', "", "[windows]", 'sandbox = "unelevated"'].join("\n"));
+    const snapshot = await getCodexControlCenterSnapshot(home);
+    await writeFile(configPath, ['model = "gpt-5.5"', "[windows", 'sandbox = "unelevated"'].join("\n"));
+
+    await expect(
+      executeCodexControlMutation(
+        {
+          expectedSha256: snapshot.configSha256,
+          confirmedHighRisk: true,
+          mutations: [{ itemId: "config.sandbox_mode", keyPath: "sandbox_mode", value: "danger-full-access" }]
+        },
+        home
+      )
+    ).rejects.toThrow(/changed on disk|validation failed/);
+  });
 });

@@ -45,6 +45,39 @@ describe("search privacy", () => {
     expect(JSON.stringify(match)).not.toContain("do not show AgentScope body");
   });
 
+  it("does not match token-shaped or oversized JSONL metadata values", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-search-metadata-"));
+    const dir = path.join(home, ".codex", "sessions", "2026", "06", "07");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "rollout-2026-06-07T04-20-59-thread-1.jsonl"),
+      [
+        JSON.stringify({
+          type: "session_meta",
+          payload: {
+            type: "metadata",
+            cwd: String.raw`D:\AgentScopeProject`,
+            title: `sk-proj_${"agentscope_search_token_1234567890"}`,
+            model: "gpt-5"
+          }
+        }),
+        JSON.stringify({
+          type: "session_meta",
+          payload: {
+            type: "metadata",
+            title: `${"AgentScopeOversized ".repeat(40)}tail`
+          }
+        })
+      ].join("\n") + "\n"
+    );
+
+    expect(await searchAll("agentscope_search_token", home, 5)).toHaveLength(0);
+    expect(await searchAll("AgentScopeOversized", home, 5)).toHaveLength(0);
+    const [match] = await searchAll("AgentScopeProject", home, 5);
+    expect(match?.matchedFields).toEqual(["payload.cwd"]);
+    expect(JSON.stringify(match)).not.toContain("agentscope_search_token");
+  });
+
   it("does not search SQLite preview unless explicitly enabled", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-search-sqlite-"));
     const codexRoot = path.join(home, ".codex");

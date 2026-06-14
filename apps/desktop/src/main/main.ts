@@ -7,6 +7,7 @@ import { execFile, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, session as electronSession, shell } from "electron";
+import type { IpcMainEvent, IpcMainInvokeEvent } from "electron";
 import {
   formatCommandForDisplay,
   isSafeSessionId,
@@ -20,6 +21,7 @@ import {
 } from "@agentscope/shared";
 import type { AgentProcess, CodexControlMutationRequest, CodexModeConfigPatch, Evidence, ScopeSnapshot } from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
+import { assertTrustedIpcSender, isSafeOperationPath } from "./security.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === "development" || process.env.VITE_DEV_SERVER_URL;
@@ -34,6 +36,7 @@ let lastCoreError: string | undefined;
 let controlMode: "safe" | "readOnly" = "safe";
 const openedTextArtifacts = new Set<string>();
 const highRiskCodexControlConfirmations = new Map<string, { signature: string; expiresAt: number }>();
+const registeredIpcChannels = new Set<string>();
 
 if (smokeUserData) {
   app.setPath("userData", path.resolve(smokeUserData));
@@ -138,16 +141,32 @@ function queueSmokeScreenshot(): void {
   }, delayMs);
 }
 
-ipcMain.handle("snapshot:get", async () => timedIpc("snapshot:get", buildSnapshot));
-ipcMain.handle("doctor:get", async () => timedIpc("doctor:get", runDoctor));
-ipcMain.handle("search:run", async (_event, query: string, limit = 50, options?: { includeSqlitePreview?: boolean }) =>
-  searchAll(query, undefined, limit, {
-    includeSqlitePreview: options?.includeSqlitePreview === true
+function handleTrustedIpc<Result>(
+  channel: string,
+  listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => Result | Promise<Result>
+): void {
+  registeredIpcChannels.add(channel);
+  ipcMain.handle(channel, async (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event, {
+      mainWindow,
+      isDev: !!isDev,
+      devServerUrl: process.env.VITE_DEV_SERVER_URL,
+      rendererIndexPath: rendererIndexPath()
+    });
+    return listener(event, ...args);
+  });
+}
+
+handleTrustedIpc("snapshot:get", async () => timedIpc("snapshot:get", buildSnapshot));
+handleTrustedIpc("doctor:get", async () => timedIpc("doctor:get", runDoctor));
+handleTrustedIpc("search:run", async (_event, query, limit = 50, options) =>
+  searchAll(asString(query, "Search query"), undefined, asOptionalLimit(limit), {
+    includeSqlitePreview: objectValue(options)?.includeSqlitePreview === true
   })
 );
-ipcMain.handle("snapshot:export", async () => exportSnapshot());
-ipcMain.handle("app:info", async () => appInfo());
-ipcMain.handle("app:setControlMode", async (_event, mode: string) => {
+handleTrustedIpc("snapshot:export", async () => exportSnapshot());
+handleTrustedIpc("app:info", async () => appInfo());
+handleTrustedIpc("app:setControlMode", async (_event, mode) => {
   if (mode !== "safe" && mode !== "readOnly") throw new Error("Unsupported AgentScope control mode.");
   if (mode === "safe" && controlMode === "readOnly" && !(await confirmControlModeSafe())) {
     return { controlMode };
@@ -155,20 +174,20 @@ ipcMain.handle("app:setControlMode", async (_event, mode: string) => {
   controlMode = mode;
   return { controlMode };
 });
-ipcMain.handle("fonts:list", async () => listInstalledFonts());
-ipcMain.handle("codexControl:list", async () => {
+handleTrustedIpc("fonts:list", async () => listInstalledFonts());
+handleTrustedIpc("codexControl:list", async () => {
   const core = await loadCore();
   return core.listCodexControlSurfaces();
 });
-ipcMain.handle("codexControl:center", async () => {
+handleTrustedIpc("codexControl:center", async () => {
   const core = await loadCore();
   return core.getCodexControlCenterSnapshot();
 });
-ipcMain.handle("codexControl:read", async (_event, id: string) => {
+handleTrustedIpc("codexControl:read", async (_event, id) => {
   const core = await loadCore();
-  return core.readCodexControlDocument(id);
+  return core.readCodexControlDocument(asString(id, "Codex control document id"));
 });
-ipcMain.handle("codexControl:revealSurface", async (_event, id: string) => {
+handleTrustedIpc("codexControl:revealSurface", async (_event, id) => {
   const core = await loadCore();
   const result = await core.revealCodexControlSurface(validateCodexControlSurfaceId(id));
   if (!result.revealAllowed) return result;
@@ -176,21 +195,25 @@ ipcMain.handle("codexControl:revealSurface", async (_event, id: string) => {
   if (!isSmokeNoShell()) shell.showItemInFolder(result.path);
   return result;
 });
-ipcMain.handle("codexControl:save", async (_event, id: string, content: string, expectedSha256: string) => {
+handleTrustedIpc("codexControl:save", async (_event, id, content, expectedSha256) => {
   assertWriteControlAllowed("Codex control save");
   const core = await loadCore();
-  return core.saveCodexControlDocument(id, content, expectedSha256);
+  return core.saveCodexControlDocument(
+    asString(id, "Codex control document id"),
+    asString(content, "Codex control document content"),
+    asSha256(expectedSha256)
+  );
 });
-ipcMain.handle("codexControl:readModes", async () => {
+handleTrustedIpc("codexControl:readModes", async () => {
   const core = await loadCore();
   return core.readCodexModeConfig();
 });
-ipcMain.handle("codexControl:saveModes", async (_event, patch: CodexModeConfigPatch, expectedSha256: string) => {
+handleTrustedIpc("codexControl:saveModes", async (_event, patch, expectedSha256) => {
   assertWriteControlAllowed("Codex mode save");
   const core = await loadCore();
-  return core.saveCodexModeConfig(patch, expectedSha256);
+  return core.saveCodexModeConfig(patch as CodexModeConfigPatch, asSha256(expectedSha256));
 });
-ipcMain.handle("codexControl:planMutation", async (_event, request: CodexControlMutationRequest) => {
+handleTrustedIpc("codexControl:planMutation", async (_event, request) => {
   const core = await loadCore();
   const validated = validateCodexControlMutationRequest(request);
   const unconfirmedPlan = await core.planCodexControlMutation({
@@ -216,7 +239,7 @@ ipcMain.handle("codexControl:planMutation", async (_event, request: CodexControl
   }
   return unconfirmedPlan;
 });
-ipcMain.handle("codexControl:executeMutation", async (_event, request: CodexControlMutationRequest) => {
+handleTrustedIpc("codexControl:executeMutation", async (_event, request) => {
   assertWriteControlAllowed("Codex control mutation");
   const core = await loadCore();
   const validated = validateCodexControlMutationRequest(request);
@@ -227,123 +250,147 @@ ipcMain.handle("codexControl:executeMutation", async (_event, request: CodexCont
   }
   return core.executeCodexControlMutation(validated);
 });
-ipcMain.handle("app:reload", async () => {
+handleTrustedIpc("app:reload", async () => {
   mainWindow?.reload();
   return true;
 });
-ipcMain.handle("app:quit", async () => {
+handleTrustedIpc("app:quit", async () => {
   app.quit();
   return true;
 });
-ipcMain.handle("app:clearCache", async () => {
+handleTrustedIpc("app:clearCache", async () => {
   return clearAppCache();
 });
-ipcMain.handle("shell:openExternal", async (_event, url: string) => {
-  if (!isAllowedExternalUrl(url)) return false;
+handleTrustedIpc("shell:openExternal", async (_event, url) => {
+  const safeUrl = asString(url, "External URL");
+  if (!isAllowedExternalUrl(safeUrl)) return false;
   if (isSmokeNoShell()) return true;
-  await shell.openExternal(url);
+  await shell.openExternal(safeUrl);
   return true;
 });
-ipcMain.handle("shell:openPath", async (_event, targetPath: string) => {
-  if (!(await isAllowedLocalPath(targetPath))) return "Path is not in AgentScope's local trace allowlist";
-  if (!fs.existsSync(targetPath)) return "Path does not exist";
-  if (!isAllowedOpenPath(targetPath)) return "Path can only be revealed, not opened by AgentScope";
+handleTrustedIpc("shell:openPath", async (_event, targetPath) => {
+  const safePath = asString(targetPath, "Path");
+  if (!(await isAllowedLocalPath(safePath))) return "Path is not in AgentScope's local trace allowlist";
+  if (!fs.existsSync(safePath)) return "Path does not exist";
+  if (!isAllowedOpenPath(safePath)) return "Path can only be revealed, not opened by AgentScope";
   if (isSmokeNoShell()) return "";
-  return shell.openPath(targetPath);
+  return shell.openPath(safePath);
 });
-ipcMain.handle("shell:revealPath", async (_event, targetPath: string) => {
-  if (!(await isAllowedLocalPath(targetPath))) return "Path is not in AgentScope's local trace allowlist";
-  if (!fs.existsSync(targetPath)) return "Path does not exist";
+handleTrustedIpc("shell:revealPath", async (_event, targetPath) => {
+  const safePath = asString(targetPath, "Path");
+  if (!(await isAllowedLocalPath(safePath))) return "Path is not in AgentScope's local trace allowlist";
+  if (!fs.existsSync(safePath)) return "Path does not exist";
   if (isSmokeNoShell()) return "";
-  shell.showItemInFolder(targetPath);
+  shell.showItemInFolder(safePath);
   return "";
 });
-ipcMain.handle("inspect:pid", async (_event, pid: number) => {
+handleTrustedIpc("inspect:pid", async (_event, pid) => {
+  const safePid = asPid(pid);
   const snapshot = await buildSnapshot();
   return {
-    process: await findProcess(snapshot, pid),
-    sessions: await sessionsForPid(snapshot, pid)
+    process: await findProcess(snapshot, safePid),
+    sessions: await sessionsForPid(snapshot, safePid)
   };
 });
-ipcMain.handle("inspect:session", async (_event, sessionId: string) => {
+handleTrustedIpc("inspect:session", async (_event, sessionId) => {
+  const safeSessionId = asString(sessionId, "Session id");
   const snapshot = await buildSnapshot();
-  const session = await findSession(snapshot, sessionId);
+  const session = await findSession(snapshot, safeSessionId);
   return {
     session,
     process: session?.pid === undefined ? undefined : await findProcess(snapshot, session.pid),
-    relations: snapshot.relations.filter((relation) => relation.sourceId === sessionId || relation.targetId === sessionId),
-    indexRecords: snapshot.indexRecords.filter((record) => record.sessionId.toLowerCase() === sessionId.toLowerCase())
+    relations: snapshot.relations.filter((relation) => relation.sourceId === safeSessionId || relation.targetId === safeSessionId),
+    indexRecords: snapshot.indexRecords.filter((record) => record.sessionId.toLowerCase() === safeSessionId.toLowerCase())
   };
 });
-ipcMain.handle("diagnostic:repair", async (_event, name: string) => {
+handleTrustedIpc("diagnostic:repair", async (_event, name) => {
+  const safeName = asString(name, "Diagnostic name");
   assertWriteControlAllowed("Diagnostic repair");
-  if (isNativeSqliteDiagnostic(name) && !(await confirmNativeSqliteRepair(name))) {
+  if (isNativeSqliteDiagnostic(safeName) && !(await confirmNativeSqliteRepair(safeName))) {
     return {
       ok: false,
-      name,
+      name: safeName,
       message: "Diagnostic repair was canceled before running npm run package.",
       directories: [],
       files: []
     };
   }
-  return repairDiagnostic(name);
+  return repairDiagnostic(safeName);
 });
-ipcMain.handle("session:backup", async (_event, agent: string, sessionId: string) => {
+handleTrustedIpc("session:backup", async (_event, agent, sessionId) => {
   assertWriteControlAllowed("Session backup");
   const core = await loadCore();
-  return core.backupSession(sessionId, asAgent(agent));
+  return core.backupSession(asString(sessionId, "Session id"), asAgent(asString(agent, "Agent")));
 });
-ipcMain.handle("session:delete", async (_event, agent: string, sessionId: string, createdAt?: string) => {
+handleTrustedIpc("session:delete", async (_event, agent, sessionId, createdAt, options) => {
   assertWriteControlAllowed("Session delete");
   const core = await loadCore();
-  return core.deleteSession(sessionId, asAgent(agent), createdAt ? { now: new Date(createdAt) } : undefined);
+  const safeCreatedAt = asOptionalString(createdAt, "Created-at timestamp");
+  const deleteOptions = objectValue(options);
+  const childMode = deleteOptions?.childMode;
+  return core.deleteSession(
+    asString(sessionId, "Session id"),
+    asAgent(asString(agent, "Agent")),
+    {
+      ...(safeCreatedAt ? { now: new Date(safeCreatedAt) } : {}),
+      ...(childMode === "includeChildren" || childMode === "detach" || childMode === "block" ? { childMode } : {})
+    }
+  );
 });
-ipcMain.handle("session:launch", async (_event, agent: string, sessionId: string, action: string, context?: SessionLaunchContext) => {
+handleTrustedIpc("session:launch", async (_event, agent, sessionId, action, context) => {
   assertWriteControlAllowed("Session launch");
-  return launchSessionCommand(agent, sessionId, action, context);
+  return launchSessionCommand(
+    asString(agent, "Agent"),
+    asString(sessionId, "Session id"),
+    asString(action, "Session launch action"),
+    context as SessionLaunchContext | undefined
+  );
 });
-ipcMain.handle("session:import", async (_event, backupDir: string) => {
+handleTrustedIpc("session:import", async (_event, backupDir) => {
   assertWriteControlAllowed("Session import");
-  if (await isAllowedAgentScopeQuarantinePath(backupDir)) {
+  const safeBackupDir = asString(backupDir, "Backup directory");
+  if (await isAllowedAgentScopeQuarantinePath(safeBackupDir)) {
     const core = await loadCore();
-    return core.restoreQuarantinedSession(backupDir);
+    return core.restoreQuarantinedSession(safeBackupDir);
   }
-  if (!(await isAllowedAgentScopeBackupPath(backupDir))) {
+  if (!(await isAllowedAgentScopeBackupPath(safeBackupDir))) {
     throw new Error("Import is limited to AgentScope backup directories.");
   }
   const core = await loadCore();
-  return core.importSessionBackup(backupDir);
+  return core.importSessionBackup(safeBackupDir);
 });
-ipcMain.handle("session:listQuarantine", async () => {
+handleTrustedIpc("session:listQuarantine", async () => {
   const core = await loadCore();
   return timedIpc("session:listQuarantine", () => core.listQuarantinedSessions());
 });
-ipcMain.handle("session:restore", async (_event, quarantineDirOrJournalPath: string) => {
+handleTrustedIpc("session:restore", async (_event, quarantineDirOrJournalPath) => {
   assertWriteControlAllowed("Session restore");
-  if (!(await isAllowedAgentScopeQuarantinePath(quarantineDirOrJournalPath))) {
+  const safeQuarantinePath = asString(quarantineDirOrJournalPath, "Quarantine path");
+  if (!(await isAllowedAgentScopeQuarantinePath(safeQuarantinePath))) {
     throw new Error("Restore is limited to AgentScope quarantine directories.");
   }
   const core = await loadCore();
-  return core.restoreQuarantinedSession(quarantineDirOrJournalPath);
+  return core.restoreQuarantinedSession(safeQuarantinePath);
 });
-ipcMain.handle("session:deletePlan", async (_event, agent: string, sessionId: string) => {
+handleTrustedIpc("session:deletePlan", async (_event, agent, sessionId) => {
   assertWriteControlAllowed("Session delete plan");
   const core = await loadCore();
-  return core.writeSessionDeletePlan(sessionId, asAgent(agent));
+  return core.writeSessionDeletePlan(asString(sessionId, "Session id"), asAgent(asString(agent, "Agent")));
 });
-ipcMain.handle("session:importPlan", async (_event, backupDir: string) => {
+handleTrustedIpc("session:importPlan", async (_event, backupDir) => {
   assertWriteControlAllowed("Session import plan");
-  if (await isAllowedAgentScopeQuarantinePath(backupDir)) {
+  const safeBackupDir = asString(backupDir, "Backup directory");
+  if (await isAllowedAgentScopeQuarantinePath(safeBackupDir)) {
     const core = await loadCore();
-    return core.planSessionRestore(backupDir);
+    return core.planSessionRestore(safeBackupDir);
   }
-  if (!(await isAllowedAgentScopeBackupPath(backupDir))) {
+  if (!(await isAllowedAgentScopeBackupPath(safeBackupDir))) {
     throw new Error("Import planning is limited to AgentScope backup directories.");
   }
   const core = await loadCore();
-  return core.planSessionImport(backupDir);
+  return core.planSessionImport(safeBackupDir);
 });
-ipcMain.handle("session:chooseImportPlan", async () => {
+handleTrustedIpc("session:chooseImportPlan", async () => {
   assertWriteControlAllowed("Session import plan");
   const backupRoot = path.join(agentScopeDataRoot(), "backups");
   await fs.promises.mkdir(backupRoot, { recursive: true });
@@ -364,7 +411,7 @@ ipcMain.handle("session:chooseImportPlan", async () => {
   const core = await loadCore();
   return core.planSessionImport(result.filePaths[0]);
 });
-ipcMain.handle("session:chooseImport", async () => {
+handleTrustedIpc("session:chooseImport", async () => {
   assertWriteControlAllowed("Session import");
   const agentScopeRoot = agentScopeDataRoot();
   const backupRoot = path.join(agentScopeRoot, "backups");
@@ -421,6 +468,12 @@ async function bootstrap(): Promise<void> {
   await createWindow().catch((error: unknown) => {
     log(`createWindow failed ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
   });
+  if (isSmoke && process.env.AGENTSCOPE_SMOKE_IPC_NEGATIVE === "1") {
+    await runIpcNegativeSmoke().catch((error: unknown) => {
+      log(`ipc negative smoke failed ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      app.exit(1);
+    });
+  }
 }
 
 function preloadPath(): string {
@@ -429,6 +482,81 @@ function preloadPath(): string {
 
 function rendererIndexPath(): string {
   return app.isPackaged ? path.join(app.getAppPath(), "dist", "renderer", "index.html") : path.join(__dirname, "..", "renderer", "index.html");
+}
+
+async function runIpcNegativeSmoke(): Promise<void> {
+  const outputPath = process.env.AGENTSCOPE_SMOKE_IPC_NEGATIVE_RESULT?.trim();
+  if (!outputPath) throw new Error("AGENTSCOPE_SMOKE_IPC_NEGATIVE_RESULT is required.");
+  const probeDir = path.join(app.getPath("userData"), "ipc-negative-smoke");
+  const preload = path.join(probeDir, "malicious-preload.cjs");
+  const html = path.join(probeDir, "malicious.html");
+  const channels = [
+    ["session:delete", ["codex", "11111111-1111-4111-8111-111111111111"]],
+    ["session:import", [path.join(appHome(), ".agentscope", "backups", "missing")]],
+    ["session:restore", [path.join(appHome(), ".agentscope", "quarantine", "missing")]],
+    ["codexControl:executeMutation", [{ expectedSha256: "0".repeat(64), mutations: [{ itemId: "config.model", keyPath: "model", value: "gpt-5.5" }] }]],
+    ["diagnostic:repair", ["native.better_sqlite3"]],
+    ["shell:openPath", [path.join(appHome(), ".codex", "auth.json")]]
+  ] as const;
+  const missing = channels.map(([channel]) => channel).filter((channel) => !registeredIpcChannels.has(channel));
+  if (missing.length) throw new Error(`IPC negative smoke channel is not registered: ${missing.join(", ")}`);
+  await fs.promises.mkdir(probeDir, { recursive: true });
+  await fs.promises.writeFile(
+    preload,
+    [
+      'const { ipcRenderer } = require("electron");',
+      `const channels = ${JSON.stringify(channels)};`,
+      "(async () => {",
+      "  const results = [];",
+      "  for (const [channel, args] of channels) {",
+      "    try {",
+      "      await ipcRenderer.invoke(channel, ...args);",
+      "      results.push({ channel, ok: true, message: 'unexpected success' });",
+      "    } catch (error) {",
+      "      results.push({ channel, ok: false, message: error && error.message ? String(error.message) : String(error) });",
+      "    }",
+      "  }",
+      "  ipcRenderer.send('agentscope:ipc-negative-result', results);",
+      "})();"
+    ].join("\n"),
+    "utf8"
+  );
+  await fs.promises.writeFile(html, "<!doctype html><title>AgentScope IPC negative smoke</title>\n", "utf8");
+  const result = await new Promise<Array<{ channel: string; ok: boolean; message: string }>>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("IPC negative smoke timed out."));
+    }, 15_000);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      ipcMain.removeListener("agentscope:ipc-negative-result", onResult);
+    };
+    const onResult = (_event: IpcMainEvent, results: Array<{ channel: string; ok: boolean; message: string }>) => {
+      cleanup();
+      resolve(results);
+    };
+    ipcMain.once("agentscope:ipc-negative-result", onResult);
+    const probe = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        preload,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false
+      }
+    });
+    probe.loadFile(html).catch((error: unknown) => {
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+  });
+  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.promises.writeFile(outputPath, `${JSON.stringify({ ok: true, results: result }, null, 2)}\n`, "utf8");
+  const failures = result.filter((item) => item.ok || !/IPC sender rejected/i.test(item.message));
+  if (failures.length) {
+    throw new Error(`IPC negative smoke expected sender rejection: ${JSON.stringify(failures)}`);
+  }
+  app.quit();
 }
 
 async function loadCore(): Promise<typeof AgentScopeCore> {
@@ -861,13 +989,10 @@ async function isAllowedAgentScopeQuarantinePath(targetPath: string): Promise<bo
 }
 
 async function isAllowedAgentScopeOperationPath(targetPath: string, child: "backups" | "quarantine"): Promise<boolean> {
-  const normalizedTarget = normalizeFsPath(targetPath);
-  if (!normalizedTarget) return false;
-  const operationRoots = [
-    normalizeFsPath(path.join(agentScopeDataRoot(), child)),
-    normalizeFsPath(path.join(app.getPath("userData"), child))
-  ].filter((item): item is string => !!item);
-  return operationRoots.some((root) => normalizedTarget === root || normalizedTarget.startsWith(`${root}${path.sep}`));
+  return isSafeOperationPath(targetPath, [
+    path.join(agentScopeDataRoot(), child),
+    path.join(app.getPath("userData"), child)
+  ]);
 }
 
 async function clearAppCache(): Promise<{ ok: true; directories: string[]; files: string[] }> {
@@ -1011,7 +1136,7 @@ async function launchSessionCommand(
   const workingDirectory = context?.cwd && await isAllowedLocalPath(context.cwd) && fs.existsSync(context.cwd) ? context.cwd : undefined;
   const snapshot = await buildSnapshot();
   const resolution = resolveSessionLauncher(agent, action as SessionLaunchAction, sessionId, await launchResolverEnvironment(snapshot), context);
-  assertLaunchResolutionSafe(resolution.filePath);
+  await assertLaunchResolutionSafe(resolution.filePath);
   if (isSmokeFakeLaunch()) {
     await recordSmokeLaunch(resolution, workingDirectory);
     return {
@@ -1055,11 +1180,12 @@ async function recordSmokeLaunch(resolution: SessionLaunchResolution, cwd?: stri
   await fs.promises.appendFile(logPath, `${JSON.stringify(entry)}\n`, "utf8");
 }
 
-function assertLaunchResolutionSafe(filePath: string): void {
+async function assertLaunchResolutionSafe(filePath: string): Promise<void> {
   if (!fs.existsSync(filePath)) throw new Error("Resolved launcher does not exist.");
   const ext = path.extname(filePath).toLowerCase();
   if ([".ps1", ".bat"].includes(ext)) throw new Error("Refusing to launch script entrypoints.");
   if (![".exe", ".cmd"].includes(ext)) throw new Error("Resolved launcher must be an executable or cmd shim.");
+  if (!(await isTrustedLauncherPath(filePath))) throw new Error("Resolved launcher is not in a trusted realpath-safe install root.");
 }
 
 async function waitForLaunchAccepted(child: ChildProcess): Promise<void> {
@@ -1089,41 +1215,51 @@ async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
   const existingFiles = new Set<string>();
   const candidates: Record<string, LaunchFileCandidate[]> = {};
   const appDataDir = npmAppDataRoot();
-  const addFile = (candidate: string | undefined) => {
+  const addFile = async (candidate: string | undefined) => {
     if (!candidate) return;
     if (!fs.existsSync(candidate)) return;
+    if (!(await isTrustedLauncherPath(candidate).catch(() => false)) && !/\.js$/i.test(candidate)) return;
     existingFiles.add(path.resolve(candidate).toLowerCase());
   };
   const addCandidates = async (command: string) => {
-    candidates[command] = (await whereCommand(command)).filter((candidate) => isTrustedWhereLauncher(command, candidate.path));
-    for (const candidate of candidates[command] ?? []) addFile(candidate.path);
+    const trusted: LaunchFileCandidate[] = [];
+    for (const candidate of await whereCommand(command)) {
+      if (!(await isTrustedWhereLauncher(command, candidate.path))) continue;
+      trusted.push(await withLauncherPathMetadata(candidate));
+    }
+    candidates[command] = trusted;
+    for (const candidate of candidates[command] ?? []) await addFile(candidate.path);
   };
-  const addDirectCandidate = (command: string, candidatePath: string | undefined, source: string) => {
+  const addDirectCandidate = async (command: string, candidatePath: string | undefined, source: string) => {
     if (!candidatePath || !fs.existsSync(candidatePath)) return;
+    if (!(await isTrustedLauncherPath(candidatePath).catch(() => false))) return;
     const list = candidates[command] ?? [];
-    list.push({
+    list.push(await withLauncherPathMetadata({
       path: candidatePath,
       source,
       evidence: [{ source: "launcher.wellKnown", detail: source, path: candidatePath }]
-    });
+    }));
     candidates[command] = list;
-    addFile(candidatePath);
+    await addFile(candidatePath);
   };
   for (const item of snapshot.processes) {
-    addFile(item.executablePath);
+    await addFile(item.executablePath);
     for (const arg of item.commandLine ? splitWindowsCommandLine(item.commandLine) : []) {
-      if (/\.js$/i.test(arg)) addFile(arg);
+      if (/\.js$/i.test(arg)) existingFiles.add(path.resolve(arg).toLowerCase());
     }
   }
-  addFile(appDataDir ? path.join(appDataDir, "npm", "node_modules", "@openai", "codex", "bin", "codex.js") : undefined);
-  addFile(process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "nodejs", "node.exe") : undefined);
-  addFile(process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "nodejs", "node.exe") : undefined);
+  const codexJs = appDataDir ? path.join(appDataDir, "npm", "node_modules", "@openai", "codex", "bin", "codex.js") : undefined;
+  if (codexJs && appDataDir && fs.existsSync(codexJs) && (await isPathRealpathSafe(codexJs, [path.join(appDataDir, "npm")]).catch(() => false))) {
+    existingFiles.add(path.resolve(codexJs).toLowerCase());
+  }
+  await addFile(process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "nodejs", "node.exe") : undefined);
+  await addFile(process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "nodejs", "node.exe") : undefined);
   await Promise.all(["node.exe", "codex.cmd", "codex.exe", "claude.cmd", "claude.exe"].map(addCandidates));
   const npmBin = appDataDir ? path.join(appDataDir, "npm") : undefined;
-  addDirectCandidate("codex.cmd", npmBin ? path.join(npmBin, "codex.cmd") : undefined, "appdata.npm.codexCmd");
-  addDirectCandidate("codex.exe", npmBin ? path.join(npmBin, "codex.exe") : undefined, "appdata.npm.codexExe");
-  addDirectCandidate("claude.cmd", npmBin ? path.join(npmBin, "claude.cmd") : undefined, "appdata.npm.claudeCmd");
-  addDirectCandidate("claude.exe", npmBin ? path.join(npmBin, "claude.exe") : undefined, "appdata.npm.claudeExe");
+  await addDirectCandidate("codex.cmd", npmBin ? path.join(npmBin, "codex.cmd") : undefined, "appdata.npm.codexCmd");
+  await addDirectCandidate("codex.exe", npmBin ? path.join(npmBin, "codex.exe") : undefined, "appdata.npm.codexExe");
+  await addDirectCandidate("claude.cmd", npmBin ? path.join(npmBin, "claude.cmd") : undefined, "appdata.npm.claudeCmd");
+  await addDirectCandidate("claude.exe", npmBin ? path.join(npmBin, "claude.exe") : undefined, "appdata.npm.claudeExe");
   return {
     homeDir: appHome(),
     ...(appDataDir ? { appDataDir } : {}),
@@ -1135,7 +1271,7 @@ async function launchResolverEnvironment(snapshot: ScopeSnapshot) {
   };
 }
 
-function isTrustedWhereLauncher(command: string, candidatePath: string): boolean {
+async function isTrustedWhereLauncher(command: string, candidatePath: string): Promise<boolean> {
   const normalized = normalizeFsPath(candidatePath);
   if (!normalized) return false;
   const appDataDir = npmAppDataRoot();
@@ -1143,12 +1279,78 @@ function isTrustedWhereLauncher(command: string, candidatePath: string): boolean
   const programFilesNode = process.env.ProgramFiles ? normalizeFsPath(path.join(process.env.ProgramFiles, "nodejs")) : undefined;
   const programFilesX86Node = process.env["ProgramFiles(x86)"] ? normalizeFsPath(path.join(process.env["ProgramFiles(x86)"], "nodejs")) : undefined;
   if (command.toLowerCase() === "node.exe") {
-    return [programFilesNode, programFilesX86Node].some((root) => !!root && (normalized === root || normalized.startsWith(`${root}${path.sep}`)));
+    return [programFilesNode, programFilesX86Node].some((root) => !!root && (normalized === root || normalized.startsWith(`${root}${path.sep}`))) &&
+      await isPathRealpathSafe(candidatePath, trustedLauncherRoots());
   }
   if (/^(?:codex|claude)\.(?:cmd|exe)$/i.test(command)) {
-    return !!appDataNpm && (normalized === appDataNpm || normalized.startsWith(`${appDataNpm}${path.sep}`));
+    return !!appDataNpm && (normalized === appDataNpm || normalized.startsWith(`${appDataNpm}${path.sep}`)) &&
+      await isPathRealpathSafe(candidatePath, trustedLauncherRoots());
   }
   return false;
+}
+
+async function withLauncherPathMetadata(candidate: LaunchFileCandidate): Promise<LaunchFileCandidate> {
+  const realPath = await fs.promises.realpath(candidate.path).catch(() => undefined);
+  return {
+    ...candidate,
+    ...(realPath ? { realPath } : {}),
+    hasReparsePoint: await pathContainsReparsePoint(candidate.path)
+  };
+}
+
+async function isTrustedLauncherPath(candidatePath: string): Promise<boolean> {
+  const ext = path.extname(candidatePath).toLowerCase();
+  if (![".exe", ".cmd"].includes(ext)) return false;
+  return isPathRealpathSafe(candidatePath, trustedLauncherRoots());
+}
+
+function trustedLauncherRoots(): string[] {
+  const roots = [
+    process.env.ProgramFiles ? path.join(process.env.ProgramFiles, "nodejs") : undefined,
+    process.env["ProgramFiles(x86)"] ? path.join(process.env["ProgramFiles(x86)"], "nodejs") : undefined,
+    npmAppDataRoot() ? path.join(npmAppDataRoot()!, "npm") : undefined
+  ].filter((root): root is string => !!root);
+  return roots;
+}
+
+async function isPathRealpathSafe(candidatePath: string, roots: string[]): Promise<boolean> {
+  if (!path.isAbsolute(candidatePath) || /^\\\\/.test(candidatePath) || /^\/\/+/.test(candidatePath)) return false;
+  if (path.normalize(candidatePath).split(/[\\/]+/).includes("..")) return false;
+  const normalizedCandidate = normalizeFsPath(candidatePath);
+  if (!normalizedCandidate) return false;
+  for (const root of roots) {
+    const normalizedRoot = normalizeFsPath(root);
+    if (!normalizedRoot || !(normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}${path.sep}`))) continue;
+    if (await pathContainsReparsePoint(candidatePath, root)) return false;
+    const rootReal = await fs.promises.realpath(root).catch(() => undefined);
+    const candidateReal = await fs.promises.realpath(candidatePath).catch(() => undefined);
+    if (!rootReal || !candidateReal) return false;
+    const normalizedRootReal = normalizeFsPath(rootReal);
+    const normalizedCandidateReal = normalizeFsPath(candidateReal);
+    if (!normalizedRootReal || !normalizedCandidateReal) return false;
+    if (normalizedCandidateReal === normalizedRootReal || normalizedCandidateReal.startsWith(`${normalizedRootReal}${path.sep}`)) return true;
+  }
+  return false;
+}
+
+async function pathContainsReparsePoint(candidatePath: string, rootPath?: string): Promise<boolean> {
+  const resolvedRoot = rootPath ? path.resolve(rootPath) : path.parse(path.resolve(candidatePath)).root;
+  const resolvedCandidate = path.resolve(candidatePath);
+  const relative = path.relative(resolvedRoot, resolvedCandidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return true;
+  let current = resolvedRoot;
+  if (await isReparsePoint(current)) return true;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    if (await isReparsePoint(current)) return true;
+  }
+  return false;
+}
+
+async function isReparsePoint(candidatePath: string): Promise<boolean> {
+  const stat = await fs.promises.lstat(candidatePath).catch(() => undefined);
+  if (!stat) return true;
+  return stat.isSymbolicLink();
 }
 
 async function whereCommand(command: string): Promise<LaunchFileCandidate[]> {
@@ -1220,6 +1422,41 @@ async function execNpm(args: string[], cwd: string, timeout: number): Promise<vo
 
 function asAgent(value: string): "codex" | "claude" | undefined {
   return value === "codex" || value === "claude" ? value : undefined;
+}
+
+function asString(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new Error(`Invalid ${label}.`);
+  return value;
+}
+
+function asOptionalString(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  return asString(value, label);
+}
+
+function asSha256(value: unknown): string {
+  const hash = asString(value, "sha256");
+  if (!/^[a-f0-9]{64}$/i.test(hash)) throw new Error("Invalid sha256.");
+  return hash;
+}
+
+function asPid(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 0x7fffffff) {
+    throw new Error("Invalid process id.");
+  }
+  return value;
+}
+
+function asOptionalLimit(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 500) {
+    throw new Error("Invalid search limit.");
+  }
+  return value;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function validateCodexControlMutationRequest(value: unknown): CodexControlMutationRequest {

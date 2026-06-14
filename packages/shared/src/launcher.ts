@@ -14,6 +14,8 @@ export interface SessionLaunchContext {
 export interface LaunchFileCandidate {
   path: string;
   source: string;
+  realPath?: string | undefined;
+  hasReparsePoint?: boolean | undefined;
   evidence?: Evidence[] | undefined;
 }
 
@@ -349,6 +351,9 @@ function isLaunchCandidateAllowed(
   agent: Extract<AgentKind, "codex" | "claude">,
   env: LaunchResolverEnvironment
 ): boolean {
+  if (isExplicitlyUnsafeLaunchPath(candidate.path)) return false;
+  if (candidate.hasReparsePoint) return false;
+  if (candidate.realPath && !isLaunchRealPathAllowed(candidate, agent, env)) return false;
   if (/\.(?:ps1|bat)$/i.test(candidate.path)) return false;
   if (isNodeExecutable(candidate.path)) {
     return isTrustedNodeExecutable(candidate.path, env) && (candidate.extraArgs ?? []).every((arg) => isTrustedJsEntrypoint(arg, agent, env));
@@ -356,11 +361,25 @@ function isLaunchCandidateAllowed(
   return isTrustedAgentCommand(candidate.path, agent, env);
 }
 
+function isLaunchRealPathAllowed(
+  candidate: InternalLaunchCandidate,
+  agent: Extract<AgentKind, "codex" | "claude">,
+  env: LaunchResolverEnvironment
+): boolean {
+  const realPath = candidate.realPath;
+  if (!realPath || isExplicitlyUnsafeLaunchPath(realPath)) return false;
+  if (isNodeExecutable(candidate.path)) {
+    return isTrustedNodeExecutable(realPath, env);
+  }
+  return isTrustedAgentCommand(realPath, agent, env);
+}
+
 function isNodeExecutable(filePath: string): boolean {
   return /(?:^|[\\/])node(?:\.exe)?$/i.test(filePath);
 }
 
 function isTrustedNodeExecutable(filePath: string, env: LaunchResolverEnvironment): boolean {
+  if (isExplicitlyUnsafeLaunchPath(filePath)) return false;
   return [env.programFilesDir, env.programFilesX86Dir]
     .map((root) => root ? path.join(root, "nodejs") : undefined)
     .some((root) => !!root && pathInsideOrEqual(root, filePath));
@@ -371,6 +390,7 @@ function isTrustedJsEntrypoint(
   agent: Extract<AgentKind, "codex" | "claude">,
   env: LaunchResolverEnvironment
 ): boolean {
+  if (isExplicitlyUnsafeLaunchPath(filePath)) return false;
   if (!/\.js$/i.test(filePath) || !env.appDataDir) return false;
   const npmRoot = path.join(env.appDataDir, "npm");
   if (agent === "codex") {
@@ -384,6 +404,7 @@ function isTrustedAgentCommand(
   agent: Extract<AgentKind, "codex" | "claude">,
   env: LaunchResolverEnvironment
 ): boolean {
+  if (isExplicitlyUnsafeLaunchPath(filePath)) return false;
   if (!env.appDataDir) return false;
   const extension = path.extname(filePath).toLowerCase();
   if (extension !== ".cmd" && extension !== ".exe") return false;
@@ -393,6 +414,13 @@ function isTrustedAgentCommand(
 
 function fileExists(env: LaunchResolverEnvironment, candidate: string): boolean {
   return env.existingFiles.has(normalizePathKey(candidate));
+}
+
+function isExplicitlyUnsafeLaunchPath(filePath: string): boolean {
+  if (!path.isAbsolute(filePath)) return true;
+  if (/^\\\\/.test(filePath) || /^\/\/+/.test(filePath)) return true;
+  const normalized = path.normalize(filePath);
+  return normalized.split(/[\\/]+/).includes("..");
 }
 
 function launchCandidateExists(env: LaunchResolverEnvironment, candidate: InternalLaunchCandidate): boolean {

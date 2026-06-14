@@ -9,7 +9,10 @@ import type {
   Evidence,
   QuarantinedSession,
   SessionBackupResult,
+  SessionChildDeleteMode,
+  SessionChildDeleteResult,
   SessionDeleteResult,
+  SessionDetachedRelation,
   SessionImportResult,
   SessionOperationDatabaseChange,
   SessionOperationFile,
@@ -26,8 +29,15 @@ export interface SessionOperationOptions {
   outputRoot?: string | undefined;
   now?: Date | undefined;
   allowActive?: boolean | undefined;
+  childMode?: SessionChildDeleteMode | undefined;
   includeProcesses?: boolean | undefined;
   processProvider?: (() => Promise<AgentProcess[]>) | undefined;
+}
+
+interface DeleteSessionContext {
+  stack: Set<string>;
+  completedChildren: Map<string, SessionChildDeleteResult>;
+  depth: number;
 }
 
 interface OperationDirectories {
@@ -38,7 +48,7 @@ interface OperationDirectories {
 
 interface DeleteJournalStep {
   at?: string | undefined;
-  phase: "backup" | "file" | "patch" | "sqlite_backup" | "sqlite_delete" | "operation";
+  phase: "backup" | "file" | "patch" | "sqlite_backup" | "sqlite_delete" | "relation" | "child_delete" | "operation";
   action: string;
   status: "started" | "succeeded" | "failed" | "skipped";
   role?: string | undefined;
@@ -49,6 +59,9 @@ interface DeleteJournalStep {
   where?: string | undefined;
   sha256?: string | undefined;
   estimatedRows?: number | undefined;
+  parentSessionId?: string | undefined;
+  childSessionId?: string | undefined;
+  rollbackRows?: Array<Record<string, string | number | boolean | null>> | undefined;
   detail?: string | undefined;
   error?: string | undefined;
   evidence?: Evidence[] | undefined;
@@ -102,10 +115,17 @@ interface RestoreJournalStep {
   database?: string | undefined;
   table?: string | undefined;
   sha256?: string | undefined;
+  bytes?: number | undefined;
   estimatedRows?: number | undefined;
+  sourceRole?: string | undefined;
+  relativePath?: string | undefined;
   detail?: string | undefined;
   error?: string | undefined;
   evidence?: Evidence[] | undefined;
+}
+
+interface DetachedRelationTarget extends SessionDetachedRelation {
+  rows: Record<string, unknown>[];
 }
 
 interface CodexDatabaseBundleManifest {
@@ -234,14 +254,79 @@ export async function deleteSession(
   agent?: AgentKind,
   options: SessionOperationOptions = {}
 ): Promise<SessionDeleteResult> {
+  return deleteSessionInternal(sessionId, agent, options, {
+    stack: new Set<string>(),
+    completedChildren: new Map<string, SessionChildDeleteResult>(),
+    depth: 0
+  });
+}
+
+async function deleteSessionInternal(
+  sessionId: string,
+  agent: AgentKind | undefined,
+  options: SessionOperationOptions,
+  context: DeleteSessionContext
+): Promise<SessionDeleteResult> {
   const session = await resolveSession(sessionId, agent, options.home, options.includeProcesses ?? true, options.processProvider);
+  const sessionKey = `${session.agent}:${session.sessionId}`.toLowerCase();
+  if (context.stack.has(sessionKey)) {
+    throw new Error(`Child session delete cycle detected at ${session.agent}:${session.sessionId}.`);
+  }
+  context.stack.add(sessionKey);
   const plan = await buildSessionPlan("delete", session, options);
-  if (plan.blockers.length && !canBypassDeleteBlockers(plan.blockers, options)) {
-    throw new Error(plan.blockers.join(" "));
+  const childMode = normalizedChildMode(options);
+  const childResults: SessionChildDeleteResult[] = [];
+  let detachedRelationTargets: DetachedRelationTarget[] = [];
+  let detachedRelations: SessionDetachedRelation[] = [];
+  try {
+    if (plan.blockers.length && !canBypassDeleteBlockers(plan.blockers, options)) {
+      throw new Error(plan.blockers.join(" "));
+    }
+    if (session.childSessionIds.length > 0 && childMode === "includeChildren") {
+      const childClosure = await resolveChildSessionClosure(session, options, context);
+      plan.affectedChildSessionIds = childClosure.map((child) => child.sessionId);
+      for (const child of childClosure) {
+        const childKey = `${child.agent}:${child.sessionId}`.toLowerCase();
+        const completed = context.completedChildren.get(childKey);
+        if (completed) {
+          childResults.push(completed);
+          continue;
+        }
+        const result = await deleteSessionInternal(
+          child.sessionId,
+          child.agent,
+          { ...options, childMode: "includeChildren" },
+          { stack: new Set(context.stack), completedChildren: context.completedChildren, depth: context.depth + 1 }
+        );
+        const summary: SessionChildDeleteResult = {
+          agent: result.plan.agent,
+          sessionId: result.plan.sessionId,
+          backupDir: result.backup.backupDir,
+          quarantineDir: result.quarantineDir,
+          journalPath: result.journalPath
+        };
+        context.completedChildren.set(childKey, summary);
+        childResults.push(summary);
+      }
+    }
+  } finally {
+    context.stack.delete(sessionKey);
   }
   const { backupDir, quarantineDir, journalPath } = operationDirectories(plan, options);
   await fs.promises.mkdir(quarantineDir, { recursive: true });
   const journal = await createDeleteJournal(plan, backupDir, quarantineDir, journalPath);
+  for (const childResult of childResults) {
+    await appendJournalStep(journal, {
+      phase: "child_delete",
+      action: "include_child_delete",
+      status: "succeeded",
+      parentSessionId: session.sessionId,
+      childSessionId: childResult.sessionId,
+      path: childResult.backupDir,
+      targetPath: childResult.quarantineDir,
+      detail: childResult.journalPath
+    });
+  }
   const movedFiles: SessionOperationFile[] = [];
   const movedFileTargets: MovedFileTarget[] = [];
   const patchedFiles: SessionOperationFile[] = [];
@@ -262,6 +347,10 @@ export async function deleteSession(
     });
 
     if (session.agent === "codex") {
+      if (session.childSessionIds.length > 0 && childMode === "detach") {
+        detachedRelationTargets = detachChildRelations(session, options, journal);
+        detachedRelations = detachedRelationTargets.map(publicDetachedRelation);
+      }
       await backupCodexDatabases(options.home, quarantineDir, journal);
       databaseChanges.push(...applyCodexDatabaseDelete(plan, options.home, quarantineDir, journal));
     }
@@ -313,8 +402,15 @@ export async function deleteSession(
       status: "succeeded",
       detail: `Moved ${movedFiles.length} file(s); applied ${databaseChanges.length} database change(s).`
     });
-    return { plan, backup, quarantineDir, journalPath, movedFiles, patchedFiles, databaseChanges };
+    return { plan, backup, quarantineDir, journalPath, childMode, childResults, detachedRelations, movedFiles, patchedFiles, databaseChanges };
   } catch (error) {
+    if (detachedRelationTargets.length) {
+      try {
+        rollbackDetachedRelations(detachedRelationTargets, journal);
+      } catch {
+        // rollbackDetachedRelations journals its own failures; keep the original operation error visible.
+      }
+    }
     await rollbackMovedFiles(movedFileTargets, journal);
     if (session.agent === "codex" && databaseChanges.some((change) => change.action === "delete" && (change.estimatedRows ?? 0) > 0)) {
       try {
@@ -339,6 +435,7 @@ export async function importSessionBackup(
   restoreJournal?: RestoreJournal | undefined
 ): Promise<SessionImportResult> {
   try {
+    await appendRestoreJournalStep(restoreJournal, { phase: "plan", action: "manifest_read", status: "started", path: path.join(backupDir, "manifest.json") });
     await appendRestoreJournalStep(restoreJournal, { phase: "plan", action: "planSessionImport", status: "started", path: backupDir });
     const planResult = await planSessionImport(backupDir, options);
     await appendRestoreJournalStep(restoreJournal, {
@@ -351,14 +448,21 @@ export async function importSessionBackup(
     const plan = planResult.plan;
     if (plan.blockers.length) throw new Error(plan.blockers.join(" "));
     const manifest = await readBackupManifest(backupDir);
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "plan",
+      action: "manifest_validate",
+      status: "succeeded",
+      path: path.join(backupDir, "manifest.json"),
+      detail: `${manifest.agent}:${manifest.sessionId}`
+    });
     const copiedFiles = manifestCopiedFiles(manifest);
     if (!copiedFiles.length) throw new Error("Backup manifest has no copied files to import.");
-    await appendRestoreJournalStep(restoreJournal, { phase: "preflight", action: "preflightImportFiles", status: "started", path: backupDir });
+    await appendRestoreJournalStep(restoreJournal, { phase: "preflight", action: "target_preflight", status: "started", path: backupDir });
     await preflightImportFiles(manifest, backupDir, options.home);
     preflightCodexDatabaseBundles(manifest, backupDir, options.home);
     await appendRestoreJournalStep(restoreJournal, {
       phase: "preflight",
-      action: "preflightImportFiles",
+      action: "target_preflight",
       status: "succeeded",
       path: backupDir,
       detail: `Validated ${copiedFiles.length} file(s) and ${(manifest.databaseBundles ?? []).length} database bundle(s).`
@@ -373,22 +477,54 @@ export async function importSessionBackup(
         const backupRelativePath = typeof file.backupRelativePath === "string" ? file.backupRelativePath : undefined;
         if (!originalPath || !backupRelativePath) continue;
         const source = resolveSafeRelative(filesRoot, backupRelativePath);
+        const role = typeof file.role === "string" ? file.role : "backup_file";
+        try {
         if (!(await pathExists(source))) throw new Error(`Backup file is missing: ${source}`);
         await appendRestoreJournalStep(restoreJournal, {
           phase: "file",
-          action: "copy",
+          action: "copy_file_started",
           status: "started",
-          role: typeof file.role === "string" ? file.role : "backup_file",
+          role,
+          sourceRole: role,
+          relativePath: backupRelativePath,
           path: source,
           targetPath: originalPath
         });
         const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
         const actualSha = await hashPath(source);
-        if (expectedSha && actualSha && expectedSha !== actualSha) {
-          throw new Error(`Backup checksum mismatch: ${source}`);
+        if (actualSha) {
+          if (!expectedSha) throw new Error(`Backup checksum is missing from manifest: ${source}`);
+          if (expectedSha !== actualSha) throw new Error(`Backup checksum mismatch: ${source}`);
         }
+        await appendRestoreJournalStep(restoreJournal, {
+          phase: "file",
+          action: "verify_sha256",
+          status: "succeeded",
+          role,
+          sourceRole: role,
+          relativePath: backupRelativePath,
+          path: source,
+          targetPath: originalPath,
+          sha256: actualSha ?? expectedSha
+        });
         validateBackupSourceTree(file, source);
+        await appendRestoreJournalStep(restoreJournal, {
+          phase: "file",
+          action: "mkdir_parent",
+          status: "started",
+          role,
+          path: path.dirname(originalPath),
+          targetPath: originalPath
+        });
         await fs.promises.mkdir(path.dirname(originalPath), { recursive: true });
+        await appendRestoreJournalStep(restoreJournal, {
+          phase: "file",
+          action: "mkdir_parent",
+          status: "succeeded",
+          role,
+          path: path.dirname(originalPath),
+          targetPath: originalPath
+        });
         const stat = await fs.promises.stat(source);
         if (stat.isDirectory()) {
           await fs.promises.cp(source, originalPath, { recursive: true, force: false, errorOnExist: true });
@@ -396,7 +532,7 @@ export async function importSessionBackup(
           await fs.promises.copyFile(source, originalPath);
         }
         importedFiles.push({
-          role: typeof file.role === "string" ? file.role : "backup_file",
+          role,
           path: originalPath,
           exists: true,
           bytes: stat.isDirectory() ? await directoryBytes(originalPath) : stat.size,
@@ -412,20 +548,37 @@ export async function importSessionBackup(
         });
         await appendRestoreJournalStep(restoreJournal, {
           phase: "file",
-          action: "copy",
+          action: "copy_file_succeeded",
           status: "succeeded",
-          role: typeof file.role === "string" ? file.role : "backup_file",
+          role,
+          sourceRole: role,
+          relativePath: backupRelativePath,
           path: source,
           targetPath: originalPath,
-          sha256: importedFiles[importedFiles.length - 1]?.sha256
+          sha256: importedFiles[importedFiles.length - 1]?.sha256,
+          bytes: importedFiles[importedFiles.length - 1]?.bytes
         });
+        } catch (error) {
+          await appendRestoreJournalStep(restoreJournal, {
+            phase: "file",
+            action: "copy_file_failed",
+            status: "failed",
+            role,
+            sourceRole: role,
+            relativePath: backupRelativePath,
+            path: source,
+            targetPath: originalPath,
+            error: error instanceof Error ? error.message : String(error)
+          }).catch(() => undefined);
+          throw error;
+        }
       }
       const databaseChanges = manifest.agent === "codex" ? importCodexDatabaseBundles(manifest, backupDir, options.home, restoreJournal) : [];
       return { plan, backupDir, importedFiles, databaseChanges };
     } catch (error) {
       await appendRestoreJournalStep(restoreJournal, {
         phase: "rollback",
-        action: "removeImportedFiles",
+        action: "rollback_remove_imported_files",
         status: "started",
         detail: `Removing ${importedFiles.length} file(s) copied before import failed.`
       }).catch(() => undefined);
@@ -433,14 +586,14 @@ export async function importSessionBackup(
         await removeImportedFiles(importedFiles, restoreJournal);
         await appendRestoreJournalStep(restoreJournal, {
           phase: "rollback",
-          action: "removeImportedFiles",
+          action: "rollback_remove_imported_files",
           status: "succeeded",
           detail: `Removed ${importedFiles.length} copied file(s).`
         }).catch(() => undefined);
       } catch (rollbackError) {
         await appendRestoreJournalStep(restoreJournal, {
           phase: "rollback",
-          action: "removeImportedFiles",
+          action: "rollback_remove_imported_files",
           status: "failed",
           detail: `Failed to remove all copied file(s) after import failure.`,
           error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
@@ -733,6 +886,10 @@ async function buildSessionPlan(
   const files = await discoverSessionFiles(session, options.home, operation);
   const databaseChanges = databasePlanForSession(session, options.home, operation);
   const blockers = operation === "delete" ? activeSessionBlockers(session) : [];
+  const childMode = normalizedChildMode(options);
+  if (operation === "delete" && session.childSessionIds.length > 0 && childMode === "detach" && session.agent !== "codex") {
+    blockers.push("Detach child delete mode is currently supported only for Codex SQLite parent/child edges.");
+  }
   const warnings = riskWarnings(session, operation);
   const notes = operation === "backup" ? backupNotes(session.agent) : deleteNotes(session.agent);
   return {
@@ -740,6 +897,7 @@ async function buildSessionPlan(
     operation,
     mode: operation === "backup" ? "execute" : "dry-run",
     risk: blockers.length ? "blocked" : warnings.length ? "caution" : "safe",
+    ...(operation === "delete" ? { childMode, affectedChildSessionIds: session.childSessionIds } : {}),
     agent: session.agent,
     sessionId: session.sessionId,
     createdAt,
@@ -1043,7 +1201,7 @@ function claudeSidecarPath(claudeRoot: string, session: AgentSession): string | 
 function activeSessionBlockers(session: AgentSession): string[] {
   const blockers: string[] = [];
   if (session.childSessionIds.length > 0) {
-    blockers.push("Session has child sessions; destructive operations are blocked until an explicit include-children or detach workflow exists.");
+    blockers.push("Session has child sessions; destructive operations are blocked unless childMode is explicitly includeChildren or detach.");
   }
   const heuristicCandidate = session.runtimeCandidates?.find((candidate) => candidate.confidence === "heuristic" && candidate.score >= 100);
   const hasHeuristicActiveProcess = session.agent === "codex" && (session.evidence.some((item) => item.source === "process.heuristic") || !!heuristicCandidate);
@@ -1064,8 +1222,16 @@ function activeSessionBlockers(session: AgentSession): string[] {
 
 function canBypassDeleteBlockers(blockers: string[], options: SessionOperationOptions): boolean {
   if (!blockers.length) return true;
-  if (!options.allowActive) return false;
-  return blockers.every((blocker) => blocker.includes("active PID mapping") || blocker.includes("active Codex process candidate"));
+  const childMode = normalizedChildMode(options);
+  return blockers.every((blocker) => {
+    if (blocker.includes("child sessions")) return childMode === "includeChildren" || childMode === "detach";
+    if (blocker.includes("active PID mapping") || blocker.includes("active Codex process candidate")) return options.allowActive === true;
+    return false;
+  });
+}
+
+function normalizedChildMode(options: SessionOperationOptions): SessionChildDeleteMode {
+  return options.childMode === "includeChildren" || options.childMode === "detach" ? options.childMode : "block";
 }
 
 function riskWarnings(session: AgentSession, operation: "backup" | "delete"): string[] {
@@ -1082,6 +1248,227 @@ function riskWarnings(session: AgentSession, operation: "backup" | "delete"): st
   }
   if (!session.transcriptPath) warnings.push("No transcript path is indexed for this session.");
   return warnings;
+}
+
+async function resolveChildSessionClosure(
+  parent: AgentSession,
+  options: SessionOperationOptions,
+  context: DeleteSessionContext
+): Promise<AgentSession[]> {
+  const out: AgentSession[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  const visit = async (session: AgentSession, isRoot = false): Promise<void> => {
+    const key = `${session.agent}:${session.sessionId}`.toLowerCase();
+    if (visited.has(key)) return;
+    if (visiting.has(key) || (!isRoot && context.stack.has(key))) {
+      throw new Error(`Child session delete cycle detected at ${session.agent}:${session.sessionId}.`);
+    }
+    visiting.add(key);
+    for (const childId of session.childSessionIds) {
+      const child = await resolveSession(childId, session.agent, options.home, options.includeProcesses ?? true, options.processProvider).catch(
+        () => undefined
+      );
+      if (!child) {
+        throw new Error(`Child session is referenced but cannot be resolved for includeChildren delete: ${childId}`);
+      }
+      await visit(child);
+      out.push(child);
+    }
+    visiting.delete(key);
+    visited.add(key);
+  };
+
+  await visit(parent, true);
+  return dedupeSessions(out);
+}
+
+function dedupeSessions(sessions: AgentSession[]): AgentSession[] {
+  const seen = new Set<string>();
+  return sessions.filter((session) => {
+    const key = `${session.agent}:${session.sessionId}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function detachChildRelations(
+  session: AgentSession,
+  options: SessionOperationOptions,
+  journal?: DeleteJournal | undefined
+): DetachedRelationTarget[] {
+  if (session.agent !== "codex") {
+    throw new Error("Detach child delete mode is currently supported only for Codex SQLite parent/child edges.");
+  }
+  const statePath = path.join(codexSqliteHome(options.home), "state_5.sqlite");
+  const db = openWritableDb(statePath);
+  if (!db) throw new Error(`Cannot detach child sessions because Codex state database is missing: ${statePath}`);
+  const detached: DetachedRelationTarget[] = [];
+  try {
+    db.pragma("busy_timeout = 5000");
+    const columns = tableColumns(db, "thread_spawn_edges");
+    if (!columns.has("parent_thread_id") || !columns.has("child_thread_id")) {
+      throw new Error("Cannot detach child sessions because thread_spawn_edges schema is incompatible.");
+    }
+    for (const childId of session.childSessionIds) {
+      appendJournalStepSync(journal, {
+        phase: "relation",
+        action: "detach_child_relation",
+        status: "started",
+        parentSessionId: session.sessionId,
+        childSessionId: childId,
+        database: statePath,
+        table: "thread_spawn_edges"
+      });
+      const rows = db
+        .prepare("SELECT * FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?")
+        .all(session.sessionId, childId) as Record<string, unknown>[];
+      if (!rows.length) {
+        appendJournalStepSync(journal, {
+          phase: "relation",
+          action: "detach_child_relation",
+          status: "failed",
+          parentSessionId: session.sessionId,
+          childSessionId: childId,
+          database: statePath,
+          table: "thread_spawn_edges",
+          error: "No reversible Codex parent/child edge exists for this child session."
+        });
+        throw new Error(`No reversible Codex parent/child edge exists for child session: ${childId}`);
+      }
+      const result = db
+        .prepare("DELETE FROM thread_spawn_edges WHERE parent_thread_id = ? AND child_thread_id = ?")
+        .run(session.sessionId, childId);
+      const removedRows = Number(result.changes ?? 0);
+      const relation: DetachedRelationTarget = {
+        agent: "codex",
+        parentSessionId: session.sessionId,
+        childSessionId: childId,
+        source: "codex.sqlite.thread_spawn_edges",
+        database: statePath,
+        table: "thread_spawn_edges",
+        removedRows,
+        rows,
+        evidence: [
+          {
+            source: "codex.sqlite.thread_spawn_edges",
+            detail: "Parent/child edge was detached before deleting the parent session.",
+            path: statePath,
+            field: "parent_thread_id,child_thread_id"
+          }
+        ]
+      };
+      detached.push(relation);
+      appendJournalStepSync(journal, {
+        phase: "relation",
+        action: "detach_child_relation",
+        status: removedRows ? "succeeded" : "skipped",
+        parentSessionId: session.sessionId,
+        childSessionId: childId,
+        database: statePath,
+        table: "thread_spawn_edges",
+        estimatedRows: removedRows,
+        rollbackRows: safeJournalRows(rows),
+        evidence: relation.evidence
+      });
+    }
+  } catch (error) {
+    appendJournalStepSync(journal, {
+      phase: "relation",
+      action: "detach_child_relation",
+      status: "failed",
+      parentSessionId: session.sessionId,
+      database: statePath,
+      table: "thread_spawn_edges",
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  } finally {
+    db.close();
+  }
+  return detached;
+}
+
+function safeJournalRows(rows: Record<string, unknown>[]): Array<Record<string, string | number | boolean | null>> {
+  return rows.map((row) => {
+    const safe: Record<string, string | number | boolean | null> = {};
+    for (const [key, value] of Object.entries(row)) {
+      if (!/^[A-Za-z0-9_]{1,80}$/.test(key)) continue;
+      if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        safe[key] = value;
+      }
+    }
+    return safe;
+  });
+}
+
+function rollbackDetachedRelations(detachedRelations: DetachedRelationTarget[], journal?: DeleteJournal | undefined): void {
+  const grouped = new Map<string, DetachedRelationTarget[]>();
+  for (const relation of detachedRelations) {
+    if (!relation.database || !relation.table || !relation.rows.length) continue;
+    const key = `${path.resolve(relation.database).toLowerCase()}\0${relation.table}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), relation]);
+  }
+  for (const relations of grouped.values()) {
+    const first = relations[0];
+    if (!first?.database || !first.table) continue;
+    const db = openWritableDb(first.database);
+    if (!db) continue;
+    try {
+      db.pragma("busy_timeout = 5000");
+      const columns = [...tableColumns(db, first.table)];
+      if (!columns.length) throw new Error(`Cannot rollback detached relations because table is missing: ${first.table}`);
+      appendJournalStepSync(journal, {
+        phase: "relation",
+        action: "rollback_detach_child_relation",
+        status: "started",
+        database: first.database,
+        table: first.table
+      });
+      const insertColumns = columns.filter((column) => relations.some((relation) => relation.rows.some((row) => column in row)));
+      const insert = db.prepare(
+        `INSERT OR IGNORE INTO ${quoteIdentifier(first.table)} (${insertColumns.map(quoteIdentifier).join(", ")}) VALUES (${insertColumns.map(() => "?").join(", ")})`
+      );
+      const transaction = db.transaction(() => {
+        let inserted = 0;
+        for (const relation of relations) {
+          for (const row of relation.rows) {
+            const result = insert.run(...insertColumns.map((column) => row[column]));
+            inserted += Number(result.changes ?? 0);
+          }
+        }
+        return inserted;
+      });
+      const inserted = Number(transaction());
+      appendJournalStepSync(journal, {
+        phase: "relation",
+        action: "rollback_detach_child_relation",
+        status: "succeeded",
+        database: first.database,
+        table: first.table,
+        estimatedRows: inserted
+      });
+    } catch (error) {
+      appendJournalStepSync(journal, {
+        phase: "relation",
+        action: "rollback_detach_child_relation",
+        status: "failed",
+        database: first.database,
+        table: first.table,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    } finally {
+      db.close();
+    }
+  }
+}
+
+function publicDetachedRelation(relation: DetachedRelationTarget): SessionDetachedRelation {
+  const { rows: _rows, ...publicRelation } = relation;
+  return publicRelation;
 }
 
 function applyCodexDatabaseDelete(
@@ -1740,7 +2127,7 @@ function importCodexDatabaseBundles(
         const transactionSteps: RestoreJournalStep[] = [];
         appendRestoreJournalStepSync(restoreJournal, {
           phase: "sqlite_import",
-          action: "transaction",
+          action: "sqlite_transaction_started",
           status: "started",
           database: dbPath
         });
@@ -1757,7 +2144,7 @@ function importCodexDatabaseBundles(
             validateCodexBundleRows(bundle.table, rows, manifest.sessionId, bundle.action);
             appendRestoreJournalStepSync(restoreJournal, {
               phase: "sqlite_import",
-              action: "insert",
+              action: "sqlite_insert_rows",
               status: "started",
               database: dbPath,
               table: bundle.table,
@@ -1772,7 +2159,7 @@ function importCodexDatabaseBundles(
             transactionChanges.push(change);
             transactionSteps.push({
               phase: "sqlite_import",
-              action: inserted ? "insert" : "skip",
+              action: inserted ? "sqlite_insert_rows" : "sqlite_insert_rows",
               status: inserted ? "succeeded" : "skipped",
               database: dbPath,
               table: bundle.table,
@@ -1786,7 +2173,7 @@ function importCodexDatabaseBundles(
         for (const step of transactionSteps) appendRestoreJournalStepSync(restoreJournal, step);
         appendRestoreJournalStepSync(restoreJournal, {
           phase: "sqlite_import",
-          action: "transaction",
+          action: "sqlite_transaction_committed",
           status: "succeeded",
           database: dbPath
         });
@@ -1797,7 +2184,7 @@ function importCodexDatabaseBundles(
   } catch (error) {
     appendRestoreJournalStepSync(restoreJournal, {
       phase: "sqlite_import",
-      action: "transaction",
+      action: "sqlite_transaction_failed",
       status: "failed",
       error: error instanceof Error ? error.message : String(error)
     });
@@ -1829,7 +2216,7 @@ function rollbackCodexDatabaseImports(
     try {
       appendRestoreJournalStepSync(restoreJournal, {
         phase: "rollback",
-        action: "sqlite_delete_inserted_rows",
+        action: "rollback_sqlite_delete_rows",
         status: "started",
         database: change.database,
         table: change.table,
@@ -1845,7 +2232,7 @@ function rollbackCodexDatabaseImports(
       transaction();
       appendRestoreJournalStepSync(restoreJournal, {
         phase: "rollback",
-        action: "sqlite_delete_inserted_rows",
+        action: "rollback_sqlite_delete_rows",
         status: "succeeded",
         database: change.database,
         table: change.table,
@@ -1854,7 +2241,7 @@ function rollbackCodexDatabaseImports(
     } catch (error) {
       appendRestoreJournalStepSync(restoreJournal, {
         phase: "rollback",
-        action: "sqlite_delete_inserted_rows",
+        action: "rollback_sqlite_delete_rows",
         status: "failed",
         database: change.database,
         table: change.table,
@@ -2260,7 +2647,9 @@ async function preflightImportFiles(manifest: BackupManifest, backupDir: string,
     } else {
       const expectedSha = typeof file.sha256 === "string" ? file.sha256 : undefined;
       const actualSha = await hashPath(source);
-      if (expectedSha && actualSha && expectedSha !== actualSha) throw new Error(`Backup checksum mismatch: ${source}`);
+      if (!actualSha) throw new Error(`Backup file cannot be hashed: ${source}`);
+      if (!expectedSha) throw new Error(`Backup checksum is missing from manifest: ${source}`);
+      if (expectedSha !== actualSha) throw new Error(`Backup checksum mismatch: ${source}`);
     }
   }
 }
@@ -2523,7 +2912,7 @@ async function removeImportedFiles(importedFiles: SessionOperationFile[], restor
   for (const file of [...importedFiles].reverse()) {
     await appendRestoreJournalStep(restoreJournal, {
       phase: "rollback",
-      action: "removeImportedFile",
+      action: "rollback_remove_imported_file",
       status: "started",
       role: file.role,
       path: file.path
@@ -2532,7 +2921,7 @@ async function removeImportedFiles(importedFiles: SessionOperationFile[], restor
       await fs.promises.rm(file.path, { recursive: true, force: true });
       await appendRestoreJournalStep(restoreJournal, {
         phase: "rollback",
-        action: "removeImportedFile",
+        action: "rollback_remove_imported_file",
         status: "succeeded",
         role: file.role,
         path: file.path
@@ -2540,7 +2929,7 @@ async function removeImportedFiles(importedFiles: SessionOperationFile[], restor
     } catch (error) {
       await appendRestoreJournalStep(restoreJournal, {
         phase: "rollback",
-        action: "removeImportedFile",
+        action: "rollback_remove_imported_file",
         status: "failed",
         role: file.role,
         path: file.path,
@@ -2548,7 +2937,19 @@ async function removeImportedFiles(importedFiles: SessionOperationFile[], restor
       });
       throw error;
     }
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "rollback",
+      action: "cleanup_parent_dir",
+      status: "started",
+      path: path.dirname(file.path)
+    });
     await pruneEmptyParents(path.dirname(file.path), 3);
+    await appendRestoreJournalStep(restoreJournal, {
+      phase: "rollback",
+      action: "cleanup_parent_dir",
+      status: "succeeded",
+      path: path.dirname(file.path)
+    });
   }
 }
 

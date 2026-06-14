@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld("agentscope", {
   inspectSession: (sessionId) => ipcRenderer.invoke("inspect:session", sessionId),
   repairDiagnostic: (name) => ipcRenderer.invoke("diagnostic:repair", name),
   backupSession: (agent, sessionId) => ipcRenderer.invoke("session:backup", agent, sessionId),
-  deleteSession: (agent, sessionId, createdAt) => ipcRenderer.invoke("session:delete", agent, sessionId, createdAt),
+  deleteSession: (agent, sessionId, createdAt, options) => ipcRenderer.invoke("session:delete", agent, sessionId, createdAt, options),
   launchSession: (agent, sessionId, action, context) => ipcRenderer.invoke("session:launch", agent, sessionId, action, context),
   importSessionBackup: (backupDir) => ipcRenderer.invoke("session:import", backupDir),
   listQuarantinedSessions: () => ipcRenderer.invoke("session:listQuarantine"),

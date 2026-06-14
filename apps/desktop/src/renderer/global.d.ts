@@ -76,7 +76,12 @@ export interface AgentScopeApi {
     restartRequired?: boolean;
   }>;
   backupSession(agent: string, sessionId: string): Promise<SessionBackupResult>;
-  deleteSession(agent: string, sessionId: string, createdAt?: string): Promise<SessionDeleteResult>;
+  deleteSession(
+    agent: string,
+    sessionId: string,
+    createdAt?: string,
+    options?: { childMode?: "block" | "includeChildren" | "detach" }
+  ): Promise<SessionDeleteResult>;
   launchSession(
     agent: AgentKind,
     sessionId: string,

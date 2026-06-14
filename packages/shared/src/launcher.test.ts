@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveSessionLauncher, splitWindowsCommandLine } from "./launcher.js";
 
@@ -107,6 +108,62 @@ describe("session launcher resolution", () => {
         ]
       })
     ).toThrow(/untrusted process paths/i);
+  });
+
+  it("refuses launcher candidates marked as reparse points or realpath escapes", () => {
+    const cmd = "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\codex.cmd";
+    const baseEnv = {
+      homeDir: "C:\\Users\\dwgx1",
+      appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
+      existingFiles: new Set([cmd.toLowerCase()])
+    };
+
+    expect(() =>
+      resolveSessionLauncher("codex", "resume", "019ea42d", {
+        ...baseEnv,
+        pathCandidates: {
+          "codex.cmd": [{ path: cmd, source: "where.codex", hasReparsePoint: true }]
+        }
+      })
+    ).toThrow(/Unable to find a safe Codex launcher/i);
+
+    expect(() =>
+      resolveSessionLauncher("codex", "resume", "019ea42d", {
+        ...baseEnv,
+        pathCandidates: {
+          "codex.cmd": [{ path: cmd, source: "where.codex", realPath: "D:\\Shadow\\codex.cmd" }]
+        }
+      })
+    ).toThrow(/Unable to find a safe Codex launcher/i);
+  });
+
+  it("allows realpath normalization when the launcher remains under a trusted root", () => {
+    const cmd = "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\codex.cmd";
+    const result = resolveSessionLauncher("codex", "resume", "019ea42d", {
+      homeDir: "C:\\Users\\dwgx1",
+      appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
+      pathCandidates: {
+        "codex.cmd": [{ path: cmd, source: "where.codex", realPath: "c:\\users\\dwgx1\\appdata\\roaming\\npm\\codex.cmd" }]
+      },
+      existingFiles: new Set([cmd.toLowerCase()])
+    });
+
+    expect(result.filePath).toBe(cmd);
+  });
+
+  it("refuses relative, traversal, and UNC launcher paths", () => {
+    for (const unsafe of ["codex.cmd", "C:\\Users\\dwgx1\\AppData\\Roaming\\npm\\..\\codex.cmd", "\\\\server\\share\\codex.cmd"]) {
+      expect(() =>
+        resolveSessionLauncher("codex", "resume", "019ea42d", {
+          homeDir: "C:\\Users\\dwgx1",
+          appDataDir: "C:\\Users\\dwgx1\\AppData\\Roaming",
+          pathCandidates: {
+            "codex.cmd": [{ path: unsafe, source: "where.codex" }]
+          },
+          existingFiles: new Set([path.resolve(unsafe).toLowerCase()])
+        })
+      ).toThrow(/Unable to find a safe Codex launcher|refusing/i);
+    }
   });
 
   it("refuses process-derived Claude executables outside trusted install roots", () => {
