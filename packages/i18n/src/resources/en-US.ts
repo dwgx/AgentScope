@@ -1,7 +1,4 @@
 export const enUS = {
-  app: {
-    tagline: "control + trace layer"
-  },
   common: {
     agent: {
       codex: "codex",
@@ -811,6 +808,7 @@ export const enUS = {
     modelRuntime: "Model + Runtime",
     codexSpawn: "Codex Spawn",
     processRuntime: "Process Runtime",
+    mcpIdentity: "MCP Identity",
     control: "Safe Control",
     indexMetadata: "Index Metadata",
     relations: "Relations",
@@ -831,6 +829,11 @@ export const enUS = {
     noCwdEvidence: "No cwd evidence",
     safeControlDetail:
       "Safe mode launches only bounded Codex/Claude resume or fork commands; delete still requires backup, quarantine, and journal. Read-only blocks launch, backup, delete, import, and repair.",
+    mcpSource: {
+      user_config: "User config",
+      plugin_config: "Plugin config",
+      process_only: "Process evidence"
+    },
     launchAction: {
       resume: "resume",
       fork: "fork"
@@ -902,6 +905,12 @@ export const enUS = {
       sourceKind: "Source kind",
       runtimeSessionId: "Runtime id",
       runtimeWorkingDir: "Runtime cwd",
+      server: "Server",
+      serverKind: "Kind",
+      transport: "Transport",
+      configSource: "Config source",
+      configTable: "Config table",
+      commandSummary: "Command summary",
       resumeCommand: "Resume",
       safeControl: "Boundary"
     }

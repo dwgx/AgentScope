@@ -3,7 +3,6 @@ import type { ResourceTree } from "../types.js";
 
 export const zhCN = {
   ...enUS,
-  app: { tagline: "控制 + 追踪层" },
   common: {
     ...enUS.common,
     agent: { codex: "codex", claude: "claude", unknown: "unknown" },
@@ -37,6 +36,7 @@ export const zhCN = {
       scored: "已评分",
       evidence: "证据",
       diagnostic: "诊断",
+      protected: "受保护",
       readOnly: "只读"
     },
     confidence: { exact: "精确", indexed: "已索引", heuristic: "推测", unknown: "未知" },
@@ -192,7 +192,7 @@ export const zhCN = {
         codex_tool_kernel: "工具内核",
         claude_cli: "Claude CLI",
         claude_daemon: "Claude daemon",
-        agent_helper: "Agent helper",
+        agent_helper: "Agent 辅助进程",
         unknown: "未知角色"
       }
     },
@@ -221,7 +221,7 @@ export const zhCN = {
         selectedCount: "已选择 {{count}} 个会话"
       },
       allSessions: "全部会话",
-      rootNoParent: "Root / no parent",
+      rootNoParent: "根会话 / 无父级",
       parentGroup: "父级：{{title}}",
       noCwd: "没有 cwd",
       recycle: {
@@ -539,7 +539,7 @@ export const zhCN = {
         },
         mcp_summary: {
           label: "MCP 服务器",
-          detail: "config.toml 中的 MCP server 表。需要修改时请编辑配置文档。"
+          detail: "config.toml 中的 MCP 服务器表。需要修改时请编辑配置文档。"
         },
         archive_summary: {
           label: "已归档线程",
@@ -610,19 +610,19 @@ export const zhCN = {
           detail: "用户配置层中的 Codex 命令审批规则。"
         },
         skill: {
-          label: "用户 skill",
-          detail: "用户 skill 编写面。AgentScope 只编辑 SKILL.md，并且先备份。"
+          label: "用户 Skill",
+          detail: "用户 Skill 编写面。AgentScope 只编辑 SKILL.md，并且先备份。"
         },
         skillReadOnly: {
-          label: "只读 skill",
-          detail: "内置/系统 skill 面。AgentScope 保持只读。"
+          label: "只读 Skill",
+          detail: "内置/系统 Skill 面。AgentScope 保持只读。"
         }
       },
       warning: {
         authMetadataOnly: "auth.json 包含凭据材料。AgentScope 只显示元数据，绝不打开、编辑或展示 token 字段。",
         rawConfigBlocked: "已阻止原始配置编辑，避免高风险键绕过结构化确认。",
         sensitiveKeysBlocked: "检测到敏感键名。已阻止原始配置编辑。",
-        systemSkillsReadOnly: "系统或插件提供的 skills 为只读。",
+        systemSkillsReadOnly: "系统或插件提供的 Skills 为只读。",
         pluginWorkflowOnly: "安装/移除请使用 Codex plugin 工作流；AgentScope 只展示证据。",
         sensitiveConfigBlocked: "检测到敏感 config 键；已阻止原始编辑。",
         highRiskConfirm: "高风险设置；执行前需要显式确认。",
@@ -630,12 +630,12 @@ export const zhCN = {
         sqliteMetadataUnreadable: "无法以只读方式打开此 SQLite 数据库读取元数据。"
       },
       mcpTitle: "config.toml 中的 MCP 服务器",
-      noMcp: "当前 config.toml 没有找到 MCP server 表。",
+      noMcp: "当前 config.toml 没有找到 MCP 服务器表。",
       kind: {
         config: "配置",
         agents: "指令",
         rules: "规则",
-        skill: "技能",
+        skill: "Skill",
         plugin: "插件",
         mcp: "MCP",
         browser: "浏览器",
@@ -777,6 +777,7 @@ export const zhCN = {
     modelRuntime: "模型与运行参数",
     codexSpawn: "Codex 派生",
     processRuntime: "进程运行时",
+    mcpIdentity: "MCP 身份",
     control: "安全控制",
     indexMetadata: "索引元数据",
     relations: "关系",
@@ -796,6 +797,11 @@ export const zhCN = {
     noCwdEvidence: "没有 cwd 证据",
     safeControlDetail:
       "安全模式只会启动受限的 Codex/Claude resume 或 fork 命令；删除仍必须备份、隔离并写入 journal。只读模式会阻止启动、备份、删除、导入和修复。",
+    mcpSource: {
+      user_config: "用户配置",
+      plugin_config: "插件配置",
+      process_only: "仅进程证据"
+    },
     launchAction: {
       resume: "resume",
       fork: "fork"
@@ -867,6 +873,12 @@ export const zhCN = {
       sourceKind: "来源类型",
       runtimeSessionId: "运行时 ID",
       runtimeWorkingDir: "运行时 cwd",
+      server: "服务器",
+      serverKind: "类型",
+      transport: "传输",
+      configSource: "配置来源",
+      configTable: "配置表",
+      commandSummary: "命令摘要",
       resumeCommand: "恢复命令",
       safeControl: "边界"
     }

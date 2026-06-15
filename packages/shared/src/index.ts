@@ -43,11 +43,33 @@ export interface AgentProcess {
   agent: AgentKind;
   processRole?: AgentProcessRole | undefined;
   processRoleDetail?: string | undefined;
+  mcp?: AgentProcessMcpIdentity | undefined;
   rootPid?: number | undefined;
   parentAgentPid?: number | undefined;
   runtimeSessionId?: string | undefined;
   runtimeWorkingDir?: string | undefined;
   sessionCandidates?: SessionCandidate[] | undefined;
+  evidence: Evidence[];
+}
+
+export type AgentProcessMcpServerKind =
+  | "playwright"
+  | "chrome_devtools"
+  | "ida_pro"
+  | "modelcontextprotocol"
+  | "codex_mcp_node"
+  | "custom"
+  | "unknown";
+
+export interface AgentProcessMcpIdentity {
+  displayName: string;
+  serverName?: string | undefined;
+  serverKind: AgentProcessMcpServerKind;
+  transport?: "stdio" | "http" | "plugin" | "unknown" | undefined;
+  configSource?: "user_config" | "plugin_config" | "process_only" | undefined;
+  configTable?: string | undefined;
+  commandSummary?: string | undefined;
+  confidence: Confidence;
   evidence: Evidence[];
 }
 
@@ -360,6 +382,9 @@ export interface CodexMcpServerSummary {
   enabled?: boolean | undefined;
   transport?: "stdio" | "http" | "plugin" | "unknown" | undefined;
   table: string;
+  command?: string | undefined;
+  args?: string[] | undefined;
+  commandSummary?: string | undefined;
   evidence: Evidence[];
 }
 

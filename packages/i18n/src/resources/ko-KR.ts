@@ -3,7 +3,6 @@ import type { ResourceTree } from "../types.js";
 
 export const koKR = {
   ...enUS,
-  app: { tagline: "제어 + 추적 레이어" },
   common: {
     ...enUS.common,
     agent: { codex: "codex", claude: "claude", unknown: "unknown" },
@@ -37,6 +36,7 @@ export const koKR = {
       scored: "점수화됨",
       evidence: "증거",
       diagnostic: "진단",
+      protected: "보호됨",
       readOnly: "읽기 전용"
     },
     confidence: { exact: "정확", indexed: "색인됨", heuristic: "추정", unknown: "알 수 없음" },
@@ -150,14 +150,14 @@ export const koKR = {
       subtitle_one: "{{count}}개의 관련 Win32 행",
       subtitle_other: "{{count}}개의 관련 Win32 행",
       noCandidate: "아직 세션 후보가 없습니다",
-      helperNoCandidate: "Helper process; no direct session id or transcript evidence.",
+      helperNoCandidate: "보조 프로세스입니다. 직접 session id 또는 transcript 증거가 없습니다.",
       weakEvidence: "약한 증거",
       candidate: "후보",
       score: "증거 {{score}}",
-      allProcesses: "All processes",
-      taskRoot: "Task root PID {{pid}}",
-      noParentPid: "No parent PID",
-      noCwdCandidate: "No cwd candidate",
+      allProcesses: "모든 프로세스",
+      taskRoot: "작업 루트 PID {{pid}}",
+      noParentPid: "부모 PID 없음",
+      noCwdCandidate: "cwd 후보 없음",
       groupCount_one: "{{count}}개 프로세스",
       groupCount_other: "{{count}}개 프로세스",
       sort: {
@@ -173,7 +173,7 @@ export const koKR = {
         label: "그룹",
         task: "작업",
         role: "역할",
-        agent: "Agent",
+        agent: "에이전트",
         parent: "부모 프로세스",
         cwd: "cwd",
         none: "전체"
@@ -185,15 +185,15 @@ export const koKR = {
       },
       roles: {
         codex_cli: "Codex CLI",
-        codex_engine: "Codex engine",
-        codex_node_repl: "Subagent runtime",
+        codex_engine: "Codex 엔진",
+        codex_node_repl: "하위 에이전트 런타임",
         codex_app_server: "Codex app-server",
-        codex_mcp_tool: "MCP tool",
-        codex_tool_kernel: "Tool kernel",
+        codex_mcp_tool: "MCP 도구",
+        codex_tool_kernel: "도구 커널",
         claude_cli: "Claude CLI",
         claude_daemon: "Claude daemon",
-        agent_helper: "Agent helper",
-        unknown: "Unknown role"
+        agent_helper: "에이전트 보조",
+        unknown: "알 수 없는 역할"
       }
     },
     sessions: {
@@ -220,10 +220,10 @@ export const koKR = {
       context: {
         selectedCount: "{{count}}개 세션 선택됨"
       },
-      allSessions: "All sessions",
-      rootNoParent: "Root / no parent",
-      parentGroup: "Parent: {{title}}",
-      noCwd: "No cwd",
+      allSessions: "모든 세션",
+      rootNoParent: "루트 / 부모 없음",
+      parentGroup: "부모: {{title}}",
+      noCwd: "cwd 없음",
       recycle: {
         title: "휴지통",
         loading: "격리 항목 스캔 중...",
@@ -237,7 +237,7 @@ export const koKR = {
         unavailableAction: "사용 불가",
         restoreBlocked: "이 격리 항목은 복원할 수 없습니다.",
         parent: "부모 {{id}}",
-        evidence: "{{files}} files / {{db}} DB steps",
+        evidence: "{{files}}개 파일 / {{db}}개 DB 단계",
         reason: {
           restored: "이미 복원됨",
           conflict: "로컬 충돌",
@@ -256,7 +256,7 @@ export const koKR = {
       group: {
         cwd: "cwd",
         parent: "부모",
-        agent: "Agent",
+        agent: "에이전트",
         none: "전체"
       }
     },
@@ -297,8 +297,8 @@ export const koKR = {
     loading: {
       title: "로컬 Agent 상태 읽는 중",
       detail: "Win32_Process, Codex SQLite/JSONL, Claude 세션 파일을 확인하고 있습니다.",
-      errorTitle: "Agent state load failed",
-      errorDetail: "{{message}}. Refresh to retry; AgentScope will keep data read-only until a fresh snapshot loads."
+      errorTitle: "Agent 상태 로드 실패",
+      errorDetail: "{{message}}. 새로 고침해 다시 시도하세요. 새 스냅샷이 로드될 때까지 AgentScope는 데이터를 읽기 전용으로 유지합니다."
     }
   },
   settings: {
@@ -387,6 +387,85 @@ export const koKR = {
     },
     codexControl: {
       ...enUS.settings.codexControl,
+      title: "Codex 설정 표면",
+      detail:
+        "허용 목록에 있는 사용자 소유 Codex 파일만 편집합니다. auth, credentials, logs, history 본문, plugin cache, memory 본문은 계속 차단됩니다.",
+      surfaces: "Codex 제어 표면",
+      loading: "Codex 제어 표면 로드 중...",
+      editable: "편집 가능",
+      readOnly: "읽기 전용",
+      noChanges: "저장할 Codex 제어 변경이 없습니다.",
+      dirty: "저장되지 않은 Codex 제어 변경",
+      clean: "대기 중인 Codex 제어 변경 없음",
+      emptyTab: "이 탭에서 구조화된 컨트롤을 찾지 못했습니다.",
+      changedKeys: "변경된 키",
+      savedWithJournal: "저장됨. Journal: {{path}}",
+      highRiskTitle: "고위험 Codex 설정",
+      highRiskConfirm:
+        "이 고위험 Codex 설정을 저장할까요?\n\n{{keys}}\n\n{{warnings}}\n\nAgentScope는 먼저 백업과 journal을 작성합니다.",
+      confirmSave: "그래도 저장",
+      readOnlyDetail:
+        "이 표면은 증거로만 표시됩니다. 상태, 캐시, 공급자 관리 항목 또는 본문 포함 항목이므로 AgentScope는 수정하지 않습니다.",
+      emptyTitle: "선택된 표면 없음",
+      emptyDetail: "Codex 설정 표면을 선택해 증거를 확인하거나 백업되는 문서를 편집하세요.",
+      save: "저장",
+      controlSaved: "Codex 제어 저장됨",
+      saved: "저장됨. 이전 파일이 없어서 백업은 필요하지 않았습니다.",
+      savedWithBackup: "저장됨. 백업: {{path}}",
+      backupBeforeSave: "저장 전 sha256을 확인하고 먼저 ~/.agentscope 아래에 백업을 작성합니다.",
+      redacted: "민감한 키 이름은 마스킹되었습니다. 다시 로드하거나 위치를 표시한 뒤 AgentScope 밖에서 편집하세요.",
+      exists: "있음",
+      bytes: "바이트",
+      updated: "업데이트",
+      modeTitle: "Codex 모드 기본값",
+      modeDetail: "문서화된 config.toml 키만 작성합니다. Plan 모드는 기본 모델을 상속하고 reasoning effort만 덮어쓸 수 있습니다.",
+      model: "모델",
+      reasoning: "추론",
+      inheritDefault: "기본값 상속",
+      unset: "설정 안 됨",
+      planModelNote: "별도 Plan 모델 키는 문서화되어 있지 않습니다. AgentScope는 상속된 기본 모델만 표시합니다.",
+      reviewReasoningNote: "Review reasoning은 기본 reasoning 설정을 상속합니다.",
+      modeEvidence: "증거 출처: OpenAI Codex manual의 설정 키 설명 및 로컬 config.toml 최상위 할당.",
+      mode: {
+        default: "Default 모드",
+        plan: "Plan 모드",
+        review: "Review"
+      },
+      source: {
+        config: "설정",
+        inherits_default: "상속",
+        unset: "설정 안 됨"
+      },
+      tabs: {
+        overview: "개요",
+        models: "모델",
+        safety: "안전",
+        runtime: "런타임",
+        mcp: "MCP",
+        skills: "Skills",
+        storage: "저장소",
+        advanced: "고급",
+        files: "파일"
+      },
+      risk: {
+        low: "낮음",
+        medium: "중간",
+        high: "높음",
+        blocked: "차단됨"
+      },
+      status: {
+        ok: "OK",
+        warn: "주의",
+        blocked: "차단됨"
+      },
+      auth: {
+        present: "보호된 auth 있음",
+        missing: "파일 auth 없음"
+      },
+      overview: {
+        codexHome: "공식 CODEX_HOME 루트입니다. AgentScope는 메타데이터만 인벤토리합니다.",
+        sqliteHome: "config/env 해석 후 SQLite 상태 루트입니다."
+      },
       items: {
         model: {
           label: "기본 모델",
@@ -460,7 +539,7 @@ export const koKR = {
         },
         mcp_summary: {
           label: "MCP 서버",
-          detail: "config.toml의 MCP server table입니다. 변경하려면 config document를 편집합니다."
+          detail: "config.toml의 MCP 서버 테이블입니다. 변경하려면 설정 문서를 편집합니다."
         },
         archive_summary: {
           label: "보관된 threads",
@@ -503,40 +582,40 @@ export const koKR = {
           detail: "Computer Use local state 존재만 표시합니다. AgentScope는 desktop control을 실행하지 않습니다."
         },
         mcp_node_runtime: {
-          label: "MCP Node runtime",
-          detail: "설치된 MCP Node runtime metadata입니다. package scripts 실행이나 source bodies 검사는 하지 않습니다."
+          label: "MCP Node 런타임",
+          detail: "설치된 MCP Node 런타임 메타데이터입니다. package scripts 실행이나 source bodies 검사는 하지 않습니다."
         },
         node_repl_runtime: {
-          label: "Node REPL runtime",
-          detail: "Node REPL runtime 존재와 entry count만 표시합니다. active exec bodies는 읽지 않습니다."
+          label: "Node REPL 런타임",
+          detail: "Node REPL 런타임 존재와 항목 수만 표시합니다. active exec bodies는 읽지 않습니다."
         },
         tmp_arg0: {
           label: "Codex 인수 임시 파일",
           detail: "temporary command argument folders만 셉니다. 생성된 command files는 열지 않습니다."
         },
         vendor_imports_cache: {
-          label: "Vendor imports cache",
+          label: "Vendor imports 캐시",
           detail: "vendor import cache 존재만 표시합니다. cached marketplace bodies는 읽지 않습니다."
         },
         pets_state: {
-          label: "Pets state",
+          label: "Pets 상태",
           detail: "Codex Desktop local state 존재만 표시합니다."
         },
         plugins_summary: {
-          label: "Plugins",
+          label: "플러그인",
           detail: "installed plugin cache와 config summary입니다. AgentScope는 plugin cache bytes를 직접 편집하지 않습니다."
         },
         rules: {
-          label: "Rule file",
+          label: "규칙 파일",
           detail: "사용자 config layer의 Codex command approval rules입니다."
         },
         skill: {
-          label: "User skill",
-          detail: "사용자 skill authoring surface입니다. AgentScope는 SKILL.md만 편집하고 먼저 백업합니다."
+          label: "사용자 Skill",
+          detail: "사용자 Skill 작성 표면입니다. AgentScope는 SKILL.md만 편집하고 먼저 백업합니다."
         },
         skillReadOnly: {
-          label: "Read-only skill",
-          detail: "bundled/system skill surface입니다. AgentScope는 읽기 전용으로 유지합니다."
+          label: "읽기 전용 Skill",
+          detail: "번들/시스템 Skill 표면입니다. AgentScope는 읽기 전용으로 유지합니다."
         }
       },
       warning: {
@@ -544,12 +623,29 @@ export const koKR = {
           "auth.json에는 자격 증명 자료가 포함됩니다. AgentScope는 메타데이터만 표시하며 token 필드를 열거나 편집하거나 표시하지 않습니다.",
         rawConfigBlocked: "고위험 키가 구조화된 확인을 우회하지 못하도록 raw config 편집을 차단합니다.",
         sensitiveKeysBlocked: "민감한 키 이름이 감지되었습니다. raw config 편집을 차단합니다.",
-        systemSkillsReadOnly: "시스템 또는 플러그인 제공 skills는 읽기 전용입니다.",
+        systemSkillsReadOnly: "시스템 또는 플러그인 제공 Skills는 읽기 전용입니다.",
         pluginWorkflowOnly: "install/remove에는 Codex plugin 워크플로를 사용하세요. AgentScope는 증거만 표시합니다.",
         sensitiveConfigBlocked: "민감한 config 키가 감지되었습니다. raw 편집을 차단합니다.",
         highRiskConfirm: "고위험 설정입니다. 실행하려면 명시적 확인이 필요합니다.",
         archivedCountUnreadable: "state_5.sqlite에서 보관된 thread 수를 읽지 못했습니다.",
         sqliteMetadataUnreadable: "이 SQLite 데이터베이스를 메타데이터용 읽기 전용으로 열지 못했습니다."
+      },
+      mcpTitle: "config.toml의 MCP 서버",
+      noMcp: "현재 config.toml에서 MCP 서버 테이블을 찾지 못했습니다.",
+      kind: {
+        config: "설정",
+        agents: "지시문",
+        rules: "규칙",
+        skill: "Skill",
+        plugin: "플러그인",
+        mcp: "MCP",
+        browser: "브라우저",
+        computer_use: "Computer Use",
+        database: "데이터베이스",
+        runtime: "런타임",
+        cache: "캐시",
+        memory: "기억",
+        archive: "보관"
       }
     },
     theme: {
@@ -644,11 +740,11 @@ export const koKR = {
       sqliteLabel: "SQLite 색인",
       codexHomeLabel: "Codex 홈 열기",
       rolloutLabel: "Rollout JSONL",
-      spawnEdgesLabel: "Spawn edges",
+      spawnEdgesLabel: "spawn edge",
       spawnEdgesDetail: "thread_spawn_edges 부모/자식 그래프입니다.",
       pidSessionsLabel: "PID 세션",
       claudeHomeLabel: "Claude 홈 열기",
-      transcriptsLabel: "Transcripts"
+      transcriptsLabel: "전사"
     },
     runtime: {
       win32Label: "Win32_Process",
@@ -682,10 +778,11 @@ export const koKR = {
     processRole: "프로세스 역할",
     runtime: "런타임",
     identity: "식별",
-    transcript: "Transcript",
+    transcript: "전사",
     modelRuntime: "모델 및 실행 설정",
     codexSpawn: "Codex spawn",
     processRuntime: "프로세스 런타임",
+    mcpIdentity: "MCP 식별",
     control: "안전 제어",
     indexMetadata: "색인 메타데이터",
     relations: "관계",
@@ -706,6 +803,11 @@ export const koKR = {
     noCwdEvidence: "cwd 증거 없음",
     safeControlDetail:
       "읽기 전용 모드입니다. 열기, 위치 표시, resume 명령 생성, 내보내기만 허용합니다. kill/archive는 명시적 force 제어가 생기기 전까지 비활성화됩니다.",
+    mcpSource: {
+      user_config: "사용자 설정",
+      plugin_config: "플러그인 설정",
+      process_only: "프로세스 증거"
+    },
     launchAction: {
       resume: "resume",
       fork: "fork"
@@ -733,9 +835,9 @@ export const koKR = {
       executable: "실행 파일",
       command: "명령",
       role: "역할",
-      rootPid: "Root PID",
-      parentAgentPid: "Agent parent",
-      roleEvidence: "Role evidence",
+      rootPid: "루트 PID",
+      parentAgentPid: "Agent 부모",
+      roleEvidence: "역할 증거",
       session: "세션",
       source: "소스",
       target: "대상",
@@ -773,10 +875,16 @@ export const koKR = {
       depth: "깊이",
       agentNickname: "Agent",
       agentRole: "역할",
-      agentPath: "Agent path",
+      agentPath: "Agent 경로",
       sourceKind: "소스 종류",
-      runtimeSessionId: "Runtime ID",
-      runtimeWorkingDir: "Runtime cwd",
+      runtimeSessionId: "런타임 ID",
+      runtimeWorkingDir: "런타임 cwd",
+      server: "서버",
+      serverKind: "종류",
+      transport: "전송",
+      configSource: "설정 출처",
+      configTable: "설정 테이블",
+      commandSummary: "명령 요약",
       resumeCommand: "재개 명령",
       safeControl: "경계"
     }

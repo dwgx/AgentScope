@@ -182,6 +182,221 @@ describe("scope confidence", () => {
     }
   });
 
+  it("decorates MCP tool processes with config-backed identity", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-identity-"));
+    try {
+      const configPath = join(home, ".codex", "config.toml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(
+        configPath,
+        [
+          "[mcp_servers.playwright]",
+          'command = "npx"',
+          'args = ["@playwright/mcp"]',
+          ""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 201,
+              ppid: 100,
+              processName: "node.exe",
+              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
+              agent: "codex",
+              evidence: []
+            }
+          ])
+      });
+
+      expect(snapshot.processes[0]).toMatchObject({
+        processRole: "codex_mcp_tool",
+        displayTitle: "MCP Tool / Playwright",
+        mcp: {
+          displayName: "Playwright",
+          serverName: "playwright",
+          serverKind: "playwright",
+          transport: "stdio",
+          configSource: "user_config",
+          configTable: "mcp_servers.playwright",
+          commandSummary: "npx @playwright/mcp",
+          confidence: "heuristic"
+        }
+      });
+      expect(snapshot.processes[0]?.evidence.map((item) => item.source)).toContain("process.mcp.config");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("inherits MCP identity to helper child processes without treating it as exact evidence", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-child-"));
+    try {
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 301,
+              ppid: 100,
+              processName: "ida-pro-mcp.exe",
+              executablePath: String.raw`C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe`,
+              commandLine: String.raw`"C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe"`,
+              agent: "codex",
+              evidence: []
+            },
+            {
+              pid: 302,
+              ppid: 301,
+              processName: "python.exe",
+              executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
+              commandLine: String.raw`python worker.py`,
+              agent: "unknown",
+              evidence: []
+            }
+          ])
+      });
+
+      const child = snapshot.processes.find((process) => process.pid === 302);
+      expect(child).toMatchObject({
+        processRole: "codex_mcp_tool",
+        displayTitle: "MCP Tool / IDA Pro",
+        mcp: {
+          displayName: "IDA Pro",
+          serverKind: "ida_pro",
+          configSource: "process_only",
+          confidence: "heuristic"
+        }
+      });
+      expect(child?.mcp?.evidence.map((item) => item.source)).toContain("process.mcp.parent_tree");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("extracts custom modelcontextprotocol MCP package names without leaking sensitive values", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-custom-"));
+    try {
+      const configPath = join(home, ".codex", "config.toml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(
+        configPath,
+        [
+          "[mcp_servers.filesystem]",
+          'command = "npx"',
+          'args = ["@modelcontextprotocol/server-filesystem", "D:\\\\Project", "--token=secret-value"]',
+          ""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 401,
+              ppid: 100,
+              processName: "node.exe",
+              commandLine: String.raw`node @modelcontextprotocol/server-filesystem D:\Project`,
+              agent: "codex",
+              evidence: []
+            }
+          ])
+      });
+
+      expect(snapshot.processes[0]?.displayTitle).toBe("MCP Tool / Filesystem");
+      expect(snapshot.processes[0]?.mcp?.serverName).toBe("filesystem");
+      expect(snapshot.processes[0]?.mcp?.commandSummary).toBe("npx @modelcontextprotocol/server-filesystem D:\\Project");
+      expect(JSON.stringify(snapshot.processes[0]?.mcp)).not.toContain("secret-value");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("redacts split sensitive MCP arguments from config-backed command summaries", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-sensitive-"));
+    try {
+      const configPath = join(home, ".codex", "config.toml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(
+        configPath,
+        [
+          "[mcp_servers.filesystem]",
+          'command = "npx"',
+          'args = ["@modelcontextprotocol/server-filesystem", "D:\\\\Project", "--token", "split-secret-value", "--api-key=inline-secret-value"]',
+          ""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 402,
+              ppid: 100,
+              processName: "node.exe",
+              commandLine: String.raw`node @modelcontextprotocol/server-filesystem D:\Project --token split-secret-value`,
+              agent: "codex",
+              evidence: []
+            }
+          ])
+      });
+
+      expect(snapshot.processes[0]?.mcp?.commandSummary).toBe("npx @modelcontextprotocol/server-filesystem D:\\Project");
+      expect(JSON.stringify(snapshot.processes[0]?.mcp)).not.toContain("split-secret-value");
+      expect(JSON.stringify(snapshot.processes[0]?.mcp)).not.toContain("inline-secret-value");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("does not match an MCP config entry from a generic command alone", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-generic-command-"));
+    try {
+      const configPath = join(home, ".codex", "config.toml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(
+        configPath,
+        [
+          "[mcp_servers.filesystem]",
+          'command = "node"',
+          'args = ["D:\\\\tools\\\\filesystem-server.js"]',
+          ""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 403,
+              ppid: 100,
+              processName: "node.exe",
+              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
+              agent: "codex",
+              evidence: []
+            }
+          ])
+      });
+
+      expect(snapshot.processes[0]?.displayTitle).toBe("MCP Tool / Playwright");
+      expect(snapshot.processes[0]?.mcp?.serverName).toBeUndefined();
+      expect(snapshot.processes[0]?.mcp?.configSource).toBe("process_only");
+      expect(snapshot.processes[0]?.evidence.map((item) => item.source)).not.toContain("process.mcp.config");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("merges to the best index confidence", () => {
     const sessions = mergeSessions([baseSession("t1", "heuristic"), baseSession("t1", "indexed")]);
     expect(sessions).toHaveLength(1);
@@ -593,6 +808,31 @@ describe("process role classification", () => {
       runtimeSessionId: "rt-123",
       runtimeWorkingDir: String.raw`D:\Project\AgentScope`
     });
+  });
+
+  it("classifies known MCP server entrypoints but not arbitrary node processes", () => {
+    const processes = annotateProcessTree([
+      {
+        pid: 300,
+        ppid: 10,
+        processName: "node.exe",
+        commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
+        agent: "codex",
+        evidence: []
+      },
+      {
+        pid: 310,
+        ppid: 10,
+        processName: "node.exe",
+        commandLine: String.raw`node D:\Project\plain-script.js`,
+        agent: "unknown",
+        evidence: []
+      }
+    ]);
+
+    expect(processes[0]?.processRole).toBe("codex_mcp_tool");
+    expect(processes[1]?.processRole).toBe("unknown");
+    expect(selectRelatedProcesses(processes).map((process) => process.pid)).toEqual([300]);
   });
 
   it("does not classify arbitrary commands containing app-server text as Codex app servers", () => {

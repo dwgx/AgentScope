@@ -1373,7 +1373,6 @@ function Sidebar(props: {
         </div>
         <div>
           <h1>AgentScope</h1>
-          <p>{t("app.tagline")}</p>
         </div>
       </div>
       <nav className="nav">
@@ -3971,6 +3970,7 @@ function SettingsPanel(props: {
                         <div>
                           <strong>{server.name}</strong>
                           <span>{server.table}</span>
+                          {server.commandSummary && <span className="mono">{server.commandSummary}</span>}
                         </div>
                         <Badge
                           text={server.enabled === false ? t("common.status.readOnly") : server.transport ?? "mcp"}
@@ -4535,6 +4535,7 @@ function Inspector(props: {
           <Field label={t("inspector.fields.parentAgentPid")} value={process.parentAgentPid} />
           <Field label={t("inspector.fields.roleEvidence")} value={process.processRoleDetail} long />
         </FieldGroup>
+        <ProcessMcpSummary process={process} />
         <ProcessRuntimeSummary process={process} />
         <FieldGroup title={t("inspector.likelySessions")}>
           <CandidateList
@@ -4798,6 +4799,23 @@ function ProcessRuntimeSummary(props: { process: AgentProcess }) {
     <FieldGroup title={t("inspector.processRuntime")}>
       <Field label={t("inspector.fields.runtimeSessionId")} value={process.runtimeSessionId} mono long />
       <Field label={t("inspector.fields.runtimeWorkingDir")} value={process.runtimeWorkingDir} mono long />
+    </FieldGroup>
+  );
+}
+
+function ProcessMcpSummary(props: { process: AgentProcess }) {
+  const { t } = useTranslation();
+  const mcp = props.process.mcp;
+  if (props.process.processRole !== "codex_mcp_tool" || !mcp) return null;
+  return (
+    <FieldGroup title={t("inspector.mcpIdentity")}>
+      <Field label={t("inspector.fields.server")} value={mcp.serverName ?? mcp.displayName} />
+      <Field label={t("inspector.fields.serverKind")} value={mcp.serverKind} />
+      <Field label={t("inspector.fields.transport")} value={mcp.transport} />
+      <Field label={t("inspector.fields.configSource")} value={mcpConfigSourceLabel(mcp.configSource, t)} />
+      <Field label={t("inspector.fields.configTable")} value={mcp.configTable} mono long />
+      <Field label={t("inspector.fields.commandSummary")} value={mcp.commandSummary} mono long />
+      <Field label={t("inspector.fields.confidence")} value={<ConfidenceBadge value={mcp.confidence} />} />
     </FieldGroup>
   );
 }
@@ -5434,6 +5452,10 @@ function processRoleDetail(process: AgentProcess, t: (key: string) => string): s
   const root = process.rootPid && process.rootPid !== process.pid ? ` - root PID ${process.rootPid}` : "";
   const parent = process.parentAgentPid ? ` - parent PID ${process.parentAgentPid}` : "";
   return `${process.processRoleDetail ?? t("views.processes.roles.unknown")}${parent}${root}`;
+}
+
+function mcpConfigSourceLabel(source: NonNullable<AgentProcess["mcp"]>["configSource"], t: (key: string) => string): string | undefined {
+  return source ? t(`inspector.mcpSource.${source}`) : undefined;
 }
 
 function EvidenceSummary(props: { evidence: Evidence[] }) {

@@ -17,11 +17,11 @@ import type {
   CodexModeConfigSnapshot,
   CodexModeId,
   CodexModeValue,
-  CodexMcpServerSummary,
   Evidence
 } from "@agentscope/shared";
 import { codexHome, codexSqliteHome, normalizeWindowsPath, userHome } from "./paths.js";
 import { openCodexDb, tableColumns } from "./codex.js";
+import { emptyConfigInventory, inspectToml, type ConfigInventory } from "./mcpIdentity.js";
 
 const maxEditableBytes = 256 * 1024;
 const textEncoding: BufferEncoding = "utf8";
@@ -1262,70 +1262,6 @@ async function directorySurface(input: {
   };
 }
 
-interface ConfigInventory {
-  exists: boolean;
-  mcpServers: CodexMcpServerSummary[];
-  pluginTables: string[];
-  projectTables: string[];
-  sensitiveLines: number[];
-}
-
-function emptyConfigInventory(): ConfigInventory {
-  return { exists: false, mcpServers: [], pluginTables: [], projectTables: [], sensitiveLines: [] };
-}
-
-function inspectToml(content: string, filePath: string): ConfigInventory {
-  const tables = parseTomlTables(content);
-  const mcpServers = new Map<string, CodexMcpServerSummary>();
-  for (const table of tables) {
-    const direct = /^mcp_servers\.([^.]+)$/.exec(table.name);
-    if (direct) {
-      const name = unquoteTomlKey(direct[1]!);
-      mcpServers.set(name, {
-        name,
-        source: "user_config",
-        enabled: booleanValue(table.keys.get("enabled")),
-        transport: table.keys.has("url") ? "http" : table.keys.has("command") ? "stdio" : "unknown",
-        table: table.name,
-        evidence: [
-          {
-            source: "codex.control.config.toml",
-            detail: "MCP server table found in user config.",
-            path: filePath,
-            field: table.name
-          }
-        ]
-      });
-    }
-    const plugin = /^plugins\.(.+)\.mcp_servers\.([^.]+)$/.exec(table.name);
-    if (plugin) {
-      const name = `${unquoteTomlKey(plugin[1]!)}:${unquoteTomlKey(plugin[2]!)}`;
-      mcpServers.set(name, {
-        name,
-        source: "plugin_config",
-        enabled: booleanValue(table.keys.get("enabled")),
-        transport: "plugin",
-        table: table.name,
-        evidence: [
-          {
-            source: "codex.control.config.toml",
-            detail: "Plugin MCP server policy table found in user config.",
-            path: filePath,
-            field: table.name
-          }
-        ]
-      });
-    }
-  }
-  return {
-    exists: true,
-    mcpServers: [...mcpServers.values()].sort((left, right) => left.name.localeCompare(right.name)),
-    pluginTables: tables.filter((table) => /^plugins\./.test(table.name)).map((table) => table.name),
-    projectTables: tables.filter((table) => /^projects\./.test(table.name)).map((table) => table.name),
-    sensitiveLines: sensitiveLineNumbers(content)
-  };
-}
-
 function configCenterItem(
   id: string,
   descriptor: NonNullable<ReturnType<typeof editableConfigItems.get>>,
@@ -1997,29 +1933,6 @@ function balancedDelimiters(line: string): boolean {
   return !single && !double && square === 0 && curly === 0;
 }
 
-interface TomlTable {
-  name: string;
-  keys: Map<string, string>;
-}
-
-function parseTomlTables(content: string): TomlTable[] {
-  const tables: TomlTable[] = [];
-  let current: TomlTable | undefined;
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = stripTomlComment(rawLine).trim();
-    if (!line) continue;
-    const tableMatch = /^\[+\s*([^\]]+?)\s*\]+$/.exec(line);
-    if (tableMatch) {
-      current = { name: tableMatch[1]!, keys: new Map() };
-      tables.push(current);
-      continue;
-    }
-    const keyMatch = /^([A-Za-z0-9_.-]+)\s*=\s*(.+)$/.exec(line);
-    if (keyMatch && current) current.keys.set(keyMatch[1]!, keyMatch[2]!.trim());
-  }
-  return tables;
-}
-
 function stripTomlComment(line: string): string {
   let quoted = false;
   let quote = "";
@@ -2037,10 +1950,6 @@ function stripTomlComment(line: string): string {
     if (char === "#" && !quoted) return line.slice(0, index);
   }
   return line;
-}
-
-function unquoteTomlKey(value: string): string {
-  return value.replace(/^["']|["']$/g, "");
 }
 
 function booleanValue(value?: string): boolean | undefined {

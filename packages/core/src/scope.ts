@@ -14,6 +14,7 @@ import type {
 import { mergeActivity } from "./activity.js";
 import { loadClaudeIndexRecords, loadClaudeSessions, loadClaudeTranscripts } from "./claude.js";
 import { appendEvidenceUnique, loadCodexIndex, scanCodexRollouts } from "./codex.js";
+import { decorateMcpProcessIdentity, loadCodexConfigInventory } from "./mcpIdentity.js";
 import { containsNormalizedPath, containsNormalizedPathToken } from "./paths.js";
 import { listProcesses } from "./processes.js";
 
@@ -62,8 +63,10 @@ export async function buildSnapshot(
   const transcripts = [...claudeTranscriptIndex.transcripts, ...rollouts.transcripts];
   const indexRecords = [...claudeRecords, ...codex.records, ...rollouts.records];
   const relations = [...codex.relations, ...rollouts.relations, ...claudeTranscriptIndex.relations];
+  const mcpInventory = loadCodexConfigInventory(home);
 
   attachTranscripts(sessions, transcripts);
+  decorateMcpProcessIdentity(processes, mcpInventory.mcpServers);
   attachProcesses(sessions, processes, relations);
   applyRelations(sessions, relations);
   decorateProcesses(processes);
@@ -262,6 +265,9 @@ function decorateProcesses(processes: AgentProcess[]): void {
 
 function processDisplayTitle(process: AgentProcess): string {
   const role = processRoleDisplayName(process.processRole);
+  if (process.processRole === "codex_mcp_tool" && process.mcp?.displayName) {
+    return `${role ?? "MCP Tool"} / ${process.mcp.displayName}`;
+  }
   const candidate = bestDisplayCandidate(process);
   const candidateTitle = cleanDisplayTitle(candidate?.title);
   const candidateCwd = basename(candidate?.cwd);

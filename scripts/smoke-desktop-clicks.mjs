@@ -181,8 +181,10 @@ async function smokeProcessTree(page) {
   await expectAttribute(page.locator('[data-testid="process-row"][data-pid="9120"]'), "data-depth", "2");
   await page.locator('[data-testid="process-row"][data-pid="9130"][data-process-role="codex_app_server"]').waitFor();
   await page.locator('[data-testid="process-row"][data-pid="9140"][data-process-role="codex_mcp_tool"]').waitFor();
+  await expectText(page.locator('[data-testid="process-row"][data-pid="9140"]'), /MCP Tool\s*\/\s*Playwright/i);
   await page.locator('[data-testid="process-row"][data-pid="9150"][data-process-role="codex_tool_kernel"]').waitFor();
   await page.locator('[data-testid="process-row"][data-pid="9160"][data-process-role="codex_mcp_tool"]').waitFor();
+  await expectText(page.locator('[data-testid="process-row"][data-pid="9160"]'), /MCP Tool\s*\/\s*IDA Pro/i);
   await page.locator('[data-testid="process-row"][data-pid="9170"][data-process-role="codex_mcp_tool"]').waitFor();
   await expectAttribute(page.locator('[data-testid="process-row"][data-pid="9170"]'), "data-parent-agent-pid", "9160");
   await page.screenshot({ path: path.join(outputRoot, "process-tree-expanded.png"), fullPage: true });
@@ -192,7 +194,7 @@ async function smokeProcessTree(page) {
   await expectText(page.locator('[data-testid="process-context-menu"]'), /MCP|parent PID|root PID/i);
   await page.locator('[data-testid="process-context-inspect"]').click();
   await page.locator('[data-testid="process-row"][data-pid="9140"].selected').waitFor();
-  await expectText(page.locator('[data-testid="inspector"]'), /MCP|process\.parent_tree|Win32_Process|smoke\.synthetic\.process/i);
+  await expectText(page.locator('[data-testid="inspector"]'), /MCP 身份|Playwright|mcp_servers\.playwright|process\.mcp\.config|smoke\.synthetic\.process/i);
 
   await page.locator('[data-testid="process-group-control"] button[data-value="role"]').click();
   await page.locator('[data-testid="process-group"][data-group-key="role:codex_mcp_tool"]').waitFor();
@@ -708,8 +710,9 @@ function seedFixtureHome(targetHome) {
       "[windows]",
       'sandbox = "unelevated"',
       "",
-      "[mcp_servers.synthetic]",
+      "[mcp_servers.playwright]",
       'command = "node"',
+      'args = ["@playwright/mcp"]',
       "enabled = true",
       "",
       '[plugins."browser@openai-bundled"]',
