@@ -31,6 +31,9 @@ and React/TypeScript renderer for the control surface.
 - Inventories safe Codex control surfaces such as config modes, MCP summary,
   rules, user skills, archives, memories, browser/computer-use state, and
   protected auth metadata.
+- Labels Codex-launched MCP helper processes with evidence-backed identities
+  such as Playwright, IDA Pro, or Model Context Protocol package names without
+  reading MCP payloads.
 - Scores process-to-session candidates with evidence from PID, cwd,
   transcript path, session id, window title, and start/update time.
 - Tracks confidence: `exact`, `indexed`, `heuristic`, `unknown`. Time-only
@@ -79,6 +82,17 @@ Packaging smoke test:
 npm run package
 ```
 
+Portable-only local release build:
+
+```powershell
+npm run native:rebuild
+npm --workspace @agentscope/desktop run build
+Push-Location apps/desktop
+npx electron-builder --win portable --x64 --publish never --config.directories.output=out-portable --config.extraMetadata.version=0.1.0
+Pop-Location
+npm run native:restore
+```
+
 Release/prebuild verification:
 
 ```powershell
@@ -100,6 +114,10 @@ npm run clean:artifacts
 
 `clean:artifacts` is a dry run by default. Pass `-- --apply` only after checking
 the listed paths; it is restricted to `apps/desktop/out`.
+
+Portable-only release artifacts can be written to ignored
+`apps/desktop/out-portable/` when the unpacked app in `apps/desktop/out` is
+locked by a running AgentScope instance.
 
 The unpacked Windows app is written to:
 
@@ -169,6 +187,7 @@ Future agents should read:
 - `AGENTS.md`
 - `docs/handoff-next-ai.md`
 - `docs/research-local-agent-stores.md`
+- `docs/release-0.1.0-summary-2026-06-15.md`
 
 ## Repository Governance
 

@@ -11,6 +11,10 @@ Source: local repository inspection, artifact audit, and subagent read-only audi
 - No real credential/API key/PAT/JWT leak was found in tracked or untracked non-ignored files, or targeted git-history scans.
 - No tracked `node_modules`, `dist`, `out`, real `.jsonl`, or real `.sqlite` files were found.
 - Ignored `apps/desktop/out/` contains build output and smoke screenshots with local paths, session titles, PIDs, and session IDs. These are local-only and must not be shared or committed.
+- Ignored `apps/desktop/out-portable/` is used for portable-only release
+  builds when `apps/desktop/out/win-unpacked` is locked by a running app.
+  It can contain signed release executables and unpacked Electron files, but it
+  is still a local artifact directory and must not be committed.
 - `apps/desktop/out/builder-debug.yml` is a local Electron Builder debug file and can contain machine-local paths. It must not be included in release manifests or uploaded artifacts.
 - Some tests still use realistic Windows paths and fake tokens as fixtures. They are allowed but should be gradually migrated to clearly synthetic values.
 - Documentation should prefer `%USERPROFILE%` and `%WORKSPACE%` over real user names and project roots.
@@ -20,6 +24,7 @@ Source: local repository inspection, artifact audit, and subagent read-only audi
 - `node_modules/`
 - `dist/`
 - `out/`
+- `out-portable/`
 - `tmp/`
 - `.codex/`
 - `.claude/`
@@ -68,6 +73,13 @@ npm run clean:artifacts
 With `-- --apply`, the default cleanup removes local-only `ci-pre/` and
 `builder-debug.yml`. It does not remove smoke screenshots or current release
 files unless `-- --smoke` or `-- --releasables` is explicitly passed.
+
+If a portable-only release was built into `apps/desktop/out-portable`, delete it
+after preserving the needed release executable and hash:
+
+```powershell
+npm run clean:artifacts -- --portable --apply
+```
 
 Do not clean user data through repository scripts. Real `%USERPROFILE%\.codex`,
 `%USERPROFILE%\.claude`, `%USERPROFILE%\.agentscope\backups`, and

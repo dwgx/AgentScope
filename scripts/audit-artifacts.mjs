@@ -4,6 +4,7 @@ import path from "node:path";
 
 const root = process.cwd();
 const outDir = path.join(root, "apps", "desktop", "out");
+const portableOutDir = path.join(root, "apps", "desktop", "out-portable");
 const manifestPath = path.join(outDir, "agentscope-prebuild.json");
 
 const rows = [];
@@ -28,13 +29,12 @@ console.log(`outDir: ${outDir}`);
 console.log(`currentHead: ${head ?? "(unknown)"}`);
 if (!fs.existsSync(outDir)) {
   console.log("status: missing output directory");
-  process.exit(0);
-}
-
-console.log("");
-console.log("entries:");
-for (const row of rows.sort((a, b) => b.bytes - a.bytes)) {
-  console.log(`- ${row.kind.padEnd(9)} ${formatBytes(row.bytes).padStart(10)} ${row.updatedAt} ${row.name}`);
+} else {
+  console.log("");
+  console.log("entries:");
+  for (const row of rows.sort((a, b) => b.bytes - a.bytes)) {
+    console.log(`- ${row.kind.padEnd(9)} ${formatBytes(row.bytes).padStart(10)} ${row.updatedAt} ${row.name}`);
+  }
 }
 
 if (manifest) {
@@ -63,6 +63,14 @@ for (const candidate of cleanupCandidates()) {
   console.log(`- ${candidate}`);
 }
 
+if (fs.existsSync(portableOutDir)) {
+  console.log("");
+  console.log("portable-only output:");
+  for (const row of directoryRows(portableOutDir).sort((a, b) => b.bytes - a.bytes)) {
+    console.log(`- ${row.kind.padEnd(9)} ${formatBytes(row.bytes).padStart(10)} ${row.updatedAt} ${path.join("apps", "desktop", "out-portable", row.name)}`);
+  }
+}
+
 function cleanupCandidates() {
   const out = [];
   for (const name of ["ci-pre", "builder-debug.yml"]) {
@@ -70,7 +78,25 @@ function cleanupCandidates() {
   }
   const smokeDir = path.join(outDir, "smoke");
   if (fs.existsSync(smokeDir)) out.push(path.join("apps", "desktop", "out", "smoke", "(use clean:artifacts --apply after preserving needed screenshots)"));
+  if (fs.existsSync(portableOutDir)) {
+    out.push(path.join("apps", "desktop", "out-portable", "(portable-only release output; remove manually after preserving needed assets)"));
+  }
   return out;
+}
+
+function directoryRows(dirPath) {
+  const rows = [];
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const target = path.join(dirPath, entry.name);
+    const stat = fs.statSync(target);
+    rows.push({
+      name: entry.name,
+      kind: entry.isDirectory() ? "directory" : "file",
+      bytes: entry.isDirectory() ? directorySize(target) : stat.size,
+      updatedAt: stat.mtime.toISOString()
+    });
+  }
+  return rows;
 }
 
 function directorySize(dirPath) {

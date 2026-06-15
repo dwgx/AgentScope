@@ -1,6 +1,6 @@
 # AgentScope Next-AI Handoff
 
-Last updated: 2026-06-13.
+Last updated: 2026-06-15.
 
 Read order for the next AI:
 
@@ -10,7 +10,10 @@ Read order for the next AI:
 4. `docs/research-local-agent-stores.md`
 5. `docs/repository-hygiene.md`
 6. `docs/session-delete-cascade-recovery-2026-06-15.md`
-7. `README.md`
+7. `docs/ui-polish-plan-and-summary-2026-06-15.md`
+8. `docs/mcp-tool-identity-2026-06-15.md`
+9. `docs/release-0.1.0-summary-2026-06-15.md`
+10. `README.md`
 
 ## Product Identity
 
@@ -37,23 +40,21 @@ The user expects:
 
 Use `git log --oneline -8` for the current commit list before changing code.
 
-The current maintenance batch focuses on release/artifact hygiene, stronger
-delete/Codex Control journaling, synthetic smoke coverage, and avoiding local
-debug artifacts in prebuild manifests.
-
-Latest verified implementation snapshot before this handoff refresh:
+Latest stable release:
 
 ```text
-commit: 9d774dc Harden release hygiene and operation journals
-github ci: https://github.com/dwgx/AgentScope/actions/runs/27447351810
-ci conclusion: success
-artifact: AgentScope-win-pre
+release: v0.1.0
+commit: 0c1b2b9 Identify MCP tools and polish localization
+github: https://github.com/dwgx/AgentScope/releases/tag/v0.1.0
+asset: AgentScope-0.1.0-Portable-x64.exe
+sha256: 078BE46458B4DABC33B6DD192EEEB7AE8E1D2408F91F6AAB55B2EA67C6A6DB3E
 ```
 
-If this document is committed after the snapshot above, treat GitHub Actions for
-the new HEAD as the current release evidence. Local `apps/desktop/out` can be
-stale after any commit because `agentscope-prebuild.json` records the HEAD that
-existed when `npm run package:pre` ran.
+The stable release is a normal GitHub release, not a prerelease. It was built as
+a portable-only release into ignored `apps/desktop/out-portable/`. Smoke was
+intentionally not run for the final stable republish because the user requested
+no smoke, but the same release cycle previously passed full packaged release
+checks for the MCP/UI work.
 
 The 2026-06-15 local recovery batch hardened `childMode="includeChildren"`
 delete rollback, fixed SQLite multi-table rollback, restored launcher
@@ -61,6 +62,13 @@ delete rollback, fixed SQLite multi-table rollback, restored launcher
 plus IPC-negative smoke.
 See `docs/session-delete-cascade-recovery-2026-06-15.md` for the evidence,
 plan, implementation summary, and local verification record.
+
+The 2026-06-15 release batch added evidence-backed MCP tool identity, improved
+Japanese/Korean/Chinese localization, removed the sidebar tagline, and published
+`v0.1.0`. See:
+
+- `docs/mcp-tool-identity-2026-06-15.md`
+- `docs/release-0.1.0-summary-2026-06-15.md`
 
 ## Commands
 
@@ -110,6 +118,9 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 - `packages/core/src/search.ts`: Codex SQLite and JSONL safe-field search.
 - `packages/core/src/jsonl.ts`: JSONL streaming and search allowlist. Privacy-sensitive.
 - `packages/core/src/codexControl.ts`: Codex control surfaces, protected auth metadata, rules/skills editing, structured config mutation, mutation journal. Security-sensitive.
+- `packages/core/src/mcpIdentity.ts`: evidence-backed MCP helper identity from
+  safe Codex config metadata, process command/path markers, and parent-tree
+  inheritance. Do not read MCP payloads here.
 - `packages/core/src/sessionOps.ts`: backup, delete, import, quarantine restore, journal, Codex DB row bundles. Highest risk.
 - `apps/desktop/src/main/main.ts`: Electron IPC, shell path allowlists, launchers, dialogs, diagnostic repair.
 - `apps/desktop/src/preload/preload.cjs`: narrow renderer API.
@@ -161,6 +172,17 @@ Codex Control:
 - Structured mutations use allowlisted key paths, sha256 conflict checks, risk classification, backup, and journal.
 - AGENTS/rules/user skill documents are allowlisted but sensitive-looking content is redacted and cannot be saved.
 
+MCP identity:
+
+- Only decorate processes already classified as `codex_mcp_tool`.
+- Treat config matches, command/path markers, and parent-tree inheritance as
+  evidence, not certainty.
+- Keep inherited child identities heuristic.
+- Do not match a config entry from a generic command such as `node` alone.
+- Strip token/API-key style arguments from all displayed command summaries.
+- Never read MCP stdio/HTTP payloads, browser contents, hidden vendor reasoning,
+  credentials, or memory bodies for identity.
+
 ## UI State
 
 Implemented views:
@@ -192,6 +214,8 @@ Current hygiene rules:
 - `npm run audit:repo` checks tracked and untracked non-ignored files for high-confidence secrets, hard-coded local paths, and real local artifacts.
 - `npm run audit:artifacts` inventories ignored desktop outputs and identifies local-only cleanup candidates.
 - `npm run clean:artifacts` is dry-run by default; `-- --apply` is required to delete and is restricted to `apps/desktop/out`.
+- `apps/desktop/out-portable/` is ignored and used for portable-only release
+  output. Treat it as local artifact state, not source.
 - If a real credential is found in git history, do not rewrite history automatically. Report, rotate/revoke, and ask before `filter-repo`/BFG.
 
 ## Known Residual Risks
@@ -208,12 +232,17 @@ Current hygiene rules:
 
 Highest-value next tasks:
 
-1. After manual desktop testing, regenerate `package:pre` artifacts for the final HEAD, verify with `--strict-head`, then push and monitor GitHub Actions.
-2. Add broader Electron/Playwright smoke coverage for Settings, Relations filters, context menus, notifications, and launch notifications.
-3. Remove or isolate old Claude patch helpers unless reversible patch/restore is implemented.
-4. Add keyboard access to row context menus with `Shift+F10`.
-5. Keep improving Codex subagent/process role classification, but never upgrade heuristic to exact without evidence.
-6. Continue Codex Control expansion only with safe structured controls and protected credentials.
+1. Add broader Electron/Playwright smoke coverage for Settings, Relations
+   filters, context menus, notifications, and launch notifications.
+2. Remove or isolate old Claude patch helpers unless reversible patch/restore is
+   implemented.
+3. Add keyboard access to row context menus with `Shift+F10`.
+4. Keep improving Codex subagent/process role classification, but never upgrade
+   heuristic to exact without evidence.
+5. Continue Codex Control expansion only with safe structured controls and
+   protected credentials.
+6. For the next release, use `npm run check:release` when the user allows smoke;
+   if smoke is explicitly skipped, record that in the release notes.
 
 ## Source Research Summary
 
