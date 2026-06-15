@@ -162,6 +162,7 @@ export const koKR = {
       groupCount_other: "{{count}}개 프로세스",
       sort: {
         label: "정렬",
+        active: "활동",
         time: "시간",
         runtime: "실행 시간",
         memory: "메모리",

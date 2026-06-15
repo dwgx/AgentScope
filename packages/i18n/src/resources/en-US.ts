@@ -178,6 +178,7 @@ export const enUS = {
       groupCount_other: "{{count}} processes",
       sort: {
         label: "Sort",
+        active: "Active",
         time: "Time",
         runtime: "Runtime",
         memory: "Memory",
@@ -600,6 +601,11 @@ export const enUS = {
         low: "low",
         medium: "medium",
         high: "high",
+        blocked: "blocked"
+      },
+      status: {
+        ok: "OK",
+        warn: "attention",
         blocked: "blocked"
       },
       auth: {

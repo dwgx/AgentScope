@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -58,6 +58,125 @@ describe("scope confidence", () => {
       expect(snapshot.sessions.some((item) => item.sessionId === sessionId)).toBe(true);
       expect(snapshot.processes).toHaveLength(0);
       expect(snapshot.diagnostics?.some((item) => item.name === "win32.process.scan" && item.detail.includes("bad process JSON"))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("decorates live processes with display titles and last activity timestamps", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-process-decoration-"));
+    try {
+      const sessionId = "33333333-3333-4333-8333-333333333333";
+      const rollout = join(home, ".codex", "sessions", "2026", "06", "15", `rollout-2026-06-15T10-00-00-${sessionId}.jsonl`);
+      mkdirSync(dirname(rollout), { recursive: true });
+      writeFileSync(
+        rollout,
+        [
+          JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }),
+          JSON.stringify({ type: "event_msg", payload: { timestamp: "2026-06-15T10:45:00.000Z" } })
+        ].join("\n"),
+        "utf8"
+      );
+      const activityTime = new Date("2026-06-15T10:45:00.000Z");
+      utimesSync(rollout, activityTime, activityTime);
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 101,
+              ppid: 1,
+              processName: "node.exe",
+              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js --cwd D:\Project\AgentScope`,
+              startTime: "2026-06-15T10:10:00.000Z",
+              agent: "codex",
+              evidence: []
+            }
+          ])
+      });
+
+      expect(snapshot.processes[0]?.displayTitle).toBe("Codex CLI / AgentScope");
+      expect(snapshot.processes[0]?.lastActivityAt).toBe("2026-06-15T10:45:00.000Z");
+      expect(snapshot.processes[0]?.evidence.map((item) => item.source)).toContain("process.activity");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("uses strong session titles as live process display titles", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-process-title-"));
+    try {
+      const sessionId = "44444444-4444-4444-8444-444444444444";
+      const rollout = join(home, ".codex", "sessions", "2026", "06", "15", `rollout-2026-06-15T10-20-00-${sessionId}.jsonl`);
+      mkdirSync(dirname(rollout), { recursive: true });
+      writeFileSync(
+        rollout,
+        [
+          JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }),
+          JSON.stringify({ data: { title: "AgentScope process title polish" } }),
+          JSON.stringify({ type: "event_msg", payload: { timestamp: "2026-06-15T10:50:00.000Z" } })
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 102,
+              ppid: 1,
+              processName: "node.exe",
+              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js --cwd D:\Project\AgentScope`,
+              startTime: "2026-06-15T10:25:00.000Z",
+              agent: "codex",
+              evidence: []
+            }
+          ])
+      });
+
+      expect(snapshot.processes[0]?.sessionCandidates?.[0]?.confidence).toBe("heuristic");
+      expect(snapshot.processes[0]?.displayTitle).toBe("AgentScope process title polish");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a role prefix when only weak session-title evidence is available", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-process-weak-title-"));
+    try {
+      const sessionId = "55555555-5555-4555-8555-555555555555";
+      const rollout = join(home, ".codex", "sessions", "2026", "06", "15", `rollout-2026-06-15T11-00-00-${sessionId}.jsonl`);
+      mkdirSync(dirname(rollout), { recursive: true });
+      writeFileSync(
+        rollout,
+        [
+          JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\Other` } }),
+          JSON.stringify({ data: { title: "SteamVR driver settings audit" } }),
+          JSON.stringify({ type: "event_msg", payload: { timestamp: "2026-06-15T11:05:00.000Z" } })
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 103,
+              ppid: 1,
+              processName: "node.exe",
+              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
+              startTime: "2026-06-15T02:03:00.000Z",
+              agent: "codex",
+              evidence: []
+            }
+          ])
+      });
+
+      expect(snapshot.processes[0]?.sessionCandidates?.[0]?.confidence).toBe("unknown");
+      expect(snapshot.processes[0]?.displayTitle).toBe("Codex CLI / SteamVR driver settings audit");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

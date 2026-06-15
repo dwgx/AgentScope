@@ -66,6 +66,7 @@ export async function buildSnapshot(
   attachTranscripts(sessions, transcripts);
   attachProcesses(sessions, processes, relations);
   applyRelations(sessions, relations);
+  decorateProcesses(processes);
 
   sessions.sort((a, b) => a.agent.localeCompare(b.agent) || (a.updatedAt ?? "").localeCompare(b.updatedAt ?? "") || a.sessionId.localeCompare(b.sessionId));
 
@@ -243,6 +244,91 @@ function attachProcesses(sessions: AgentSession[], processes: AgentProcess[], re
       field: "CommandLine,cwd,transcriptPath,CreationDate,StartTime,MainWindowTitle"
     });
   }
+}
+
+function decorateProcesses(processes: AgentProcess[]): void {
+  for (const process of processes) {
+    process.displayTitle = processDisplayTitle(process);
+    process.lastActivityAt = processLastActivity(process);
+    if (process.lastActivityAt) {
+      process.evidence.push({
+        source: "process.activity",
+        detail: "Process last activity is derived from attached session candidate update time, process start time, or creation date.",
+        field: "sessionCandidates.updatedAt,StartTime,CreationDate"
+      });
+    }
+  }
+}
+
+function processDisplayTitle(process: AgentProcess): string {
+  const role = processRoleDisplayName(process.processRole);
+  const candidate = bestDisplayCandidate(process);
+  const candidateTitle = cleanDisplayTitle(candidate?.title);
+  const candidateCwd = basename(candidate?.cwd);
+  if (candidateTitle && candidate && isUsefulProcessCandidate(candidate)) {
+    return role && (isHelperProcess(process) || candidate.confidence === "unknown") ? `${role} / ${candidateTitle}` : candidateTitle;
+  }
+  const title = cleanDisplayTitle(process.windowTitle);
+  if (title && !isHelperProcess(process)) return title;
+  const cwd = candidateCwd ?? basename(process.cwdHint) ?? basename(process.runtimeWorkingDir);
+  if (role && cwd) return `${role} / ${cwd}`;
+  if (role) return role;
+  return cleanProcessName(process.processName) || `PID ${process.pid}`;
+}
+
+function bestDisplayCandidate(process: AgentProcess): SessionCandidate | undefined {
+  return [...(process.sessionCandidates ?? [])]
+    .filter(isUsefulProcessCandidate)
+    .sort(
+      (left, right) =>
+        confidenceRank(right.confidence) - confidenceRank(left.confidence) ||
+        right.score - left.score ||
+        (right.updatedAt ?? right.startedAt ?? "").localeCompare(left.updatedAt ?? left.startedAt ?? "") ||
+        left.sessionId.localeCompare(right.sessionId)
+    )[0];
+}
+
+function isUsefulProcessCandidate(candidate: SessionCandidate): boolean {
+  return candidate.score >= 20 || candidate.confidence === "exact";
+}
+
+function processRoleDisplayName(role: AgentProcess["processRole"]): string | undefined {
+  const labels: Record<string, string> = {
+    codex_cli: "Codex CLI",
+    codex_engine: "Codex Engine",
+    codex_node_repl: "Codex Node REPL",
+    codex_app_server: "Codex app-server",
+    codex_mcp_tool: "MCP Tool",
+    codex_tool_kernel: "Codex Tool Kernel",
+    claude_cli: "Claude CLI",
+    claude_daemon: "Claude daemon",
+    agent_helper: "Agent helper"
+  };
+  return role ? labels[role] : undefined;
+}
+
+function processLastActivity(process: AgentProcess): string | undefined {
+  const candidateTimes = (process.sessionCandidates ?? [])
+    .flatMap((candidate) => [candidate.updatedAt, candidate.startedAt])
+    .filter(isDefined);
+  return [...candidateTimes, process.startTime, process.creationDate].filter(isDefined).sort().at(-1);
+}
+
+function cleanDisplayTitle(value: string | undefined): string | undefined {
+  const cleaned = value?.replace(/\s+/g, " ").trim();
+  if (!cleaned || /^[.-]+$/.test(cleaned)) return undefined;
+  return cleaned.length > 80 ? `${cleaned.slice(0, 77)}...` : cleaned;
+}
+
+function cleanProcessName(value: string | undefined): string | undefined {
+  const cleaned = value?.replace(/\.exe$/i, "").trim();
+  return cleaned || undefined;
+}
+
+function basename(value?: string): string | undefined {
+  if (!value) return undefined;
+  const parts = value.split(/[\\/]+/).filter(Boolean);
+  return cleanDisplayTitle(parts.at(-1));
 }
 
 function applyRelations(sessions: AgentSession[], relations: Relation[]): void {
@@ -523,6 +609,10 @@ function isHelperProcess(process: AgentProcess): boolean {
 function bestConfidence(left: Confidence, right: Confidence): Confidence {
   const rank: Record<Confidence, number> = { unknown: 0, heuristic: 1, indexed: 2, exact: 3 };
   return rank[left]! >= rank[right]! ? left : right;
+}
+
+function confidenceRank(value: Confidence): number {
+  return { unknown: 0, heuristic: 1, indexed: 2, exact: 3 }[value];
 }
 
 function maxText(left?: string, right?: string): string | undefined {

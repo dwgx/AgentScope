@@ -88,7 +88,7 @@ type FontPreset = "windows" | "language" | "claude" | "japaneseTextbook" | "dens
 type ControlMode = "safe" | "readOnly";
 type StrongConfidence = "exact" | "indexed" | "heuristic";
 type SessionLaunchAction = "resume" | "fork";
-type ProcessSortMode = "time" | "memory" | "runtime" | "score" | "tree";
+type ProcessSortMode = "active" | "time" | "memory" | "runtime" | "score" | "tree";
 type ProcessGroupMode = "task" | "role" | "agent" | "parent" | "cwd" | "none";
 interface ProcessTreeRow {
   process: AgentProcess;
@@ -359,7 +359,6 @@ function App() {
     setSettings((current) => {
       const next = { ...current, ...patch };
       saveSettings(next);
-      if (patch.controlMode) syncControlMode(next.controlMode);
       return next;
     });
   }
@@ -1514,14 +1513,35 @@ function CommandBar(props: {
         />
       </div>
       <div className="statusChips">
-        <StatusChip label={t("command.proc")} value={props.counts.processes} />
-        <StatusChip label={t("command.matched")} value={props.counts.matched} />
-        <StatusChip label="Codex" value={props.counts.codex} />
-        <StatusChip label="Claude" value={props.counts.claude} />
+        <StatusChip
+          label={t("command.proc")}
+          value={props.counts.processes}
+          icon={<Cpu size={14} />}
+          testId="status-chip-processes"
+          onClick={() => props.onSetView("processes")}
+        />
+        <StatusChip
+          label={t("command.matched")}
+          value={props.counts.matched}
+          icon={<CircleDot size={14} />}
+          testId="status-chip-matched"
+          onClick={() => props.onSetView("processes")}
+        />
+        <StatusChip label="Codex" value={props.counts.codex} icon={<Bot size={14} />} testId="status-chip-codex" onClick={() => props.onSetView("processes")} />
+        <StatusChip
+          label="Claude"
+          value={props.counts.claude}
+          icon={<MessagesSquare size={14} />}
+          testId="status-chip-claude"
+          onClick={() => props.onSetView("sessions")}
+        />
         <StatusChip
           label={t("command.warn")}
           value={props.counts.warnings}
           tone={props.counts.warnings ? "warn" : "ok"}
+          icon={<AlertTriangle size={14} />}
+          testId="status-chip-warnings"
+          onClick={() => props.onSetView("doctor")}
         />
       </div>
       <button className="iconButton" title={t("command.refreshTitle")} onClick={props.onRefresh}>
@@ -1817,11 +1837,24 @@ function MenuDivider() {
   return <div className="menuDivider" />;
 }
 
-function StatusChip(props: { label: string; value: number; tone?: "ok" | "warn" }) {
-  return (
-    <span className={`statusChip ${props.tone ?? ""}`}>
+function StatusChip(props: { label: string; value: number; tone?: "ok" | "warn"; icon?: ReactNode; testId?: string | undefined; onClick?: () => void }) {
+  const content = (
+    <>
+      {props.icon}
       <span>{props.label}</span>
       <strong>{props.value}</strong>
+    </>
+  );
+  if (props.onClick) {
+    return (
+      <button className={`statusChip ${props.tone ?? ""}`} data-testid={props.testId} onClick={props.onClick} title={`${props.label}: ${props.value}`}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <span className={`statusChip ${props.tone ?? ""}`} data-testid={props.testId}>
+      {content}
     </span>
   );
 }
@@ -1838,7 +1871,7 @@ function ProcessList(props: {
 }) {
   const { t, i18n: activeI18n } = useTranslation();
   const locale = activeI18n.resolvedLanguage ?? activeI18n.language;
-  const [sortMode, setSortMode] = useState<ProcessSortMode>("time");
+  const [sortMode, setSortMode] = useState<ProcessSortMode>("active");
   const [groupMode, setGroupMode] = useState<ProcessGroupMode>("task");
   const [, startProcessListTransition] = useTransition();
   const [isReordering, setIsReordering] = useState(false);
@@ -1915,7 +1948,7 @@ function ProcessList(props: {
         <ToolbarControl label={t("views.processes.sort.label")}>
           <MiniSegmentedControl
             value={sortMode}
-            values={["time", "runtime", "memory", "score", "tree"]}
+            values={["active", "time", "runtime", "memory", "score", "tree"]}
             label={(value) => t(`views.processes.sort.${value}`)}
             onChange={(value) =>
               reorder(() => setSortMode(value as ProcessSortMode))
@@ -2306,13 +2339,15 @@ function SessionList(props: {
             testId="sessions-kind-filter"
           />
         </ToolbarControl>
-        <MiniSegmentedControl
-          value={groupMode}
-          values={["cwd", "parent", "agent", "none"]}
-          label={(value) => t(`views.sessions.group.${value}`)}
-          onChange={(value) => setGroupMode(value as SessionGroupMode)}
-          testId="sessions-group-filter"
-        />
+        <ToolbarControl label={t("views.sessions.group.label")}>
+          <MiniSegmentedControl
+            value={groupMode}
+            values={["cwd", "parent", "agent", "none"]}
+            label={(value) => t(`views.sessions.group.${value}`)}
+            onChange={(value) => setGroupMode(value as SessionGroupMode)}
+            testId="sessions-group-filter"
+          />
+        </ToolbarControl>
       </div>
       <div className="rows">
         {groupMode === "none"
@@ -5383,6 +5418,7 @@ function hasDirectCandidateEvidence(candidate: SessionCandidate): boolean {
 }
 
 function processDisplayTitle(process: AgentProcess, t: (key: string) => string): string {
+  if (process.displayTitle) return process.displayTitle;
   const role = processRoleLabel(process, t);
   if (process.windowTitle && !isHelperProcess(process)) return process.windowTitle;
   return role === t("views.processes.roles.unknown") ? process.processName : role;
@@ -5555,8 +5591,8 @@ function processTaskGroupLabel(processes: AgentProcess[]): string {
   const actualRoot = processTaskActualRoot(processes);
   const displayRoot = processTaskDisplayRoot(processes) ?? actualRoot;
   if (!displayRoot) return i18n.t("views.processes.taskRoot", { pid: processes[0]?.rootPid ?? processes[0]?.pid ?? "unknown" });
-  const rootSuffix = actualRoot && actualRoot.pid !== displayRoot.pid ? ` Â· root PID ${actualRoot.pid}` : "";
-  return `${processDisplayTitle(displayRoot, (key) => i18n.t(key))} Â· PID ${displayRoot.pid}${rootSuffix}`;
+  const rootSuffix = actualRoot && actualRoot.pid !== displayRoot.pid ? ` / root PID ${actualRoot.pid}` : "";
+  return `${processDisplayTitle(displayRoot, (key) => i18n.t(key))} / PID ${displayRoot.pid}${rootSuffix}`;
 }
 
 function processTaskGroupSummary(processes: AgentProcess[]): string | undefined {
@@ -5568,7 +5604,7 @@ function processTaskGroupSummary(processes: AgentProcess[]): string | undefined 
     processRoleLabel(root, (key) => i18n.t(key)),
     actualRoot && actualRoot.pid !== root.pid ? `root PID ${actualRoot.pid}` : undefined,
     topProcessCwd(root)
-  ].filter(Boolean).join(" Â· ");
+  ].filter(Boolean).join(" / ");
 }
 
 function processTaskActualRoot(processes: AgentProcess[]): AgentProcess | undefined {
@@ -5662,14 +5698,22 @@ function restoreActionTitle(item: QuarantinedSession, restoreTitle: string): str
 }
 
 function compareProcesses(left: AgentProcess, right: AgentProcess, sortMode: ProcessSortMode): number {
+  if (sortMode === "active") {
+    return (
+      parseDate(right.lastActivityAt ?? right.startTime ?? right.creationDate) -
+        parseDate(left.lastActivityAt ?? left.startTime ?? left.creationDate) ||
+      topScore(right) - topScore(left) ||
+      left.pid - right.pid
+    );
+  }
   if (sortMode === "memory") {
-    return (right.workingSetBytes ?? 0) - (left.workingSetBytes ?? 0) || compareProcesses(left, right, "time");
+    return (right.workingSetBytes ?? 0) - (left.workingSetBytes ?? 0) || compareProcesses(left, right, "active");
   }
   if (sortMode === "runtime") {
-    return runtimeMs(right) - runtimeMs(left) || compareProcesses(left, right, "time");
+    return runtimeMs(right) - runtimeMs(left) || compareProcesses(left, right, "active");
   }
   if (sortMode === "score") {
-    return topScore(right) - topScore(left) || compareProcesses(left, right, "time");
+    return topScore(right) - topScore(left) || compareProcesses(left, right, "active");
   }
   if (sortMode === "tree") {
     return (left.ppid ?? 0) - (right.ppid ?? 0) || left.pid - right.pid;
@@ -5851,7 +5895,7 @@ function searchResultTitle(result: Record<string, unknown>): string {
       : "";
   return [eventType, line, fields, result.path ? String(result.path) : ""]
     .filter(Boolean)
-    .join(" Â· ");
+    .join(" / ");
 }
 
 function searchResultSelection(

@@ -74,6 +74,7 @@ try {
   await smokeCommandSearch(page);
   await smokeCodexControlInteractions(page);
 
+  await waitForNoOverlay(page);
   await page.screenshot({ path: path.join(outputRoot, "desktop-clicks-final.png"), fullPage: true });
   await assertLaunchLog();
   completed = true;
@@ -167,6 +168,7 @@ async function smokeRelationsFilter(page) {
 
 async function smokeProcessTree(page) {
   await page.locator('[data-testid="nav-processes"]').click();
+  await assertTopStatusChipIds(page);
   const taskGroup = page.locator('[data-testid="process-group"][data-group-key="root:9100"]');
   await taskGroup.waitFor();
   await taskGroup.locator('[data-testid="process-group-toggle"]').click();
@@ -262,8 +264,10 @@ async function smokeCodexControlInteractions(page) {
   await page.screenshot({ path: path.join(outputRoot, "codex-control-blocked-surfaces.png"), fullPage: true });
 
   await page.locator('[data-testid="codex-control-tabs"] button[data-value="models"]').click();
+  const scrollBeforeCombo = await scrollTopFor(page, ".settingsRows");
   await page.locator('[data-testid="codex-control-item-config.model_reasoning_effort-trigger"]').click();
   await assertViewportFit(page, '[data-testid="codex-control-item-config.model_reasoning_effort-search"]', "Codex Control combo menu");
+  await assertScrollStable(page, ".settingsRows", scrollBeforeCombo, "Codex Control combo open");
   await page.locator('[data-testid="codex-control-item-config.model_reasoning_effort-option"][data-value="medium"]').click();
   const save = page.locator('[data-testid="codex-control-center-save"]');
   await waitForEnabled(save, "Codex Control model save");
@@ -292,6 +296,7 @@ async function smokeCodexControlInteractions(page) {
 
   await page.locator('[data-testid="nav-settings"]').click();
   await page.locator('[data-testid="settings-control-mode"] button[data-value="readOnly"]').click();
+  await waitForMainReadOnly(page);
   await page.locator('[data-testid="nav-codex-control"]').click();
   await page.locator('[data-testid="codex-control-tabs"] button[data-value="models"]').click();
   await page.locator('[data-testid="codex-control-item-config.plan_mode_reasoning_effort-trigger"]').waitFor();
@@ -311,13 +316,21 @@ async function smokeCodexControlInteractions(page) {
       return error instanceof Error ? error.message : String(error);
     }
   });
-  if (!/read-only|只读/i.test(readOnlyDirectResult)) {
+  if (!/read-only/i.test(readOnlyDirectResult)) {
     throw new Error(`Direct Codex Control save was not blocked by main read-only mode: ${readOnlyDirectResult}`);
   }
   await assertReadOnlyDirectIpcBlocked(page);
   await page.screenshot({ path: path.join(outputRoot, "codex-control-read-only.png"), fullPage: true });
   await page.locator('[data-testid="nav-settings"]').click();
   await page.locator('[data-testid="settings-control-mode"] button[data-value="safe"]').click();
+  await waitForSegmentedActive(page, "settings-control-mode", "safe");
+  await waitForNoOverlay(page);
+}
+
+async function assertTopStatusChipIds(page) {
+  for (const id of ["status-chip-processes", "status-chip-matched", "status-chip-codex", "status-chip-claude", "status-chip-warnings"]) {
+    await page.locator(`[data-testid="${id}"]`).waitFor();
+  }
 }
 
 async function ensureSessionsView(page) {
@@ -365,6 +378,9 @@ async function closeNotificationIfVisible(page) {
 async function editCodexSurface(page, surfaceId, marker, readFile, label) {
   const card = page.locator(`[data-testid="codex-control-surface-card"][data-surface-id="${surfaceId}"]`);
   await card.waitFor();
+  if (surfaceId === "skill:review-helper") {
+    await expectText(card, /Smoke Review Helper/);
+  }
   await card.click();
   await page.locator(`[data-testid="codex-control-detail"][data-surface-id="${surfaceId}"]`).waitFor();
   const editor = page.locator('[data-testid="codex-control-editor"]');
@@ -379,6 +395,46 @@ async function editCodexSurface(page, surfaceId, marker, readFile, label) {
   await waitForNotification(page, /已保存|Saved/i);
   await waitForFilePredicate(label, () => readFile().includes(marker), `${label} to contain smoke marker`);
   await page.screenshot({ path: path.join(outputRoot, `codex-control-${safeScreenshotName(surfaceId)}-edit.png`), fullPage: true });
+}
+
+async function scrollTopFor(page, selector) {
+  return page.locator(selector).evaluate((node) => node.scrollTop).catch(() => 0);
+}
+
+async function assertScrollStable(page, selector, before, label) {
+  const after = await scrollTopFor(page, selector);
+  if (Math.abs(after - before) > 4) {
+    throw new Error(`${label} changed ${selector} scrollTop from ${before} to ${after}.`);
+  }
+}
+
+async function waitForSegmentedActive(page, testId, value) {
+  await page
+    .locator(`[data-testid="${testId}"] button[data-value="${value}"].active`)
+    .waitFor({ state: "visible", timeout: 15_000 });
+}
+
+async function waitForNoOverlay(page) {
+  await page.locator('[data-testid="confirm-overlay"]').waitFor({ state: "detached", timeout: 15_000 }).catch(() => undefined);
+  const overlayCount = await page.locator('[data-testid="confirm-overlay"]').count();
+  if (overlayCount) throw new Error(`Expected no confirm overlay before final screenshot, found ${overlayCount}.`);
+}
+
+async function waitForMainReadOnly(page) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const result = await page.evaluate(async () => {
+      try {
+        await window.agentscope.saveCodexControlDocument("agents.global", "blocked direct smoke write\n", "0".repeat(64));
+        return "unexpected success";
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    });
+    if (/read-only/i.test(result)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Main process did not enter read-only mode.");
 }
 
 async function assertReadOnlySurface(page, surfaceId) {
@@ -666,7 +722,7 @@ function seedFixtureHome(targetHome) {
   fs.mkdirSync(path.join(codexRoot, "rules"), { recursive: true });
   fs.writeFileSync(path.join(codexRoot, "rules", "default.rules"), "# Synthetic smoke rule\n", "utf8");
   fs.mkdirSync(path.join(codexRoot, "skills", "review-helper"), { recursive: true });
-  fs.writeFileSync(path.join(codexRoot, "skills", "review-helper", "SKILL.md"), "---\nname: review-helper\n---\nSynthetic skill body.\n", "utf8");
+  fs.writeFileSync(path.join(codexRoot, "skills", "review-helper", "SKILL.md"), "# Smoke Review Helper\n\n---\nname: review-helper\n---\nSynthetic skill body.\n", "utf8");
   fs.mkdirSync(path.join(codexRoot, "skills", ".system", "skill-creator"), { recursive: true });
   fs.writeFileSync(path.join(codexRoot, "skills", ".system", "skill-creator", "SKILL.md"), "system skill body\n", "utf8");
   fs.mkdirSync(path.join(codexRoot, "plugins", "browser@openai-bundled"), { recursive: true });

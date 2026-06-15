@@ -436,22 +436,43 @@ input {
 
 .statusChips {
   display: flex;
-  gap: 7px;
+  gap: 6px;
   justify-content: flex-end;
   overflow: visible;
+  min-width: 0;
 }
 
 .statusChip {
-  height: 29px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 10px;
-  background: var(--surface);
+  border-radius: 8px;
+  padding: 0 9px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
   color: var(--muted);
+  font-size: 12px;
   white-space: nowrap;
+  cursor: default;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
+}
+
+button.statusChip {
+  cursor: pointer;
+}
+
+button.statusChip:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text);
+}
+
+.statusChip svg {
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
 }
 
 .statusChip strong {
@@ -465,6 +486,10 @@ input {
 
 .statusChip.warn strong {
   color: var(--warn);
+}
+
+.statusChip.warn {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--border));
 }
 
 .iconButton {
@@ -558,13 +583,14 @@ input {
 }
 
 .paneHeader {
-  height: 60px;
+  min-height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
 }
 
 .paneHeaderAction {
@@ -578,6 +604,8 @@ input {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .paneHeader h2 {
@@ -600,12 +628,12 @@ input {
 
 .listToolbar {
   flex: none;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px 10px;
   border-bottom: 1px solid var(--border-soft);
-  padding: 8px 10px 9px;
+  padding: 9px 12px 10px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, transparent), transparent),
     color-mix(in srgb, var(--panel) 88%, transparent);
@@ -791,7 +819,8 @@ input {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  flex: 1 1 260px;
 }
 
 .toolbarControl > span {
@@ -2005,21 +2034,27 @@ input {
 .codexOverviewGrid,
 .codexSummaryGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px;
 }
 
 .codexOverviewCard,
 .codexSummaryCard {
   min-width: 0;
   display: grid;
-  gap: 5px;
+  gap: 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface2) 54%, transparent);
   color: var(--text);
-  padding: 10px;
+  padding: 12px;
   text-align: left;
+}
+
+.codexSummaryCard {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  min-height: 86px;
 }
 
 .codexOverviewCard {
@@ -2051,12 +2086,36 @@ input {
   min-width: 0;
 }
 
+.codexSummaryCard > span {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.codexSummaryCard strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .codexOverviewCard span,
 .codexOverviewCard em,
 .codexSummaryCard em {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
+  line-height: 1.45;
+}
+
+.codexSummaryCard em {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .codexOverviewCard strong {
@@ -2073,20 +2132,20 @@ input {
 
 .codexControlItems {
   display: grid;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .codexControlItem {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 280px);
+  gap: 14px;
   align-items: center;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface2) 45%, transparent);
-  padding: 10px;
+  padding: 12px;
 }
 
 .codexSummaryCard[data-editable="true"] {
@@ -2175,8 +2234,8 @@ input {
 
 .codexModeGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
 }
 
 .codexModeCard {
@@ -2187,7 +2246,7 @@ input {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface2) 50%, transparent);
-  padding: 9px;
+  padding: 11px;
 }
 
 .codexModeCardTitle {
@@ -2315,8 +2374,8 @@ input {
   max-height: 250px;
   overflow: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 9px;
   padding-right: 3px;
 }
 
@@ -2790,7 +2849,8 @@ input {
 
 .fontComboMenuPortal {
   right: auto;
-  min-width: 220px;
+  min-width: 240px;
+  z-index: 260;
 }
 
 .fontComboMenu::-webkit-scrollbar-corner {

@@ -140,6 +140,56 @@ describe("Codex control surfaces", () => {
     expect(plugins.path).toBe("");
   });
 
+  it("uses SKILL.md heading as the visible Skill name without exposing the body", async () => {
+    const home = await tempHome();
+    const skillPath = path.join(home, ".codex", "skills", "review-helper", "SKILL.md");
+    await writeFile(skillPath, "# Evidence Review Helper\n\nPrivate workflow body that should not be copied into labels.\n");
+
+    const inventory = await listCodexControlSurfaces(home);
+    const center = await getCodexControlCenterSnapshot(home);
+    const surface = inventory.surfaces.find((item) => item.id === "skill:review-helper");
+    const item = center.items.find((entry) => entry.id === "surface.skill:review-helper");
+
+    expect(surface?.label).toBe("Evidence Review Helper");
+    expect(item?.displayLabel).toBe("Evidence Review Helper");
+    expect(JSON.stringify(item)).not.toContain("Private workflow body");
+  });
+
+  it("uses SKILL.md frontmatter name when no heading is present", async () => {
+    const home = await tempHome();
+    const skillPath = path.join(home, ".codex", "skills", "review-helper", "SKILL.md");
+    await writeFile(
+      skillPath,
+      [
+        "---",
+        'name: "Evidence Frontmatter Helper"',
+        "description: Private description that should stay out of labels.",
+        "---",
+        "",
+        "Private workflow body that should not be copied into labels."
+      ].join("\n")
+    );
+
+    const center = await getCodexControlCenterSnapshot(home);
+    const item = center.items.find((entry) => entry.id === "surface.skill:review-helper");
+
+    expect(item?.displayLabel).toBe("Evidence Frontmatter Helper");
+    expect(JSON.stringify(item)).not.toContain("Private workflow body");
+    expect(JSON.stringify(item)).not.toContain("Private description");
+  });
+
+  it("atomically saves SKILL.md without Windows hidden-temp rename failures", async () => {
+    const home = await tempHome();
+    const skillPath = path.join(home, ".codex", "skills", "review-helper", "SKILL.md");
+    await writeFile(skillPath, "# Evidence Review Helper\n\nOriginal body.\n");
+    const doc = await readCodexControlDocument("skill:review-helper", home);
+
+    const result = await saveCodexControlDocument("skill:review-helper", `${doc.content.trimEnd()}\n\nUpdated body.\n`, doc.sha256, home);
+
+    expect(result.journalPath).toBeDefined();
+    expect(await readFile(skillPath, "utf8")).toContain("Updated body.");
+  });
+
   it("rejects stale writes and path traversal ids", async () => {
     const home = await tempHome();
     const agentsPath = path.join(home, ".codex", "AGENTS.md");

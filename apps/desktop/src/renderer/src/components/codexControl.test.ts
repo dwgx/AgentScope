@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { CodexControlCenterSnapshot } from "@agentscope/shared";
+import type { CodexControlCenterSnapshot, CodexControlSurface } from "@agentscope/shared";
 import {
   codexControlDraftFromCenter,
   codexControlMutationsFromDraft,
   codexModeDraftFromSnapshot,
-  codexModePatchFromDraft
+  codexModePatchFromDraft,
+  localizedCodexSurfaceDetail,
+  localizedCodexSurfaceLabel
 } from "./codexControl.js";
 
 describe("Codex Control renderer helpers", () => {
@@ -53,6 +55,24 @@ describe("Codex Control renderer helpers", () => {
     expect(codexModePatchFromDraft({ ...draft, reviewModel: "gpt-5.5" }, snapshot)).toEqual({
       reviewModel: "gpt-5.5"
     });
+  });
+
+  it("keeps real Skill names while localizing reusable Skill details", () => {
+    const surface: CodexControlSurface = {
+      id: "skill:review-helper",
+      kind: "skill",
+      label: "Evidence Review Helper",
+      detail: "User skill authoring surface. AgentScope edits only SKILL.md and backs it up first.",
+      exists: true,
+      editable: true,
+      status: "ok",
+      warnings: [],
+      evidence: []
+    };
+    const translate = (key: string) => `translated:${key}`;
+
+    expect(localizedCodexSurfaceLabel(surface, translate)).toBe("Evidence Review Helper");
+    expect(localizedCodexSurfaceDetail(surface, translate)).toBe("translated:settings.codexControl.surfaceText.skill.detail");
   });
 });
 

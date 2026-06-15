@@ -266,15 +266,15 @@ handleTrustedIpc("shell:openExternal", async (_event, url) => {
 });
 handleTrustedIpc("shell:openPath", async (_event, targetPath) => {
   const safePath = asString(targetPath, "Path");
-  if (!(await isAllowedLocalPath(safePath))) return "Path is not in AgentScope's local trace allowlist";
+  if (!(await isAllowedLocalPath(safePath))) return "路径不在 AgentScope 本地 trace allowlist 中，只允许定位已识别的 Codex/Claude/AgentScope 元数据路径。";
   if (!fs.existsSync(safePath)) return "Path does not exist";
-  if (!isAllowedOpenPath(safePath)) return "Path can only be revealed, not opened by AgentScope";
+  if (!isAllowedOpenPath(safePath)) return "此路径只能在文件管理器中定位，AgentScope 不直接打开敏感正文、数据库、可执行文件或目录。";
   if (isSmokeNoShell()) return "";
   return shell.openPath(safePath);
 });
 handleTrustedIpc("shell:revealPath", async (_event, targetPath) => {
   const safePath = asString(targetPath, "Path");
-  if (!(await isAllowedLocalPath(safePath))) return "Path is not in AgentScope's local trace allowlist";
+  if (!(await isAllowedLocalPath(safePath))) return "路径不在 AgentScope 本地 trace allowlist 中，只允许定位已识别的 Codex/Claude/AgentScope 元数据路径。";
   if (!fs.existsSync(safePath)) return "Path does not exist";
   if (isSmokeNoShell()) return "";
   shell.showItemInFolder(safePath);
@@ -755,7 +755,15 @@ function allowedLocalPathPrefixes(): string[] {
   const info = appInfo();
   return [
     normalizeFsPath(info.userData),
-    normalizeFsPath(agentScopeDataRoot())
+    normalizeFsPath(agentScopeDataRoot()),
+    normalizeFsPath(path.join(info.codexHome, "sessions")),
+    normalizeFsPath(path.join(info.codexHome, "rollouts")),
+    normalizeFsPath(path.join(info.codexHome, "browser-profiles")),
+    normalizeFsPath(path.join(info.codexHome, "sqlite")),
+    normalizeFsPath(path.join(info.claudeHome, "sessions")),
+    normalizeFsPath(path.join(info.claudeHome, "projects")),
+    normalizeFsPath(path.join(info.claudeHome, "jobs")),
+    normalizeFsPath(path.join(info.claudeHome, "daemon"))
   ].filter((item): item is string => !!item);
 }
 
@@ -829,6 +837,7 @@ async function allowedLocalPaths(): Promise<string[]> {
   addAllowedPath(paths, info.userData);
   addAllowedPath(paths, agentScopeDataRoot());
   addAllowedPath(paths, info.codexHome);
+  addAllowedPath(paths, info.claudeHome);
   addAllowedPath(paths, path.join(info.codexHome, "state_5.sqlite"));
 
   const snapshot = await buildSnapshot();

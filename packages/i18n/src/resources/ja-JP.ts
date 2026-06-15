@@ -163,6 +163,7 @@ export const jaJP = {
       groupCount_other: "{{count}} 件のプロセス",
       sort: {
         label: "並び替え",
+        active: "活動",
         time: "時刻",
         runtime: "実行時間",
         memory: "メモリ",

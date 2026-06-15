@@ -1031,10 +1031,11 @@ async function skillSurfaces(root: string): Promise<CodexControlSurface[]> {
     const stat = await statFile(skillPath);
     const isSystem = entry.name === ".system";
     const editable = !isSystem && safeSkillNameRe.test(entry.name);
+    const displayName = await skillDisplayName(skillPath, entry.name);
     surfaces.push({
       id: editable ? `skill:${entry.name}` : `skill-readonly:${entry.name}`,
       kind: "skill",
-      label: entry.name,
+      label: displayName,
       path: skillPath,
       exists: stat.exists,
       editable,
@@ -1393,11 +1394,19 @@ function surfaceCenterItem(surface: CodexControlSurface): CodexControlCenterItem
             surface.kind === "cache"
           ? "storage"
           : "advanced";
+  const displayText =
+    surface.kind === "skill"
+      ? {
+          displayLabel: surface.label,
+          displayDetail: surface.detail,
+        }
+      : {};
   return {
     id: `surface.${surface.id}`,
     section,
     label: surface.label,
     detail: surface.detail,
+    ...displayText,
     value: surface.exists ? "present" : "missing",
     valueKind: "summary",
     editable: false,
@@ -1408,6 +1417,38 @@ function surfaceCenterItem(surface: CodexControlSurface): CodexControlCenterItem
     warnings: surface.warnings,
     evidence: surface.evidence
   };
+}
+
+async function skillDisplayName(skillPath: string, fallbackName: string): Promise<string> {
+  const content = await readSmallText(skillPath);
+  const header = markdownHeading(content);
+  const frontmatterName = skillFrontmatterName(content);
+  return cleanSkillDisplayName(header) ?? cleanSkillDisplayName(frontmatterName) ?? cleanSkillDisplayName(fallbackName) ?? fallbackName;
+}
+
+function markdownHeading(content: string | undefined): string | undefined {
+  return content
+    ?.split(/\r?\n/)
+    .map((line) => /^#\s+(.+?)\s*$/.exec(line)?.[1]?.trim())
+    .find((value): value is string => !!value);
+}
+
+function skillFrontmatterName(content: string | undefined): string | undefined {
+  if (!content?.startsWith("---")) return undefined;
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
+  if (!match) return undefined;
+  const name = /^name\s*:\s*(.+?)\s*$/im.exec(match[1] ?? "")?.[1];
+  if (!name) return undefined;
+  return name.replace(/^["']|["']$/g, "");
+}
+
+function cleanSkillDisplayName(value: string | undefined): string | undefined {
+  const cleaned = value
+    ?.replace(/[`*_~[\]()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > 80 ? `${cleaned.slice(0, 77)}...` : cleaned;
 }
 
 async function authSnapshot(root: string, configText: string): Promise<CodexControlCenterSnapshot["auth"]> {
@@ -2173,7 +2214,7 @@ async function writeBackup(resolved: ResolvedDocument, bytes: Buffer, home: stri
 
 async function writeTextAtomically(filePath: string, content: string): Promise<void> {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.agentscope-${Date.now()}.tmp`);
+  const tempPath = path.join(path.dirname(filePath), `${path.basename(filePath)}.agentscope-${Date.now()}.tmp`);
   try {
     await fs.promises.writeFile(tempPath, content, { encoding: textEncoding, flag: "wx" });
     await fs.promises.rename(tempPath, filePath);

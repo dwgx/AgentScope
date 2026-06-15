@@ -100,6 +100,8 @@ export function SearchableComboBox(props: {
   const [menuStyle, setMenuStyle] = useState<CSSProperties | undefined>();
   const comboRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const scrollSnapshotRef = useRef<Array<{ element: Element | Window; top: number; left: number }>>([]);
   const options = useMemo(() => {
     const query = filter.trim().toLowerCase();
     const all = comboOptions(props.options, props.value, props.allowEmpty ? props.emptyLabel ?? "" : undefined);
@@ -128,6 +130,7 @@ export function SearchableComboBox(props: {
       setMenuStyle(undefined);
       return undefined;
     }
+    scrollSnapshotRef.current = captureScrollPositions(comboRef.current);
     const updatePosition = () => {
       const trigger = comboRef.current?.querySelector<HTMLButtonElement>(".fontComboTrigger");
       if (!trigger) return;
@@ -152,7 +155,15 @@ export function SearchableComboBox(props: {
     return () => {
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
+      scrollSnapshotRef.current = [];
     };
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    window.requestAnimationFrame(() => {
+      searchRef.current?.focus({ preventScroll: true });
+      restoreScrollPositions(scrollSnapshotRef.current);
+    });
   }, [open]);
 
   const commit = (value: string) => {
@@ -183,9 +194,9 @@ export function SearchableComboBox(props: {
       {open && createPortal((
         <div className="fontComboMenu fontComboMenuPortal" ref={menuRef} style={menuStyle}>
           <input
+            ref={searchRef}
             className="fontComboSearch"
             data-testid={props.testId ? `${props.testId}-search` : undefined}
-            autoFocus
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             onKeyDown={(event) => {
@@ -255,6 +266,37 @@ export function SearchableComboBox(props: {
       ), document.body)}
     </div>
   );
+}
+
+function captureScrollPositions(anchor: Element | null): Array<{ element: Element | Window; top: number; left: number }> {
+  const out: Array<{ element: Element | Window; top: number; left: number }> = [
+    { element: window, top: window.scrollY, left: window.scrollX }
+  ];
+  let current = anchor?.parentElement;
+  while (current) {
+    if (current.scrollTop || current.scrollLeft || scrollableElement(current)) {
+      out.push({ element: current, top: current.scrollTop, left: current.scrollLeft });
+    }
+    current = current.parentElement;
+  }
+  return out;
+}
+
+function restoreScrollPositions(items: Array<{ element: Element | Window; top: number; left: number }>): void {
+  for (const item of items) {
+    if (item.element instanceof Element) {
+      const element = item.element;
+      element.scrollTop = item.top;
+      element.scrollLeft = item.left;
+    } else {
+      item.element.scrollTo(item.left, item.top);
+    }
+  }
+}
+
+function scrollableElement(element: Element): boolean {
+  const style = window.getComputedStyle(element);
+  return /(auto|scroll|overlay)/.test(`${style.overflow}${style.overflowY}${style.overflowX}`);
 }
 
 function comboOptions(options: string[], current: string, emptyLabel?: string | undefined): string[] {

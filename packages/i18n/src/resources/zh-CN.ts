@@ -162,6 +162,7 @@ export const zhCN = {
       groupCount_other: "{{count}} 个进程",
       sort: {
         label: "排序",
+        active: "活跃",
         time: "时间",
         runtime: "运行时长",
         memory: "内存",
@@ -441,15 +442,20 @@ export const zhCN = {
         safety: "安全",
         runtime: "运行",
         mcp: "MCP",
-        skills: "技能",
+        skills: "Skill",
         storage: "存储",
         advanced: "高级",
         files: "文件"
       },
       risk: {
-        low: "低",
-        medium: "中",
-        high: "高",
+        low: "低风险",
+        medium: "中风险",
+        high: "高风险",
+        blocked: "阻止"
+      },
+      status: {
+        ok: "OK",
+        warn: "注意",
         blocked: "阻止"
       },
       auth: {

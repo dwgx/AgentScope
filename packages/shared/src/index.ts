@@ -29,10 +29,12 @@ export interface AgentProcess {
   pid: number;
   ppid?: number | undefined;
   processName: string;
+  displayTitle?: string | undefined;
   executablePath?: string | undefined;
   commandLine?: string | undefined;
   creationDate?: string | undefined;
   startTime?: string | undefined;
+  lastActivityAt?: string | undefined;
   windowTitle?: string | undefined;
   workingSetBytes?: number | undefined;
   privateMemoryBytes?: number | undefined;
@@ -388,6 +390,8 @@ export interface CodexControlCenterItem {
   section: CodexControlCenterSection;
   label: string;
   detail: string;
+  displayLabel?: string | undefined;
+  displayDetail?: string | undefined;
   keyPath?: string | undefined;
   value?: string | number | boolean | undefined;
   valueKind: CodexControlValueKind;

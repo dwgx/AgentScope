@@ -148,7 +148,7 @@ export function CodexControlCenterPanel(props: {
                   <strong>{localizedCodexControlItemLabel(item, (key) => String(t(key)))}</strong>
                   <em>{localizedCodexControlItemDetail(item, (key) => String(t(key)))}</em>
                 </span>
-                <Badge text={item.status} tone={item.status === "ok" ? "ok" : "warn"} />
+                <Badge text={t(`settings.codexControl.status.${item.status}`)} tone={item.status === "ok" ? "ok" : "warn"} />
               </button>
             );
           })}
@@ -590,16 +590,19 @@ export function localizedCodexControlWarning(warning: string, translate: (key: s
 }
 
 function localizedCodexControlItemLabel(item: CodexControlCenterItem, translate: (key: string) => string): string {
+  if (item.displayLabel) return item.displayLabel;
   const key = codexControlItemTextKey(item, "label");
   return key ? translate(key) : item.label;
 }
 
 function localizedCodexControlItemDetail(item: CodexControlCenterItem, translate: (key: string) => string): string {
+  if (item.displayDetail) return item.displayDetail;
   const key = codexControlItemTextKey(item, "detail");
   return key ? translate(key) : item.detail;
 }
 
 export function localizedCodexSurfaceLabel(surface: CodexControlSurface, translate: (key: string) => string): string {
+  if (surface.kind === "skill") return surface.label;
   const key = codexSurfaceTextKey(surface, "label");
   return key ? translate(key) : surface.label;
 }
