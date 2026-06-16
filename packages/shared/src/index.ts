@@ -384,6 +384,15 @@ export interface CodexMcpServerSummary {
   table: string;
   command?: string | undefined;
   args?: string[] | undefined;
+  cwd?: string | undefined;
+  url?: string | undefined;
+  startupTimeoutSec?: number | undefined;
+  toolTimeoutSec?: number | undefined;
+  required?: boolean | undefined;
+  defaultToolsApprovalMode?: "auto" | "prompt" | "approve" | undefined;
+  enabledTools?: string[] | undefined;
+  disabledTools?: string[] | undefined;
+  unknownKeys?: string[] | undefined;
   commandSummary?: string | undefined;
   evidence: Evidence[];
 }
@@ -421,6 +430,7 @@ export interface CodexControlCenterItem {
   value?: string | number | boolean | undefined;
   valueKind: CodexControlValueKind;
   options?: string[] | undefined;
+  allowCustom?: boolean | undefined;
   editable: boolean;
   risk: CodexControlRisk;
   targetPath?: string | undefined;
@@ -453,7 +463,19 @@ export interface CodexControlCenterSnapshot {
 export interface CodexControlMutation {
   itemId: string;
   keyPath: string;
-  value: string | number | boolean | null;
+  value: CodexControlMutationValue;
+  comment?: string | undefined;
+}
+
+export type CodexControlMutationValue = string | number | boolean | string[] | null;
+export type CodexControlEffectiveScope = "new_codex_sessions";
+export type CodexConfigSupportLevel = "official" | "known_local" | "unverified";
+
+export interface CodexControlWriteVerification {
+  status: "passed" | "failed";
+  checkedKeys: string[];
+  warnings: string[];
+  error?: string | undefined;
 }
 
 export interface CodexControlMutationRequest {
@@ -470,10 +492,136 @@ export interface CodexControlMutationPlan {
   changedKeys: string[];
   blockers: string[];
   warnings: string[];
+  effectiveScope?: CodexControlEffectiveScope | undefined;
+  effectiveWarnings?: string[] | undefined;
   highRisk: boolean;
   highRiskConfirmationToken?: string | undefined;
   backupPath?: string | undefined;
   journalPath?: string | undefined;
+  evidence: Evidence[];
+}
+
+export type CodexConfigTemplateOrigin = "current" | "builtin" | "custom";
+
+export interface CodexConfigTemplateItem {
+  itemId: string;
+  keyPath: string;
+  value: CodexControlMutationValue;
+  defaultSelected?: boolean | undefined;
+  comment?: string | undefined;
+}
+
+export interface CodexConfigTemplate {
+  id: string;
+  origin: CodexConfigTemplateOrigin;
+  name: string;
+  description: string;
+  risk: CodexControlRisk;
+  readonly: boolean;
+  items: CodexConfigTemplateItem[];
+  evidence: Evidence[];
+}
+
+export interface CodexConfigTemplateDraft {
+  id?: string | undefined;
+  name: string;
+  description?: string | undefined;
+  items: CodexConfigTemplateItem[];
+}
+
+export interface CodexConfigTemplateList {
+  storagePath: string;
+  templates: CodexConfigTemplate[];
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexConfigTemplatePreviewRequest {
+  templateId?: string | undefined;
+  template?: CodexConfigTemplateDraft | undefined;
+  selectedItemIds?: string[] | undefined;
+}
+
+export interface CodexConfigTemplatePreviewItem {
+  itemId: string;
+  keyPath: string;
+  label: string;
+  detail: string;
+  valueKind: CodexControlValueKind | "stringArray";
+  risk: CodexControlRisk;
+  currentValue?: string | number | boolean | string[] | undefined;
+  nextValue: CodexControlMutationValue;
+  selected: boolean;
+  editable: boolean;
+  changed: boolean;
+  comment?: string | undefined;
+  warnings: string[];
+  supportLevel?: CodexConfigSupportLevel | undefined;
+  effectiveNote?: string | undefined;
+}
+
+export interface CodexConfigTemplatePreview {
+  configPath: string;
+  configSha256: string;
+  templateId?: string | undefined;
+  templateName: string;
+  templateDescription: string;
+  storagePath: string;
+  items: CodexConfigTemplatePreviewItem[];
+  mutations: CodexControlMutation[];
+  changedKeys: string[];
+  warnings: string[];
+  blockers: string[];
+  effectiveScope?: CodexControlEffectiveScope | undefined;
+  effectiveWarnings?: string[] | undefined;
+  highRisk: boolean;
+  evidence: Evidence[];
+}
+
+export type CodexConfigWorkbenchGroup = "current" | "mcp" | "templates" | "unknown";
+
+export interface CodexConfigWorkbenchItem {
+  id: string;
+  group: CodexConfigWorkbenchGroup;
+  keyPath: string;
+  table?: string | undefined;
+  label: string;
+  detail: string;
+  valueKind: CodexControlValueKind | "stringArray";
+  options?: string[] | undefined;
+  allowCustom?: boolean | undefined;
+  currentValue?: string | number | boolean | string[] | undefined;
+  enabled: boolean;
+  editable: boolean;
+  risk: CodexControlRisk;
+  source: CodexControlCenterItem["source"];
+  supportLevel?: CodexConfigSupportLevel | undefined;
+  effectiveNote?: string | undefined;
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexConfigUnknownEntry {
+  id: string;
+  table?: string | undefined;
+  keyPath: string;
+  line: number;
+  valueKind: "scalar" | "array" | "inline" | "unknown";
+  sensitive: boolean;
+  displayValue?: string | undefined;
+  warnings: string[];
+  evidence: Evidence[];
+}
+
+export interface CodexConfigWorkbenchSnapshot {
+  codexHome: string;
+  configPath: string;
+  configSha256: string;
+  items: CodexConfigWorkbenchItem[];
+  mcpServers: CodexMcpServerSummary[];
+  unknownEntries: CodexConfigUnknownEntry[];
+  templateList: CodexConfigTemplateList;
+  warnings: string[];
   evidence: Evidence[];
 }
 
@@ -506,6 +654,9 @@ export interface CodexControlSaveResult {
   backupPath?: string | undefined;
   journalPath?: string | undefined;
   changedKeys?: string[] | undefined;
+  effectiveScope?: CodexControlEffectiveScope | undefined;
+  effectiveWarnings?: string[] | undefined;
+  verification?: CodexControlWriteVerification | undefined;
   sha256: string;
   bytes: number;
   evidence: Evidence[];

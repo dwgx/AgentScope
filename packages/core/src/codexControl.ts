@@ -2,16 +2,30 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  CodexConfigTemplate,
+  CodexConfigTemplateDraft,
+  CodexConfigTemplateItem,
+  CodexConfigTemplateList,
+  CodexConfigTemplatePreview,
+  CodexConfigTemplatePreviewRequest,
+  CodexConfigUnknownEntry,
+  CodexConfigWorkbenchItem,
+  CodexConfigWorkbenchSnapshot,
   CodexControlDocument,
+  CodexControlEffectiveScope,
   CodexControlCenterItem,
   CodexControlCenterSnapshot,
+  CodexControlMutation,
   CodexControlMutationPlan,
   CodexControlMutationRequest,
+  CodexControlMutationValue,
   CodexControlRevealResult,
   CodexControlSaveResult,
   CodexControlSnapshot,
   CodexControlSurface,
   CodexControlSurfaceKind,
+  CodexControlWriteVerification,
+  CodexConfigSupportLevel,
   CodexModeConfigPatch,
   CodexModeConfigSaveResult,
   CodexModeConfigSnapshot,
@@ -19,33 +33,49 @@ import type {
   CodexModeValue,
   Evidence
 } from "@agentscope/shared";
-import { codexHome, codexSqliteHome, normalizeWindowsPath, userHome } from "./paths.js";
+import { agentScopeHome, codexHome, codexSqliteHome, normalizeWindowsPath, userHome } from "./paths.js";
 import { openCodexDb, tableColumns } from "./codex.js";
 import { emptyConfigInventory, inspectToml, type ConfigInventory } from "./mcpIdentity.js";
 
 const maxEditableBytes = 256 * 1024;
 const textEncoding: BufferEncoding = "utf8";
 const recommendedModels = ["gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark"];
+const modelProviderValues = ["openai", "amazon-bedrock", "ollama", "lmstudio"];
 const reasoningEffortValues = ["minimal", "low", "medium", "high", "xhigh"];
 const planReasoningEffortValues = ["none", ...reasoningEffortValues];
+const reasoningSummaryValues = ["auto", "concise", "detailed", "none"];
+const modelVerbosityValues = ["low", "medium", "high"];
 const sandboxModeValues = ["read-only", "workspace-write", "danger-full-access"];
 const approvalPolicyValues = ["untrusted", "on-request", "never"];
 const approvalsReviewerValues = ["user", "auto_review"];
 const webSearchValues = ["cached", "live", "disabled"];
 const serviceTierValues = ["default", "fast", "flex"];
 const windowsSandboxValues = ["elevated", "unelevated"];
+const mcpApprovalModeValues = ["auto", "prompt", "approve"];
+const maxCustomTemplateCount = 24;
+const maxCustomTemplateItems = 32;
+const templateStorageFileName = "codex-config-templates.json";
+const currentConfigTemplateId = "current.config";
+const codexConfigEffectiveScope: CodexControlEffectiveScope = "new_codex_sessions";
+const codexConfigNewSessionWarning =
+  "Codex reads config.toml when a new Codex session starts; already-running Codex processes may keep their previous settings.";
+const reservedBuiltinProviderIds = new Set(["openai", "ollama", "lmstudio"]);
+type EditableConfigDescriptor = {
+  keyPath: string;
+  section: CodexControlCenterItem["section"];
+  label: string;
+  detail: string;
+  valueKind: CodexControlCenterItem["valueKind"] | "stringArray";
+  options?: string[] | undefined;
+  allowCustom?: boolean | undefined;
+  risk: CodexControlCenterItem["risk"];
+  source: CodexControlCenterItem["source"];
+  supportLevel?: CodexConfigSupportLevel | undefined;
+  effectiveNote?: string | undefined;
+};
 const editableConfigItems = new Map<
   string,
-  {
-    keyPath: string;
-    section: CodexControlCenterItem["section"];
-    label: string;
-    detail: string;
-    valueKind: CodexControlCenterItem["valueKind"];
-    options?: string[] | undefined;
-    risk: CodexControlCenterItem["risk"];
-    source: CodexControlCenterItem["source"];
-  }
+  EditableConfigDescriptor
 >([
   [
     "config.model",
@@ -56,19 +86,7 @@ const editableConfigItems = new Map<
       detail: "Top-level Codex model used when CLI/app/profile/project settings do not override it.",
       valueKind: "string",
       options: recommendedModels,
-      risk: "medium",
-      source: "official_docs"
-    }
-  ],
-  [
-    "config.review_model",
-    {
-      keyPath: "review_model",
-      section: "models",
-      label: "Review model",
-      detail: "Optional model override for Codex review workflows.",
-      valueKind: "string",
-      options: recommendedModels,
+      allowCustom: true,
       risk: "medium",
       source: "official_docs"
     }
@@ -184,6 +202,7 @@ const editableConfigItems = new Map<
       detail: "Optional OpenAI service tier selection when supported by the account/model.",
       valueKind: "select",
       options: serviceTierValues,
+      allowCustom: true,
       risk: "medium",
       source: "official_docs"
     }
@@ -214,6 +233,132 @@ const editableConfigItems = new Map<
     }
   ],
   [
+    "config.features.goals",
+    {
+      keyPath: "features.goals",
+      section: "runtime",
+      label: "Goals feature",
+      detail: "Feature flag for Codex Goal mode when supported by this Codex build.",
+      valueKind: "boolean",
+      risk: "medium",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.model_verbosity",
+    {
+      keyPath: "model_verbosity",
+      section: "models",
+      label: "Model verbosity",
+      detail: "Text verbosity for GPT-5 family models when the provider uses the Responses API.",
+      valueKind: "select",
+      options: modelVerbosityValues,
+      risk: "medium",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.review_model",
+    {
+      keyPath: "review_model",
+      section: "models",
+      label: "Review model",
+      detail: "Optional model override for Codex review workflows.",
+      valueKind: "string",
+      options: recommendedModels,
+      allowCustom: true,
+      risk: "medium",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.model_provider",
+    {
+      keyPath: "model_provider",
+      section: "models",
+      label: "Model provider",
+      detail: "Provider id selected from model_providers. Recommended provider ids are suggestions; custom providers are allowed.",
+      valueKind: "select",
+      options: modelProviderValues,
+      allowCustom: true,
+      risk: "medium",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.model_reasoning_summary",
+    {
+      keyPath: "model_reasoning_summary",
+      section: "models",
+      label: "Reasoning summary",
+      detail: "Reasoning summary policy for supported Responses API models.",
+      valueKind: "select",
+      options: reasoningSummaryValues,
+      risk: "medium",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.model_supports_reasoning_summaries",
+    {
+      keyPath: "model_supports_reasoning_summaries",
+      section: "models",
+      label: "Force reasoning summaries",
+      detail: "Force-enable or disable reasoning summaries for the current model.",
+      valueKind: "boolean",
+      risk: "medium",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.openai_base_url",
+    {
+      keyPath: "openai_base_url",
+      section: "models",
+      label: "OpenAI base URL",
+      detail: "Base URL override for the built-in OpenAI provider. Use this instead of overriding the reserved openai provider id.",
+      valueKind: "string",
+      risk: "high",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.project_doc_max_bytes",
+    {
+      keyPath: "project_doc_max_bytes",
+      section: "runtime",
+      label: "Project doc max bytes",
+      detail: "Maximum bytes from AGENTS.md/project instructions that Codex embeds into first-turn instructions.",
+      valueKind: "number",
+      risk: "medium",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.features.memories",
+    {
+      keyPath: "features.memories",
+      section: "storage",
+      label: "Memories feature",
+      detail: "Enable Codex Memories globally. AgentScope still does not read memory bodies.",
+      valueKind: "boolean",
+      risk: "medium",
+      source: "official_docs"
+    }
+  ],
+  [
+    "config.features.js_repl",
+    {
+      keyPath: "features.js_repl",
+      section: "runtime",
+      label: "JS REPL feature",
+      detail: "Feature flag for the JavaScript REPL capability when present in this Codex build.",
+      valueKind: "boolean",
+      risk: "high",
+      source: "current_code"
+    }
+  ],
+  [
     "config.memories.generate_memories",
     {
       keyPath: "memories.generate_memories",
@@ -238,6 +383,224 @@ const editableConfigItems = new Map<
     }
   ]
 ]);
+const builtinCodexConfigTemplates: CodexConfigTemplate[] = [
+  {
+    id: "builtin.yolo-full-access",
+    origin: "builtin",
+    name: "YOLO / Full Access",
+    description:
+      "Highest-autonomy local Codex workflow: no approvals, no sandbox boundary, elevated Windows sandbox mode, live web search, xhigh reasoning, and multi-agent enabled.",
+    risk: "high",
+    readonly: true,
+    items: [
+      templateItem("config.approval_policy", "never", true, "No approval prompts; Codex runs requested operations directly."),
+      templateItem("config.sandbox_mode", "danger-full-access", true, "Full filesystem and network access without sandbox isolation."),
+      templateItem("config.windows.sandbox", "elevated", true, "Native Windows sandbox mode recommended when elevated setup is available."),
+      templateItem("config.web_search", "live", true, "Live web results instead of cached web search."),
+      templateItem("config.model_reasoning_effort", "xhigh", true, "Deep default reasoning for implementation work."),
+      templateItem("config.plan_mode_reasoning_effort", "xhigh", true, "Deep planning reasoning before implementation."),
+      templateItem("config.features.multi_agent", true, true, "Enable Codex multi-agent/subagent workflows when supported.")
+    ],
+    evidence: templateEvidence("codex.template.builtin.yolo")
+  },
+  {
+    id: "builtin.safe-workspace",
+    origin: "builtin",
+    name: "Safe Workspace",
+    description:
+      "Low-friction local automation inside the workspace boundary with interactive approval for higher-risk operations.",
+    risk: "medium",
+    readonly: true,
+    items: [
+      templateItem("config.approval_policy", "on-request", true, "Ask when an operation needs elevated trust."),
+      templateItem("config.sandbox_mode", "workspace-write", true, "Write inside the workspace while keeping a sandbox boundary."),
+      templateItem("config.windows.sandbox", "elevated", true, "Use the native Windows sandbox when available."),
+      templateItem("config.web_search", "cached", true, "Use cached web search to reduce live web exposure."),
+      templateItem("config.approvals_reviewer", "user", true, "Keep approval decisions with the user.")
+    ],
+    evidence: templateEvidence("codex.template.builtin.safe_workspace")
+  },
+  {
+    id: "builtin.readonly-audit",
+    origin: "builtin",
+    name: "Read-only Audit",
+    description: "Repository and evidence review preset: read-only sandbox, user approvals, cached web search, and high planning effort.",
+    risk: "medium",
+    readonly: true,
+    items: [
+      templateItem("config.approval_policy", "on-request", true, "Keep approval prompts interactive."),
+      templateItem("config.sandbox_mode", "read-only", true, "Prevent workspace writes from the default sandbox."),
+      templateItem("config.web_search", "cached", true, "Use cached web search while auditing."),
+      templateItem("config.model_reasoning_effort", "high", true, "High reasoning for code and evidence review."),
+      templateItem("config.plan_mode_reasoning_effort", "xhigh", true, "Extra planning depth for audit plans.")
+    ],
+    evidence: templateEvidence("codex.template.builtin.readonly_audit")
+  },
+  {
+    id: "builtin.deep-planning",
+    origin: "builtin",
+    name: "Deep Planning",
+    description: "Reasoning-focused preset that avoids permission changes by default.",
+    risk: "medium",
+    readonly: true,
+    items: [
+      templateItem("config.model_reasoning_effort", "xhigh", true, "Deep reasoning for implementation turns."),
+      templateItem("config.plan_mode_reasoning_effort", "xhigh", true, "Deep reasoning for planning turns."),
+      templateItem("config.web_search", "cached", true, "Keep web search on cached mode.")
+    ],
+    evidence: templateEvidence("codex.template.builtin.deep_planning")
+  },
+  {
+    id: "builtin.live-research",
+    origin: "builtin",
+    name: "Live Research",
+    description: "Current-information preset: live web search with high reasoning, without changing approval or sandbox permissions.",
+    risk: "high",
+    readonly: true,
+    items: [
+      templateItem("config.web_search", "live", true, "Fetch the most recent web data when a task needs current facts."),
+      templateItem("config.model_reasoning_effort", "high", true, "High reasoning for synthesis."),
+      templateItem("config.plan_mode_reasoning_effort", "high", true, "High planning effort for research plans.")
+    ],
+    evidence: templateEvidence("codex.template.builtin.live_research")
+  }
+];
+const mcpEditableFieldDescriptors = new Map<
+  string,
+  Omit<EditableConfigDescriptor, "keyPath" | "section" | "source">
+>([
+  [
+    "enabled",
+    {
+      label: "MCP enabled",
+      detail: "Enable or disable this MCP server without deleting its table.",
+      valueKind: "boolean",
+      risk: "medium"
+    }
+  ],
+  [
+    "command",
+    {
+      label: "MCP command",
+      detail: "STDIO MCP executable or launcher command.",
+      valueKind: "path",
+      risk: "high"
+    }
+  ],
+  [
+    "args",
+    {
+      label: "MCP args",
+      detail: "STDIO MCP command arguments. Sensitive token-like values are blocked.",
+      valueKind: "stringArray",
+      risk: "high"
+    }
+  ],
+  [
+    "cwd",
+    {
+      label: "MCP cwd",
+      detail: "Optional working directory for the MCP process.",
+      valueKind: "path",
+      risk: "medium"
+    }
+  ],
+  [
+    "url",
+    {
+      label: "MCP URL",
+      detail: "HTTP MCP endpoint URL.",
+      valueKind: "string",
+      risk: "high"
+    }
+  ],
+  [
+    "bearer_token_env_var",
+    {
+      label: "Bearer token env var",
+      detail: "Environment variable name containing the bearer token; the token value is not stored here.",
+      valueKind: "string",
+      risk: "medium"
+    }
+  ],
+  [
+    "env_vars",
+    {
+      label: "Forwarded env vars",
+      detail: "Environment variable names Codex may forward to the STDIO MCP server.",
+      valueKind: "stringArray",
+      risk: "medium"
+    }
+  ],
+  [
+    "experimental_environment",
+    {
+      label: "Experimental environment",
+      detail: "Optional remote executor environment selector for STDIO MCP.",
+      valueKind: "select",
+      options: ["remote"],
+      risk: "medium"
+    }
+  ],
+  [
+    "startup_timeout_sec",
+    {
+      label: "MCP startup timeout",
+      detail: "Seconds Codex waits for the MCP server to start.",
+      valueKind: "number",
+      risk: "medium"
+    }
+  ],
+  [
+    "tool_timeout_sec",
+    {
+      label: "MCP tool timeout",
+      detail: "Seconds Codex allows a tool call to run.",
+      valueKind: "number",
+      risk: "medium"
+    }
+  ],
+  [
+    "required",
+    {
+      label: "MCP required",
+      detail: "Require this MCP server to initialize successfully.",
+      valueKind: "boolean",
+      risk: "medium"
+    }
+  ],
+  [
+    "default_tools_approval_mode",
+    {
+      label: "MCP approval mode",
+      detail: "Default approval behavior for MCP tools.",
+      valueKind: "select",
+      options: mcpApprovalModeValues,
+      risk: "high"
+    }
+  ],
+  [
+    "enabled_tools",
+    {
+      label: "Enabled tools",
+      detail: "Optional allowlist of MCP tool names.",
+      valueKind: "stringArray",
+      risk: "medium"
+    }
+  ],
+  [
+    "disabled_tools",
+    {
+      label: "Disabled tools",
+      detail: "Optional denylist of MCP tool names.",
+      valueKind: "stringArray",
+      risk: "medium"
+    }
+  ]
+]);
+const mcpUserConfigEditableFields = new Set(mcpEditableFieldDescriptors.keys());
+const mcpPluginPolicyEditableFields = new Set(["enabled", "required", "default_tools_approval_mode", "enabled_tools", "disabled_tools"]);
+const safeMcpServerNameRe = /^[A-Za-z0-9_-]{1,80}$/;
 const sensitivePathPartRe = /^(auth|credentials?|secrets?|tokens?|keyrings?|keychains?)$/i;
 const safeSkillNameRe = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const safeRuleNameRe = /^[a-z0-9][a-z0-9._-]{0,79}\.rules$/i;
@@ -440,6 +803,270 @@ export async function planCodexControlMutation(
   return publicPlan;
 }
 
+export async function listCodexConfigTemplates(home = userHome()): Promise<CodexConfigTemplateList> {
+  const storagePath = codexTemplateStoragePath(home);
+  const custom = await readCustomCodexConfigTemplates(home);
+  const currentTemplate = await currentCodexConfigTemplate(home);
+  const warnings = custom.warnings;
+  return {
+    storagePath,
+    templates: [currentTemplate, ...builtinCodexConfigTemplates, ...custom.templates],
+    warnings,
+    evidence: [
+      {
+        source: "codex.template.official_manual",
+        detail:
+          "Codex manual documents config.toml, approval_policy, sandbox_mode, web_search, model reasoning effort, profiles, and Windows sandbox settings.",
+        path: path.join(codexHome(home), "config.toml")
+      },
+      {
+        source: "codex.template.local_storage",
+        detail: "AgentScope stores custom Codex config templates as local UI metadata, separate from CODEX_HOME.",
+        path: storagePath
+      }
+    ]
+  };
+}
+
+export async function getCodexConfigWorkbenchSnapshot(home = userHome()): Promise<CodexConfigWorkbenchSnapshot> {
+  const root = codexHome(home);
+  const configPath = path.join(root, "config.toml");
+  const configBytes = await readCurrentBytes(configPath);
+  const configText = configBytes.toString(textEncoding);
+  const configSha256 = sha256(configBytes);
+  const assignments = parseConfigAssignments(configText, configPath);
+  const tables = parseConfigTables(configText, configPath);
+  const inventory = configText ? inspectToml(configText, configPath) : emptyConfigInventory();
+  const templateList = await listCodexConfigTemplates(home);
+  const items: CodexConfigWorkbenchItem[] = [];
+  const sensitiveLines = sensitiveLineNumbers(configText);
+  for (const [itemId, descriptor] of editableConfigItems.entries()) {
+    const assignment = assignments.get(descriptor.keyPath);
+    const currentValue = configValueFromToml(assignment?.value, descriptor.valueKind);
+    items.push({
+      id: itemId,
+      group: "current",
+      keyPath: descriptor.keyPath,
+      label: descriptor.label,
+      detail: descriptor.detail,
+      valueKind: descriptor.valueKind,
+      options: descriptor.options,
+      allowCustom: descriptor.allowCustom,
+      currentValue,
+      enabled: currentValue !== undefined,
+      editable: sensitiveLines.length === 0,
+      risk: descriptor.risk,
+      source: descriptor.source,
+      supportLevel: descriptorSupportLevel(descriptor),
+      effectiveNote: descriptorEffectiveNote(descriptor),
+      warnings: [
+        ...(assignment && !tomlValueReplacementSafeForKind(assignment.value, descriptor.valueKind)
+          ? [`${descriptor.keyPath} currently uses a complex TOML value and is read-only.`]
+          : []),
+        ...descriptorWarnings(descriptor)
+      ],
+      evidence: configItemEvidence(configPath, descriptor.keyPath, assignment)
+    });
+  }
+  for (const server of inventory.mcpServers) {
+    const table = tables.get(server.table);
+    if (!table) continue;
+    const fields = server.source === "plugin_config" ? mcpPluginPolicyEditableFields : mcpUserConfigEditableFields;
+    for (const field of fields) {
+      const descriptor = mcpEditableFieldDescriptors.get(field);
+      if (!descriptor) continue;
+      const keyPath = `${server.table}.${field}`;
+      const raw = table.keys.get(field)?.value;
+      const currentValue = configValueFromToml(raw, descriptor.valueKind);
+      const transportBlocked =
+        server.source === "plugin_config" && !mcpPluginPolicyEditableFields.has(field);
+      items.push({
+        id: `config.${keyPath}`,
+        group: "mcp",
+        keyPath,
+        table: server.table,
+        label: `${server.name} / ${descriptor.label}`,
+        detail: descriptor.detail,
+        valueKind: descriptor.valueKind,
+        options: descriptor.options,
+        allowCustom: descriptor.allowCustom,
+        currentValue,
+        enabled: currentValue !== undefined,
+        editable: !transportBlocked && sensitiveLines.length === 0,
+        risk: descriptor.risk,
+        source: "official_docs",
+        supportLevel: "official",
+        effectiveNote: codexConfigNewSessionWarning,
+        warnings: mcpWorkbenchWarnings(server, field, raw),
+        evidence: [
+          {
+            source: "codex.control.config.toml",
+            detail: `${server.source === "plugin_config" ? "Plugin MCP policy" : "MCP server"} field ${field} from ${server.table}.`,
+            path: configPath,
+            field: keyPath
+          }
+        ]
+      });
+    }
+  }
+  const unknownEntries = unknownConfigEntries(assignments, tables, configPath);
+  for (const entry of unknownEntries) {
+    const item = unknownWorkbenchItem(entry, assignments, configPath, sensitiveLines.length === 0);
+    if (item) items.push(item);
+  }
+  return {
+    codexHome: root,
+    configPath,
+    configSha256,
+    items,
+    mcpServers: inventory.mcpServers,
+    unknownEntries,
+    templateList,
+    warnings: [
+      ...templateList.warnings,
+      ...(inventory.sensitiveLines.length ? ["Sensitive-looking config values detected; structured editing is blocked."] : [])
+    ],
+    evidence: [
+      {
+        source: "codex.config.workbench",
+        detail:
+          "Workbench snapshot was generated from current config.toml using structured allowlists; scalar unknown keys are editable with unverified warnings.",
+        path: configPath
+      }
+    ]
+  };
+}
+
+export async function saveCodexConfigTemplate(
+  draft: CodexConfigTemplateDraft,
+  home = userHome()
+): Promise<CodexConfigTemplateList> {
+  const template = sanitizeCustomTemplateDraft(draft);
+  const current = await readCustomCodexConfigTemplates(home);
+  const templates = current.templates.filter((item) => item.id !== template.id);
+  if (templates.length >= maxCustomTemplateCount) {
+    throw new Error(`Codex config template limit reached: ${maxCustomTemplateCount}.`);
+  }
+  templates.push(template);
+  await writeCustomCodexConfigTemplates(home, templates);
+  return listCodexConfigTemplates(home);
+}
+
+export async function deleteCodexConfigTemplate(id: string, home = userHome()): Promise<CodexConfigTemplateList> {
+  if (!isSafeTemplateId(id) || id.startsWith("builtin.")) {
+    throw new Error("Only custom Codex config templates can be deleted.");
+  }
+  const current = await readCustomCodexConfigTemplates(home);
+  await writeCustomCodexConfigTemplates(
+    home,
+    current.templates.filter((template) => template.id !== id)
+  );
+  return listCodexConfigTemplates(home);
+}
+
+export async function previewCodexConfigTemplate(
+  request: CodexConfigTemplatePreviewRequest,
+  home = userHome()
+): Promise<CodexConfigTemplatePreview> {
+  const root = codexHome(home);
+  const configPath = path.join(root, "config.toml");
+  const configBytes = await readCurrentBytes(configPath);
+  const configText = configBytes.toString(textEncoding);
+  const configSha256 = sha256(configBytes);
+  const center = await getCodexControlCenterSnapshot(home);
+  const template = await resolveConfigTemplateForPreview(request, home);
+  const selectedIds = request.selectedItemIds
+    ? new Set(request.selectedItemIds.filter((id) => typeof id === "string" && id.length <= 120))
+    : undefined;
+  const assignments = parseConfigAssignments(configText, configPath);
+  const warnings: string[] = [];
+  const blockers: string[] = [];
+  const mutations: CodexControlMutationRequest["mutations"] = [];
+  const items = template.items.map((templateEntry) => {
+    const descriptor = descriptorForMutation(templateEntry);
+    const selected = selectedIds ? selectedIds.has(templateEntry.itemId) : templateEntry.defaultSelected !== false;
+    const currentValue = descriptor ? configValueForKey(descriptor.keyPath, assignments) : undefined;
+    const changed = currentValue !== templateEntry.value;
+    const item = center.items.find((entry) => entry.id === templateEntry.itemId);
+    const itemWarnings: string[] = [];
+    if (!descriptor || descriptor.keyPath !== templateEntry.keyPath) {
+      itemWarnings.push(`Unsupported Codex config template item: ${templateEntry.itemId}/${templateEntry.keyPath}`);
+    } else {
+      const validation = validateMutationValue(descriptor, templateEntry.value);
+      if (validation) itemWarnings.push(validation);
+      const assignment = assignments.get(descriptor.keyPath);
+      if (assignment && !tomlScalarReplacementSafe(assignment.value)) {
+        itemWarnings.push(`${descriptor.keyPath} currently uses a complex TOML value and may be replaced by a scalar.`);
+      }
+      if (!item?.editable) itemWarnings.push(`${descriptor.keyPath} is not editable in the current config snapshot.`);
+      if (isHighRiskMutation(descriptor, templateEntry.value)) itemWarnings.push(`${descriptor.keyPath} is a high-risk Codex control setting.`);
+      if (template.origin === "current") itemWarnings.push(`${descriptor.keyPath} is shown as current state and is not applied as a template mutation.`);
+      const patchBlocker = safeConfigPatchBlocker(configText, descriptor.keyPath, templateEntry.value);
+      if (patchBlocker) itemWarnings.push(patchBlocker);
+      if (selected && changed && !itemWarnings.some((warning) => /Unsupported|must be one of|expects|sensitive|not editable|not applied|unsafe|cannot safely/i.test(warning))) {
+        mutations.push({
+          itemId: templateEntry.itemId,
+          keyPath: templateEntry.keyPath,
+          value: templateEntry.value,
+          comment: sanitizeTemplateComment(templateEntry.comment)
+        });
+      }
+    }
+    warnings.push(...itemWarnings);
+    return {
+      itemId: templateEntry.itemId,
+      keyPath: templateEntry.keyPath,
+      label: item?.label ?? descriptor?.label ?? templateEntry.keyPath,
+      detail: item?.detail ?? descriptor?.detail ?? "Unsupported Codex config key.",
+      valueKind: item?.valueKind ?? descriptor?.valueKind ?? "string",
+      risk: item?.risk ?? descriptor?.risk ?? "blocked",
+      currentValue,
+      nextValue: templateEntry.value,
+      selected,
+      editable: !!item?.editable && !!descriptor,
+      changed,
+      comment: sanitizeTemplateComment(templateEntry.comment),
+      warnings: itemWarnings,
+      supportLevel: descriptor ? descriptorSupportLevel(descriptor) : undefined,
+      effectiveNote: descriptor ? descriptorEffectiveNote(descriptor) : undefined
+    };
+  });
+  const highRisk = mutations.some((mutation) => {
+    const descriptor = descriptorForMutation(mutation);
+    return !!descriptor && isHighRiskMutation(descriptor, mutation.value);
+  });
+  const duplicateSelected = new Set<string>();
+  for (const mutation of mutations) {
+    if (duplicateSelected.has(mutation.keyPath)) blockers.push(`Template selects ${mutation.keyPath} more than once.`);
+    duplicateSelected.add(mutation.keyPath);
+  }
+  if (sensitiveLineNumbers(configText).length > 0) blockers.push("config.toml contains sensitive-looking key names.");
+  return {
+    configPath,
+    configSha256,
+    templateId: template.id,
+    templateName: template.name,
+    templateDescription: template.description,
+    storagePath: codexTemplateStoragePath(home),
+    items,
+    mutations: safeMutationsForPlan(mutations),
+    changedKeys: mutations.map((mutation) => mutation.keyPath),
+    warnings: [...new Set(warnings)],
+    blockers: [...new Set(blockers)],
+    highRisk,
+    effectiveScope: codexConfigEffectiveScope,
+    effectiveWarnings: [codexConfigNewSessionWarning],
+    evidence: [
+      {
+        source: template.origin === "builtin" ? "codex.template.builtin" : "codex.template.custom",
+        detail: "Template preview was generated from allowlisted Codex Control keys and current config.toml assignments.",
+        path: configPath,
+        field: mutations.map((mutation) => mutation.keyPath).join(",")
+      }
+    ]
+  };
+}
+
 async function planCodexControlMutationInternal(
   request: CodexControlMutationRequest,
   home = userHome()
@@ -457,21 +1084,39 @@ async function planCodexControlMutationInternal(
   const normalized = normalizeMutations(request.mutations);
   const currentAssignments = parseConfigAssignments(content, configPath);
   for (const mutation of normalized) {
-    const descriptor = editableConfigItems.get(mutation.itemId);
+    const descriptor = descriptorForMutation(mutation);
     if (!descriptor || descriptor.keyPath !== mutation.keyPath) {
       blockers.push(`Unsupported Codex control mutation: ${mutation.itemId}/${mutation.keyPath}`);
       continue;
     }
+    const reservedProviderBlocker = reservedProviderMutationBlocker(mutation.keyPath);
+    if (reservedProviderBlocker) blockers.push(reservedProviderBlocker);
+    if (descriptor.supportLevel === "unverified") {
+      warnings.push(`${mutation.keyPath} is an unverified advanced Codex config key; AgentScope can write it but cannot prove Codex will use it.`);
+    }
+    const sensitiveKeyBlocker = sensitiveMutationKeyBlocker(mutation.keyPath);
+    if (sensitiveKeyBlocker) blockers.push(sensitiveKeyBlocker);
+    const mcp = parseMcpKeyPath(mutation.keyPath);
+    if (mcp) {
+      if (!safeMcpServerNameRe.test(mcp.tableName.split(".").at(-1) ?? "")) {
+        blockers.push(`Cannot safely edit MCP server with unsupported table name: ${mcp.tableName}`);
+      }
+      if (mcp.source === "plugin_config" && !mcpPluginPolicyEditableFields.has(mcp.field)) {
+        blockers.push(`Plugin MCP transport field is read-only: ${mutation.keyPath}`);
+      }
+    }
     const validation = validateMutationValue(descriptor, mutation.value);
     if (validation) blockers.push(validation);
-    const currentValue = configValueForKey(descriptor.keyPath, currentAssignments);
+    const patchBlocker = safeConfigPatchBlocker(content, descriptor.keyPath, mutation.value);
+    if (patchBlocker) blockers.push(patchBlocker);
+    const currentValue = configValueForDescriptor(descriptor, currentAssignments);
     if (currentValue === mutation.value) warnings.push(`${mutation.keyPath} already has the requested value.`);
     if (isHighRiskMutation(descriptor, mutation.value)) {
       warnings.push(`${mutation.keyPath} is a high-risk Codex control setting.`);
     }
   }
   const highRisk = normalized.some((mutation) => {
-    const descriptor = editableConfigItems.get(mutation.itemId);
+    const descriptor = descriptorForMutation(mutation);
     return !!descriptor && isHighRiskMutation(descriptor, mutation.value);
   });
   if (highRisk && !request.confirmedHighRisk) {
@@ -480,7 +1125,7 @@ async function planCodexControlMutationInternal(
   let next = content;
   if (!blockers.length) {
     for (const mutation of normalized) {
-      next = applyConfigMutation(next, mutation.keyPath, mutation.value);
+      next = applyConfigMutation(next, mutation.keyPath, mutation.value, mutation.comment);
     }
     const validation = validateTomlShape(next);
     if (validation) blockers.push(`config.toml validation failed: ${validation}`);
@@ -492,7 +1137,9 @@ async function planCodexControlMutationInternal(
     rawMutations: normalized,
     changedKeys: normalized.map((mutation) => mutation.keyPath),
     blockers,
-    warnings,
+    warnings: [...new Set(warnings)],
+    effectiveScope: codexConfigEffectiveScope,
+    effectiveWarnings: [codexConfigNewSessionWarning],
     highRisk,
     evidence: [
       {
@@ -521,7 +1168,7 @@ export async function executeCodexControlMutation(
   }
   let next = current.toString(textEncoding);
   for (const mutation of plan.rawMutations) {
-    next = applyConfigMutation(next, mutation.keyPath, mutation.value);
+    next = applyConfigMutation(next, mutation.keyPath, mutation.value, mutation.comment);
   }
   const validation = validateTomlShape(next);
   if (validation) throw new Error(`config.toml validation failed: ${validation}`);
@@ -542,13 +1189,24 @@ export async function executeCodexControlMutation(
     },
     home
   );
+  let verification: CodexControlWriteVerification = {
+    status: "failed",
+    checkedKeys: plan.changedKeys,
+    warnings: [],
+    error: "write_not_attempted"
+  };
   try {
     await writeTextAtomically(resolved.path, next);
-    await finishCodexControlJournal(journal, { status: "succeeded", nextSha256: nextHash });
+    verification = await verifyCodexControlMutationWrite(resolved.path, plan.rawMutations);
+    if (verification.status !== "passed") {
+      throw new Error(verification.error ?? `verification_failed: ${verification.checkedKeys.join(", ")}`);
+    }
+    await finishCodexControlJournal(journal, { status: "succeeded", nextSha256: nextHash, verification });
   } catch (error) {
     await finishCodexControlJournal(journal, {
       status: "failed",
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
+      verification
     }).catch(() => undefined);
     throw error;
   }
@@ -558,12 +1216,15 @@ export async function executeCodexControlMutation(
     backupPath,
     journalPath: journal.journalPath,
     changedKeys: plan.changedKeys,
+    effectiveScope: plan.effectiveScope,
+    effectiveWarnings: plan.effectiveWarnings,
+    verification,
     sha256: nextHash,
     bytes: nextBytes.length,
     evidence: [
       {
         source: "codex.control.mutation.execute",
-        detail: "Allowlisted Codex config keys were written after backup, sha256 check, and journal creation.",
+        detail: "Codex config keys were written after backup, sha256 check, journal creation, atomic rename, and read-back verification.",
         path: resolved.path,
         field: plan.changedKeys.join(",")
       },
@@ -1264,7 +1925,7 @@ async function directorySurface(input: {
 
 function configCenterItem(
   id: string,
-  descriptor: NonNullable<ReturnType<typeof editableConfigItems.get>>,
+  descriptor: EditableConfigDescriptor,
   assignments: Map<string, TopLevelAssignment>,
   configPath: string,
   sensitiveLines: number[]
@@ -1272,6 +1933,7 @@ function configCenterItem(
   const assignment = assignments.get(descriptor.keyPath);
   const assignmentSensitive = assignment ? isSensitiveTomlLine(`${assignment.key} = ${assignment.value}`) : false;
   const value = assignmentSensitive ? undefined : configValueFromToml(assignment?.value, descriptor.valueKind);
+  const valueKind = descriptor.valueKind === "stringArray" ? "summary" : descriptor.valueKind;
   const warnings = [
     ...(sensitiveLines.length ? ["Sensitive-looking config keys block structural edits."] : []),
     ...(assignmentSensitive ? ["This config value looks sensitive and is not displayed."] : []),
@@ -1283,9 +1945,10 @@ function configCenterItem(
     label: descriptor.label,
     detail: descriptor.detail,
     keyPath: descriptor.keyPath,
-    value,
-    valueKind: descriptor.valueKind,
+    value: Array.isArray(value) ? value.join(", ") : value,
+    valueKind,
     options: descriptor.options,
+    allowCustom: descriptor.allowCustom,
     editable: sensitiveLines.length === 0,
     risk: descriptor.risk,
     targetPath: configPath,
@@ -1439,9 +2102,57 @@ function normalizeMutations(mutations: CodexControlMutationRequest["mutations"])
     const key = `${itemId}\n${keyPath}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    normalized.push({ itemId, keyPath, value: mutation.value });
+    normalized.push({ itemId, keyPath, value: mutation.value, comment: sanitizeTemplateComment(mutation.comment) });
   }
   return normalized;
+}
+
+function descriptorForMutation(
+  mutation: Pick<CodexControlMutation, "itemId" | "keyPath"> & Partial<Pick<CodexControlMutation, "value">>
+): EditableConfigDescriptor | undefined {
+  const staticDescriptor = editableConfigItems.get(mutation.itemId);
+  if (staticDescriptor) return staticDescriptor;
+  const parsed = parseMcpKeyPath(mutation.keyPath);
+  if (parsed && mutation.itemId === `config.${mutation.keyPath}`) {
+    const fieldDescriptor = mcpEditableFieldDescriptors.get(parsed.field);
+    if (!fieldDescriptor) return undefined;
+    if (parsed.source === "plugin_config" && !mcpPluginPolicyEditableFields.has(parsed.field)) return undefined;
+    if (parsed.source === "user_config" && !mcpUserConfigEditableFields.has(parsed.field)) return undefined;
+    return {
+      keyPath: mutation.keyPath,
+      section: "mcp",
+      label: fieldDescriptor.label,
+      detail: fieldDescriptor.detail,
+      valueKind: fieldDescriptor.valueKind,
+      options: fieldDescriptor.options,
+      allowCustom: fieldDescriptor.allowCustom,
+      risk: fieldDescriptor.risk,
+      source: "official_docs",
+      supportLevel: "official",
+      effectiveNote: codexConfigNewSessionWarning
+    };
+  }
+  if (isCustomConfigItemId(mutation.itemId)) {
+    return customConfigDescriptorForMutation(mutation);
+  }
+  return undefined;
+}
+
+function parseMcpKeyPath(keyPath: string):
+  | { source: "user_config" | "plugin_config"; tableName: string; serverName: string; field: string }
+  | undefined {
+  const direct = /^mcp_servers\.([A-Za-z0-9_-]{1,80})\.([A-Za-z0-9_.-]{1,80})$/.exec(keyPath);
+  if (direct) return { source: "user_config", tableName: `mcp_servers.${direct[1]!}`, serverName: direct[1]!, field: direct[2]! };
+  const plugin = /^plugins\.([A-Za-z0-9_-]{1,80})\.mcp_servers\.([A-Za-z0-9_-]{1,80})\.([A-Za-z0-9_.-]{1,80})$/.exec(keyPath);
+  if (plugin) {
+    return {
+      source: "plugin_config",
+      tableName: `plugins.${plugin[1]!}.mcp_servers.${plugin[2]!}`,
+      serverName: `${plugin[1]!}:${plugin[2]!}`,
+      field: plugin[3]!
+    };
+  }
+  return undefined;
 }
 
 function safeMutationsForPlan(
@@ -1453,7 +2164,108 @@ function safeMutationsForPlan(
   }));
 }
 
-function isSensitiveMutationValue(value: string | number | boolean | null): boolean {
+function descriptorSupportLevel(descriptor: EditableConfigDescriptor): CodexConfigSupportLevel {
+  if (descriptor.supportLevel) return descriptor.supportLevel;
+  return descriptor.source === "official_docs" ? "official" : "known_local";
+}
+
+function descriptorEffectiveNote(descriptor: EditableConfigDescriptor): string {
+  return descriptor.effectiveNote ?? codexConfigNewSessionWarning;
+}
+
+function descriptorWarnings(descriptor: EditableConfigDescriptor): string[] {
+  const warnings: string[] = [];
+  if (descriptorSupportLevel(descriptor) === "unverified") {
+    warnings.push(`${descriptor.keyPath} is an unverified advanced Codex config key; AgentScope can write it but cannot prove Codex will use it.`);
+  }
+  const reserved = reservedProviderMutationBlocker(descriptor.keyPath);
+  if (reserved) warnings.push(reserved);
+  return warnings;
+}
+
+function isCustomConfigItemId(itemId: string): boolean {
+  return /^config\.(?:custom|unknown)\.[A-Za-z0-9_.-]{1,110}$/.test(itemId);
+}
+
+function customConfigDescriptorForMutation(
+  mutation: Pick<CodexControlMutation, "itemId" | "keyPath"> & Partial<Pick<CodexControlMutation, "value">>
+): EditableConfigDescriptor | undefined {
+  if (!safeCustomConfigKeyPath(mutation.keyPath)) return undefined;
+  const kind = valueKindForMutationValue(mutation.value);
+  return {
+    keyPath: mutation.keyPath,
+    section: "advanced",
+    label: mutation.keyPath,
+    detail: "Unverified advanced Codex config key preserved from the user's config.toml or custom edit.",
+    valueKind: kind,
+    risk: riskForCustomKeyPath(mutation.keyPath),
+    source: "current_code",
+    supportLevel: "unverified",
+    effectiveNote: codexConfigNewSessionWarning
+  };
+}
+
+function valueKindForMutationValue(value: CodexControlMutationValue | undefined): EditableConfigDescriptor["valueKind"] {
+  if (Array.isArray(value)) return "stringArray";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number") return "number";
+  return "string";
+}
+
+function valueKindForUnknownEntry(entry: CodexConfigUnknownEntry, assignments: Map<string, TopLevelAssignment>): EditableConfigDescriptor["valueKind"] {
+  const value = assignments.get(entry.keyPath)?.value;
+  if (entry.valueKind === "array") return "stringArray";
+  const boolean = booleanValue(value);
+  if (boolean !== undefined) return "boolean";
+  if (value !== undefined && /^-?\d+(?:\.\d+)?$/.test(value.trim())) return "number";
+  return "string";
+}
+
+function safeCustomConfigKeyPath(keyPath: string): boolean {
+  if (!keyPath || keyPath.length > 120) return false;
+  if (keyPath.split(".").some((part) => !safeTomlBareKey(part))) return false;
+  if (keyPath.startsWith("auth.") || keyPath === "auth" || keyPath.includes("..")) return false;
+  return true;
+}
+
+function sensitiveMutationKeyBlocker(keyPath: string): string | undefined {
+  if (sensitiveKeyRe.test(keyPath)) {
+    const tail = keyPath.split(".").at(-1) ?? keyPath;
+    if (tail === "bearer_token_env_var" || tail === "env_vars" || tail === "env_http_headers") return undefined;
+    return `Cannot safely edit sensitive-looking Codex config key: ${keyPath}`;
+  }
+  return undefined;
+}
+
+function reservedProviderMutationBlocker(keyPath: string): string | undefined {
+  const match = /^model_providers\.([A-Za-z0-9_-]+)\./.exec(keyPath);
+  if (!match) return undefined;
+  const providerId = match[1]!;
+  if (!reservedBuiltinProviderIds.has(providerId)) return undefined;
+  if (providerId === "openai") {
+    return "The built-in openai provider id is reserved; edit openai_base_url instead of model_providers.openai.*.";
+  }
+  return `The built-in ${providerId} provider id is reserved; use a custom provider id before editing model_providers.${providerId}.*.`;
+}
+
+function riskForCustomKeyPath(keyPath: string): CodexControlCenterItem["risk"] {
+  if (
+    keyPath === "approval_policy" ||
+    keyPath === "sandbox_mode" ||
+    keyPath === "web_search" ||
+    keyPath.endsWith(".command") ||
+    keyPath.endsWith(".url") ||
+    keyPath.endsWith(".base_url") ||
+    keyPath.includes("mcp_servers")
+  ) {
+    return "high";
+  }
+  if (keyPath.startsWith("model_providers.") || keyPath.startsWith("features.")) return "medium";
+  return "medium";
+}
+
+function isSensitiveMutationValue(value: CodexControlMutationValue): boolean {
+  if (Array.isArray(value)) return value.some((item) => isSensitiveMutationValue(item));
   return typeof value === "string" && (sensitiveTokenRe.test(value) || vendorTokenShapeRe.test(value));
 }
 
@@ -1477,18 +2289,34 @@ function validateMutationRequest(request: CodexControlMutationRequest): void {
       mutation.value !== null &&
       typeof mutation.value !== "string" &&
       typeof mutation.value !== "number" &&
-      typeof mutation.value !== "boolean"
+      typeof mutation.value !== "boolean" &&
+      !Array.isArray(mutation.value)
     ) {
       throw new Error("Invalid Codex control mutation value.");
+    }
+    if (Array.isArray(mutation.value) && mutation.value.some((item) => typeof item !== "string" || item.length > 200)) {
+      throw new Error("Invalid Codex control mutation array value.");
+    }
+    if (mutation.comment !== undefined && typeof mutation.comment !== "string") {
+      throw new Error("Invalid Codex control mutation comment.");
     }
   }
 }
 
 function validateMutationValue(
-  descriptor: NonNullable<ReturnType<typeof editableConfigItems.get>>,
-  value: string | number | boolean | null
+  descriptor: EditableConfigDescriptor,
+  value: CodexControlMutationValue
 ): string | undefined {
   if (value === null) return undefined;
+  if (descriptor.valueKind === "stringArray") {
+    if (!Array.isArray(value)) return `${descriptor.keyPath} expects an array of strings.`;
+    if (value.length > 64) return `${descriptor.keyPath} has too many entries.`;
+    for (const item of value) {
+      if (!item.trim() || item.length > 200) return `${descriptor.keyPath} has an invalid empty or long entry.`;
+      if (isSensitiveMutationValue(item)) return `${descriptor.keyPath} contains a sensitive-looking value and is blocked.`;
+    }
+    return undefined;
+  }
   if (descriptor.valueKind === "boolean") {
     return typeof value === "boolean" ? undefined : `${descriptor.keyPath} expects a boolean value.`;
   }
@@ -1498,18 +2326,30 @@ function validateMutationValue(
   if (typeof value !== "string") return `${descriptor.keyPath} expects a string value.`;
   if (value.length > 160) return `${descriptor.keyPath} value is too long.`;
   if (isSensitiveMutationValue(value)) return `${descriptor.keyPath} value looks sensitive and is blocked.`;
-  if (descriptor.options?.length && !descriptor.options.includes(value)) {
+  if (descriptor.options?.length && !descriptor.allowCustom && !descriptor.options.includes(value)) {
     return `${descriptor.keyPath} must be one of: ${descriptor.options.join(", ")}`;
   }
-  if (descriptor.keyPath.includes("model") && !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,80}$/.test(value)) {
+  if (
+    (descriptor.keyPath === "model" || descriptor.keyPath === "review_model") &&
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{1,80}$/.test(value)
+  ) {
     return `${descriptor.keyPath} is not a valid model-style value.`;
+  }
+  if (descriptor.keyPath === "model_provider" && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(value)) {
+    return `${descriptor.keyPath} is not a valid provider id.`;
+  }
+  if ((descriptor.keyPath.endsWith(".base_url") || descriptor.keyPath === "openai_base_url") && !/^https?:\/\/[^\s]+$/i.test(value)) {
+    return `${descriptor.keyPath} expects an http(s) URL.`;
+  }
+  if (descriptor.keyPath.endsWith(".name") && value.length > 100) {
+    return `${descriptor.keyPath} value is too long.`;
   }
   return undefined;
 }
 
 function isHighRiskMutation(
-  descriptor: NonNullable<ReturnType<typeof editableConfigItems.get>>,
-  value: string | number | boolean | null
+  descriptor: EditableConfigDescriptor,
+  value: CodexControlMutationValue
 ): boolean {
   if (descriptor.risk === "high") return true;
   return (
@@ -1521,37 +2361,356 @@ function isHighRiskMutation(
   );
 }
 
-function configValueForKey(keyPath: string, assignments: Map<string, TopLevelAssignment>): string | number | boolean | undefined {
+function configValueForKey(keyPath: string, assignments: Map<string, TopLevelAssignment>): string | number | boolean | string[] | undefined {
   const descriptor = [...editableConfigItems.values()].find((item) => item.keyPath === keyPath);
   return configValueFromToml(assignments.get(keyPath)?.value, descriptor?.valueKind ?? "string");
 }
 
+function configValueForDescriptor(
+  descriptor: EditableConfigDescriptor,
+  assignments: Map<string, TopLevelAssignment>
+): string | number | boolean | string[] | undefined {
+  return configValueFromToml(assignments.get(descriptor.keyPath)?.value, descriptor.valueKind);
+}
+
+async function verifyCodexControlMutationWrite(
+  configPath: string,
+  mutations: CodexControlMutationRequest["mutations"]
+): Promise<CodexControlWriteVerification> {
+  const checkedKeys = mutations.map((mutation) => mutation.keyPath);
+  const warnings: string[] = [];
+  let content: string;
+  try {
+    content = await fs.promises.readFile(configPath, textEncoding);
+  } catch (error) {
+    return {
+      status: "failed",
+      checkedKeys,
+      warnings,
+      error: `verification_failed: could not read config.toml after write: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+  const validation = validateTomlShape(content);
+  if (validation) {
+    return {
+      status: "failed",
+      checkedKeys,
+      warnings,
+      error: `verification_failed: config.toml validation failed after write: ${validation}`
+    };
+  }
+  const assignments = parseConfigAssignments(content, configPath);
+  const mismatches: string[] = [];
+  for (const mutation of mutations) {
+    const descriptor = descriptorForMutation(mutation);
+    if (!descriptor) {
+      mismatches.push(`${mutation.keyPath}: descriptor missing during verification`);
+      continue;
+    }
+    const actual = configValueFromToml(assignments.get(mutation.keyPath)?.value, descriptor.valueKind);
+    if (mutation.value === null) {
+      if (actual !== undefined) mismatches.push(`${mutation.keyPath}: expected removal`);
+      continue;
+    }
+    if (!codexMutationValueEquals(actual, mutation.value)) {
+      mismatches.push(`${mutation.keyPath}: expected ${safeVerificationValue(mutation.value)} but read ${safeVerificationValue(actual)}`);
+    }
+  }
+  if (mismatches.length) {
+    return {
+      status: "failed",
+      checkedKeys,
+      warnings,
+      error: `verification_failed: ${mismatches.join("; ")}`
+    };
+  }
+  return { status: "passed", checkedKeys, warnings };
+}
+
+function codexMutationValueEquals(
+  actual: string | number | boolean | string[] | undefined,
+  expected: Exclude<CodexControlMutationValue, null>
+): boolean {
+  if (Array.isArray(actual) || Array.isArray(expected)) {
+    return JSON.stringify(actual ?? []) === JSON.stringify(expected ?? []);
+  }
+  return actual === expected;
+}
+
+function safeVerificationValue(value: string | number | boolean | string[] | undefined | null): string {
+  if (value === undefined) return "unset";
+  if (value === null) return "remove";
+  if (isSensitiveMutationValue(value)) return redactedMutationValue;
+  return Array.isArray(value) ? JSON.stringify(value) : String(value);
+}
+
 function configValueFromToml(
   rawValue: string | undefined,
-  kind: CodexControlCenterItem["valueKind"]
-): string | number | boolean | undefined {
+  kind: EditableConfigDescriptor["valueKind"]
+): string | number | boolean | string[] | undefined {
   if (rawValue === undefined) return undefined;
   if (kind === "boolean") return booleanValue(rawValue);
   if (kind === "number") {
     const parsed = Number(rawValue);
     return Number.isFinite(parsed) ? parsed : undefined;
   }
+  if (kind === "stringArray") return tomlStringArrayValue(rawValue);
   return stringTomlValue(rawValue) ?? rawValue.replace(/^["']|["']$/g, "");
 }
 
-function applyConfigMutation(content: string, keyPath: string, value: string | number | boolean | null): string {
-  if (value === null) return removeConfigKey(content, keyPath);
-  return setConfigValue(content, keyPath, tomlScalar(value));
+function templateItem(
+  itemId: string,
+  value: CodexControlMutationValue,
+  defaultSelected: boolean,
+  comment: string
+): CodexConfigTemplateItem {
+  const descriptor = editableConfigItems.get(itemId);
+  if (!descriptor) throw new Error(`Invalid built-in Codex config template item: ${itemId}`);
+  return {
+    itemId,
+    keyPath: descriptor.keyPath,
+    value,
+    defaultSelected,
+    comment: `AgentScope template: ${comment}`
+  };
 }
 
-function setConfigValue(content: string, keyPath: string, encodedValue: string): string {
+function templateEvidence(source: string): Evidence[] {
+  return [
+    {
+      source,
+      detail: "Built-in Codex config template derived from documented config.toml keys and AgentScope's structured control allowlist."
+    }
+  ];
+}
+
+function codexTemplateStoragePath(home: string): string {
+  return path.join(agentScopeHome(home), "codex-control", templateStorageFileName);
+}
+
+async function readCustomCodexConfigTemplates(home: string): Promise<{ templates: CodexConfigTemplate[]; warnings: string[] }> {
+  const storagePath = codexTemplateStoragePath(home);
+  let content: string;
+  try {
+    const stat = await fs.promises.stat(storagePath);
+    if (!stat.isFile() || stat.size > maxEditableBytes) {
+      return { templates: [], warnings: [`Codex config template storage is not a small file: ${storagePath}`] };
+    }
+    content = await fs.promises.readFile(storagePath, textEncoding);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { templates: [], warnings: [] };
+    return { templates: [], warnings: [`Could not read Codex config templates: ${storagePath}`] };
+  }
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    const rawTemplates = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object" && Array.isArray((parsed as { templates?: unknown }).templates)
+        ? (parsed as { templates: unknown[] }).templates
+        : [];
+    const templates = rawTemplates
+      .map((entry) => sanitizeStoredTemplate(entry))
+      .filter((entry): entry is CodexConfigTemplate => !!entry)
+      .slice(0, maxCustomTemplateCount);
+    return { templates, warnings: [] };
+  } catch {
+    return { templates: [], warnings: [`Codex config template storage is invalid JSON: ${storagePath}`] };
+  }
+}
+
+async function writeCustomCodexConfigTemplates(home: string, templates: CodexConfigTemplate[]): Promise<void> {
+  const storagePath = codexTemplateStoragePath(home);
+  await fs.promises.mkdir(path.dirname(storagePath), { recursive: true });
+  const body = `${JSON.stringify({ schemaVersion: 1, templates }, null, 2)}\n`;
+  await writeTextAtomically(storagePath, body);
+}
+
+async function currentCodexConfigTemplate(home: string): Promise<CodexConfigTemplate> {
+  const configPath = path.join(codexHome(home), "config.toml");
+  const content = (await readCurrentBytes(configPath)).toString(textEncoding);
+  const assignments = parseConfigAssignments(content, configPath);
+  const items: CodexConfigTemplateItem[] = [];
+  for (const [itemId, descriptor] of editableConfigItems.entries()) {
+    const value = configValueForKey(descriptor.keyPath, assignments);
+    if (value === undefined) continue;
+    items.push({
+      itemId,
+      keyPath: descriptor.keyPath,
+      value,
+      defaultSelected: false,
+      comment: "AgentScope current snapshot"
+    });
+  }
+  return {
+    id: currentConfigTemplateId,
+    origin: "current",
+    name: "Current config",
+    description:
+      "Read-only view of allowlisted values already present in config.toml. Unknown advanced settings stay untouched and are not copied.",
+    risk: templateRisk(items),
+    readonly: true,
+    items,
+    evidence: [
+      {
+        source: "codex.template.current",
+        detail:
+          "Current-state template is generated from allowlisted config.toml assignments only; unsupported advanced settings are preserved but not copied.",
+        path: configPath
+      }
+    ]
+  };
+}
+
+function sanitizeStoredTemplate(value: unknown): CodexConfigTemplate | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  try {
+    return sanitizeCustomTemplateDraft(value as CodexConfigTemplateDraft);
+  } catch {
+    return undefined;
+  }
+}
+
+function sanitizeCustomTemplateDraft(draft: CodexConfigTemplateDraft): CodexConfigTemplate {
+  if (!draft || typeof draft !== "object") throw new Error("Invalid Codex config template.");
+  const rawId = typeof draft.id === "string" && draft.id.trim() ? draft.id.trim() : `custom.${slugifyTemplateId(draft.name)}-${Date.now().toString(36)}`;
+  const id = rawId.startsWith("custom.") ? rawId : `custom.${rawId}`;
+  if (!isSafeTemplateId(id) || id.startsWith("builtin.") || id.startsWith("current.")) throw new Error("Invalid Codex config template id.");
+  const name = normalizeTemplateText(draft.name, 80, "Codex config template name");
+  const description = normalizeTemplateText(draft.description ?? "", 240, "Codex config template description", true);
+  if (!Array.isArray(draft.items) || draft.items.length < 1 || draft.items.length > maxCustomTemplateItems) {
+    throw new Error(`Codex config template must contain 1-${maxCustomTemplateItems} items.`);
+  }
+  const seen = new Set<string>();
+  const items: CodexConfigTemplateItem[] = [];
+  for (const entry of draft.items) {
+    const item = sanitizeTemplateItem(entry);
+    if (seen.has(item.itemId)) continue;
+    seen.add(item.itemId);
+    items.push(item);
+  }
+  if (!items.length) throw new Error("Codex config template has no supported items.");
+  const risk = templateRisk(items);
+  return {
+    id,
+    origin: "custom",
+    name,
+    description,
+    risk,
+    readonly: false,
+    items,
+    evidence: [
+      {
+        source: "codex.template.custom",
+        detail: "Custom Codex config template stored as AgentScope local metadata."
+      }
+    ]
+  };
+}
+
+function sanitizeTemplateItem(entry: CodexConfigTemplateItem): CodexConfigTemplateItem {
+  if (!entry || typeof entry !== "object") throw new Error("Invalid Codex config template item.");
+  const itemId = typeof entry.itemId === "string" ? entry.itemId.trim() : "";
+  const keyPath = typeof entry.keyPath === "string" ? entry.keyPath.trim() : "";
+  const descriptor = descriptorForMutation({ itemId, keyPath });
+  if (!descriptor) throw new Error(`Unsupported Codex config template item: ${itemId}`);
+  if (keyPath !== descriptor.keyPath) throw new Error(`Codex config template item key mismatch: ${itemId}`);
+  const validation = validateMutationValue(descriptor, entry.value);
+  if (validation) throw new Error(validation);
+  return {
+    itemId,
+    keyPath: descriptor.keyPath,
+    value: entry.value,
+    defaultSelected: entry.defaultSelected !== false,
+    comment: sanitizeTemplateComment(entry.comment)
+  };
+}
+
+async function resolveConfigTemplateForPreview(
+  request: CodexConfigTemplatePreviewRequest,
+  home: string
+): Promise<CodexConfigTemplate> {
+  if (request.template) return sanitizeCustomTemplateDraft(request.template);
+  const id = request.templateId;
+  if (!id || !isSafeTemplateId(id)) throw new Error("Invalid Codex config template id.");
+  const list = await listCodexConfigTemplates(home);
+  const template = list.templates.find((entry) => entry.id === id);
+  if (!template) throw new Error(`Codex config template not found: ${id}`);
+  return template;
+}
+
+function templateRisk(items: CodexConfigTemplateItem[]): CodexControlCenterItem["risk"] {
+  let risk: CodexControlCenterItem["risk"] = "low";
+  for (const item of items) {
+    const descriptor = descriptorForMutation(item);
+    if (!descriptor) return "blocked";
+    if (isHighRiskMutation(descriptor, item.value)) return "high";
+    if (descriptor.risk === "medium" && risk === "low") risk = "medium";
+  }
+  return risk;
+}
+
+function isSafeTemplateId(id: string): boolean {
+  return /^(?:current|builtin|custom)\.[A-Za-z0-9][A-Za-z0-9._-]{1,95}$/.test(id);
+}
+
+function slugifyTemplateId(value: string): string {
+  return (value || "template")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "template";
+}
+
+function normalizeTemplateText(value: string, maxLength: number, label: string, allowEmpty = false): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!allowEmpty && !normalized) throw new Error(`${label} is required.`);
+  if (normalized.length > maxLength) throw new Error(`${label} is too long.`);
+  if (isSensitiveDocumentLine(normalized)) throw new Error(`${label} looks sensitive and is blocked.`);
+  return normalized;
+}
+
+function sanitizeTemplateComment(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized || isSensitiveDocumentLine(normalized)) return undefined;
+  return normalized.replace(/#/g, "").slice(0, 160);
+}
+
+function commentLines(comment?: string): string[] {
+  const sanitized = sanitizeTemplateComment(comment);
+  return sanitized ? [`# ${sanitized}`] : [];
+}
+
+function tomlScalarReplacementSafe(rawValue: string): boolean {
+  const trimmed = rawValue.trim();
+  return (
+    /^"((?:\\"|[^"])*)"|'([^']*)'$/.test(trimmed) ||
+    /^\[(?:\s*(?:"(?:\\"|[^"])*"|'[^']*')\s*,?)*\]$/.test(trimmed) ||
+    /^(true|false)$/i.test(trimmed) ||
+    /^-?\d+(?:\.\d+)?$/.test(trimmed) ||
+    /^[A-Za-z0-9._:-]+$/.test(trimmed)
+  );
+}
+
+function tomlValueReplacementSafeForKind(rawValue: string, kind: EditableConfigDescriptor["valueKind"]): boolean {
+  if (kind === "stringArray") return Array.isArray(tomlStringArrayValue(rawValue));
+  return tomlScalarReplacementSafe(rawValue);
+}
+
+function applyConfigMutation(content: string, keyPath: string, value: CodexControlMutationValue, comment?: string): string {
+  if (value === null) return removeConfigKey(content, keyPath);
+  return setConfigValue(content, keyPath, tomlValue(value), comment);
+}
+
+function setConfigValue(content: string, keyPath: string, encodedValue: string, comment?: string): string {
   const pathParts = keyPath.split(".");
   const key = pathParts.pop();
   if (!key) throw new Error(`Invalid Codex config key path: ${keyPath}`);
   const tableName = pathParts.join(".");
   return tableName
-    ? setTableTomlValue(content, tableName, key, encodedValue)
-    : setTopLevelTomlValue(content, key, encodedValue);
+    ? setTableTomlValue(content, tableName, key, encodedValue, comment)
+    : setTopLevelTomlValue(content, key, encodedValue, comment);
 }
 
 function removeConfigKey(content: string, keyPath: string): string {
@@ -1562,9 +2721,10 @@ function removeConfigKey(content: string, keyPath: string): string {
   return tableName ? removeTableTomlKey(content, tableName, key) : removeTopLevelTomlKey(content, key);
 }
 
-function setTopLevelTomlValue(content: string, key: string, encodedValue: string): string {
-  const lines = normalizeTrailingNewline(content).split(/\r?\n/);
-  const assignmentRe = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
+function setTopLevelTomlValue(content: string, key: string, encodedValue: string, comment?: string): string {
+  assertSafeTomlPatch(content, key);
+  const normalized = normalizeTrailingNewline(content);
+  const lines = normalized.split(/\r?\n/);
   let insertAt = 0;
   let inTopLevel = true;
   for (let index = 0; index < lines.length; index += 1) {
@@ -1578,71 +2738,277 @@ function setTopLevelTomlValue(content: string, key: string, encodedValue: string
       inTopLevel = false;
       break;
     }
-    if (inTopLevel && assignmentRe.test(rawLine)) {
-      lines[index] = `${key} = ${encodedValue}`;
+    if (inTopLevel && assignmentKey(rawLine) === key) {
+      lines[index] = replaceTomlAssignmentValue(rawLine, key, encodedValue);
       return lines.join("\n");
     }
     if (inTopLevel) insertAt = index + 1;
   }
-  lines.splice(insertAt, 0, `${key} = ${encodedValue}`);
+  lines.splice(insertAt, 0, ...commentLines(comment), `${key} = ${encodedValue}`);
   return lines.join("\n");
 }
 
-function setTableTomlValue(content: string, tableName: string, key: string, encodedValue: string): string {
+function setTableTomlValue(content: string, tableName: string, key: string, encodedValue: string, comment?: string): string {
+  assertSafeTomlPatch(content, `${tableName}.${key}`);
   const lines = normalizeTrailingNewline(content).split(/\r?\n/);
-  const assignmentRe = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
-  const headerRe = tableHeaderRe(tableName);
-  let tableStart = -1;
-  let tableEnd = lines.length;
-  for (let index = 0; index < lines.length; index += 1) {
-    const stripped = stripTomlComment(lines[index] ?? "").trim();
-    if (headerRe.test(stripped)) {
-      tableStart = index;
-      continue;
-    }
-    if (tableStart >= 0 && index > tableStart && /^\[+/.test(stripped)) {
-      tableEnd = index;
-      break;
-    }
-  }
-  if (tableStart < 0) {
-    const needsBlank = lines.length > 1 && (lines[lines.length - 2] ?? "").trim();
-    lines.splice(lines.length - 1, 0, ...(needsBlank ? [""] : []), `[${tableName}]`, `${key} = ${encodedValue}`);
-    return lines.join("\n");
-  }
-  for (let index = tableStart + 1; index < tableEnd; index += 1) {
-    if (assignmentRe.test(lines[index] ?? "")) {
-      lines[index] = `${key} = ${encodedValue}`;
+  const dottedKey = `${tableName}.${key}`;
+  for (const { lineIndex, assignment } of topLevelAssignments(lines)) {
+    if (assignment.key === dottedKey) {
+      lines[lineIndex] = replaceTomlAssignmentValue(lines[lineIndex] ?? "", dottedKey, encodedValue);
       return lines.join("\n");
     }
   }
-  lines.splice(tableEnd, 0, `${key} = ${encodedValue}`);
+  const range = findTomlTableRange(lines, tableName);
+  const tableStart = range?.start ?? -1;
+  const tableEnd = range?.end ?? lines.length;
+  if (tableStart < 0) {
+    const needsBlank = lines.length > 1 && (lines[lines.length - 2] ?? "").trim();
+    lines.splice(lines.length - 1, 0, ...(needsBlank ? [""] : []), `[${tableName}]`, ...commentLines(comment), `${key} = ${encodedValue}`);
+    return lines.join("\n");
+  }
+  for (let index = tableStart + 1; index < tableEnd; index += 1) {
+    if (assignmentKey(lines[index] ?? "") === key) {
+      lines[index] = replaceTomlAssignmentValue(lines[index] ?? "", key, encodedValue);
+      return lines.join("\n");
+    }
+  }
+  lines.splice(tableEnd, 0, ...commentLines(comment), `${key} = ${encodedValue}`);
   return lines.join("\n");
 }
 
 function removeTableTomlKey(content: string, tableName: string, key: string): string {
-  const assignmentRe = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
-  const headerRe = tableHeaderRe(tableName);
+  assertSafeTomlPatch(content, `${tableName}.${key}`);
   const lines = content.split(/\r?\n/);
-  let inTable = false;
-  const next: string[] = [];
-  for (const rawLine of lines) {
-    const stripped = stripTomlComment(rawLine).trim();
-    if (/^\[+/.test(stripped)) inTable = headerRe.test(stripped);
-    if (inTable && assignmentRe.test(rawLine)) continue;
-    next.push(rawLine);
+  const dottedKey = `${tableName}.${key}`;
+  for (const { lineIndex, assignment } of topLevelAssignments(lines)) {
+    if (assignment.key === dottedKey) {
+      const next = [...lines];
+      next.splice(lineIndex, 1);
+      return next.join("\n");
+    }
   }
-  return next.join("\n");
+  const range = findTomlTableRange(lines, tableName);
+  if (!range) return content;
+  const next = [...lines];
+  for (let index = range.start + 1; index < range.end; index += 1) {
+    if (assignmentKey(next[index] ?? "") === key) {
+      next.splice(index, 1);
+      return next.join("\n");
+    }
+  }
+  return content;
 }
 
 function tableHeaderRe(tableName: string): RegExp {
   return new RegExp(`^\\[\\s*${escapeRegExp(tableName)}\\s*\\]$`);
 }
 
+interface TomlTableRange {
+  start: number;
+  end: number;
+}
+
+function safeConfigPatchBlocker(content: string, keyPath: string, value: CodexControlMutationValue): string | undefined {
+  try {
+    if (value !== null) tomlValue(value);
+    assertSafeTomlPatch(content, keyPath);
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+function assertSafeTomlPatch(content: string, keyPath: string): void {
+  const pathParts = keyPath.split(".");
+  const key = pathParts.pop();
+  if (!key || pathParts.some((part) => !safeTomlBareKey(part)) || !safeTomlBareKey(key)) {
+    throw new Error(`Cannot safely edit unsupported TOML key path: ${keyPath}`);
+  }
+  const tableName = pathParts.join(".");
+  const lines = normalizeTrailingNewline(content).split(/\r?\n/);
+  const duplicateCount = countConfigAssignments(content, keyPath);
+  if (duplicateCount > 1) {
+    throw new Error(`Cannot safely edit ${keyPath}: duplicate assignments exist.`);
+  }
+  if (tableName) {
+    const tableConflict = tablePathConflict(lines, tableName);
+    if (tableConflict) throw new Error(tableConflict);
+    const dottedAssignment = topLevelAssignment(lines, keyPath);
+    if (dottedAssignment && !tomlScalarReplacementSafe(dottedAssignment.value)) {
+      throw new Error(`Cannot safely edit ${keyPath}: current dotted value is complex TOML.`);
+    }
+    const range = findTomlTableRange(lines, tableName);
+    if (range && hasInlineTableAssignment(lines, range, key)) {
+      throw new Error(`Cannot safely edit ${keyPath}: inline table value uses the same key.`);
+    }
+  } else {
+    const existing = topLevelAssignment(lines, key);
+    if (existing && !tomlScalarReplacementSafe(existing.value)) {
+      throw new Error(`Cannot safely edit ${keyPath}: current value is complex TOML.`);
+    }
+    if (hasTopLevelDottedDescendant(lines, key)) {
+      throw new Error(`Cannot safely edit ${keyPath}: dotted child keys already exist.`);
+    }
+  }
+}
+
+function countConfigAssignments(content: string, keyPath: string): number {
+  let count = 0;
+  let currentTable = "";
+  for (const rawLine of content.split(/\r?\n/)) {
+    const stripped = stripTomlComment(rawLine).trim();
+    if (!stripped) continue;
+    const table = tableNameFromLine(stripped);
+    if (table !== undefined) {
+      currentTable = table;
+      continue;
+    }
+    const key = assignmentKey(rawLine);
+    if (!key) continue;
+    const fullKey = currentTable ? `${currentTable}.${key}` : key;
+    if (fullKey === keyPath) count += 1;
+  }
+  return count;
+}
+
+function tablePathConflict(lines: string[], tableName: string): string | undefined {
+  const parts = tableName.split(".");
+  for (let depth = 1; depth < parts.length; depth += 1) {
+    const parentTable = parts.slice(0, depth).join(".");
+    const childKey = parts[depth]!;
+    const parentRange = findTomlTableRange(lines, parentTable);
+    if (parentRange && hasInlineTableAssignment(lines, parentRange, childKey)) {
+      return `Cannot safely edit ${tableName}: parent table [${parentTable}] has inline value for ${childKey}.`;
+    }
+  }
+  const topKey = parts[0]!;
+  if (hasTopLevelInlineOrScalar(lines, topKey)) {
+    return `Cannot safely edit ${tableName}: top-level ${topKey} already exists as a value.`;
+  }
+  return undefined;
+}
+
+function findTomlTableRange(lines: string[], tableName: string): TomlTableRange | undefined {
+  let start = -1;
+  let end = lines.length;
+  for (let index = 0; index < lines.length; index += 1) {
+    const stripped = stripTomlComment(lines[index] ?? "").trim();
+    if (!stripped) continue;
+    if (/^\[\[/.test(stripped) && tableNameFromLine(stripped) === tableName) {
+      throw new Error(`Cannot safely edit [${tableName}]: array table exists.`);
+    }
+    if (tableHeaderRe(tableName).test(stripped)) {
+      if (start >= 0) throw new Error(`Cannot safely edit [${tableName}]: duplicate table exists.`);
+      start = index;
+      continue;
+    }
+    if (start >= 0 && index > start && /^\[+/.test(stripped)) {
+      end = index;
+      break;
+    }
+  }
+  return start >= 0 ? { start, end } : undefined;
+}
+
+function hasInlineTableAssignment(lines: string[], range: TomlTableRange, key: string): boolean {
+  for (let index = range.start + 1; index < range.end; index += 1) {
+    const assignment = parseAssignmentLine(lines[index] ?? "");
+    if (!assignment || assignment.key !== key) continue;
+    return !tomlScalarReplacementSafe(assignment.value);
+  }
+  return false;
+}
+
+function hasTopLevelInlineOrScalar(lines: string[], key: string): boolean {
+  return !!topLevelAssignment(lines, key);
+}
+
+function hasTopLevelDottedDescendant(lines: string[], key: string): boolean {
+  for (const { assignment } of topLevelAssignments(lines)) {
+    if (assignment?.key.startsWith(`${key}.`)) return true;
+  }
+  return false;
+}
+
+function topLevelAssignment(lines: string[], key: string):
+  | {
+      key: string;
+      value: string;
+      valueStart: number;
+      valueEnd: number;
+    }
+  | undefined {
+  for (const { assignment } of topLevelAssignments(lines)) {
+    if (assignment?.key === key) return assignment;
+  }
+  return undefined;
+}
+
+function* topLevelAssignments(lines: string[]): Iterable<{ lineIndex: number; assignment: NonNullable<ReturnType<typeof parseAssignmentLine>> }> {
+  for (const [lineIndex, rawLine] of lines.entries()) {
+    const stripped = stripTomlComment(rawLine).trim();
+    if (stripped && /^\[+/.test(stripped)) return;
+    const assignment = parseAssignmentLine(rawLine);
+    if (assignment) yield { lineIndex, assignment };
+  }
+}
+
+function replaceTomlAssignmentValue(rawLine: string, key: string, encodedValue: string): string {
+  const parsed = parseAssignmentLine(rawLine);
+  if (!parsed || parsed.key !== key) {
+    throw new Error(`Cannot safely replace TOML assignment for ${key}.`);
+  }
+  return `${rawLine.slice(0, parsed.valueStart)}${encodedValue}${rawLine.slice(parsed.valueEnd)}`;
+}
+
+function assignmentKey(rawLine: string): string | undefined {
+  return parseAssignmentLine(rawLine)?.key;
+}
+
+function parseAssignmentLine(rawLine: string):
+  | {
+      key: string;
+      value: string;
+      valueStart: number;
+      valueEnd: number;
+    }
+  | undefined {
+  const lineWithoutComment = stripTomlComment(rawLine);
+  const match = /^(\s*)([A-Za-z0-9_.-]+)\s*=\s*(.*?)(\s*)$/.exec(lineWithoutComment);
+  if (!match) return undefined;
+  const key = match[2]!;
+  const beforeValue = lineWithoutComment.length - match[3]!.length - match[4]!.length;
+  const valueEnd = lineWithoutComment.length - match[4]!.length;
+  return {
+    key,
+    value: match[3]!.trim(),
+    valueStart: beforeValue,
+    valueEnd
+  };
+}
+
+function tableNameFromLine(strippedLine: string): string | undefined {
+  const match = /^\[+\s*([^\]]+?)\s*\]+$/.exec(strippedLine);
+  return match?.[1]?.trim();
+}
+
+function safeTomlBareKey(key: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(key);
+}
+
+function tomlValue(value: string | number | boolean | string[]): string {
+  if (Array.isArray(value)) return tomlStringArray(value);
+  return tomlScalar(value);
+}
+
 function tomlScalar(value: string | number | boolean): string {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return String(value);
   return tomlString(value);
+}
+
+function tomlStringArray(values: string[]): string {
+  return `[${values.map((value) => tomlString(value)).join(", ")}]`;
 }
 
 function parseConfigAssignments(content: string, filePath: string): Map<string, TopLevelAssignment> {
@@ -1676,6 +3042,198 @@ interface TopLevelAssignment {
   line: number;
   raw: string;
   path: string;
+}
+
+interface ConfigTableAssignment {
+  key: string;
+  value: string;
+  line: number;
+  raw: string;
+  path: string;
+}
+
+interface ConfigTable {
+  name: string;
+  line: number;
+  keys: Map<string, ConfigTableAssignment>;
+}
+
+function parseConfigTables(content: string, filePath: string): Map<string, ConfigTable> {
+  const tables = new Map<string, ConfigTable>();
+  let current: ConfigTable | undefined;
+  for (const [index, rawLine] of content.split(/\r?\n/).entries()) {
+    const stripped = stripTomlComment(rawLine).trim();
+    if (!stripped) continue;
+    const table = tableNameFromLine(stripped);
+    if (table !== undefined) {
+      current = { name: table, line: index + 1, keys: new Map() };
+      if (!tables.has(table)) tables.set(table, current);
+      continue;
+    }
+    if (!current) continue;
+    const assignment = parseAssignmentLine(rawLine);
+    if (!assignment) continue;
+    current.keys.set(assignment.key, {
+      key: assignment.key,
+      value: assignment.value,
+      line: index + 1,
+      raw: rawLine,
+      path: filePath
+    });
+  }
+  return tables;
+}
+
+function unknownConfigEntries(
+  assignments: Map<string, TopLevelAssignment>,
+  tables: Map<string, ConfigTable>,
+  configPath: string
+): CodexConfigUnknownEntry[] {
+  const knownTopLevel = new Set([...editableConfigItems.values()].map((item) => item.keyPath).filter((key) => !key.includes(".")));
+  const knownTableKeys = new Set<string>();
+  for (const descriptor of editableConfigItems.values()) {
+    if (!descriptor.keyPath.includes(".")) continue;
+    knownTableKeys.add(descriptor.keyPath);
+  }
+  const out: CodexConfigUnknownEntry[] = [];
+  for (const assignment of assignments.values()) {
+    if (assignment.key.includes(".")) continue;
+    const parsed = parseMcpKeyPath(assignment.key);
+    const isKnownMcp = parsed && (mcpUserConfigEditableFields.has(parsed.field) || mcpPluginPolicyEditableFields.has(parsed.field));
+    if (knownTopLevel.has(assignment.key) || knownTableKeys.has(assignment.key) || isKnownMcp) continue;
+    out.push(unknownEntryFromAssignment(assignment.key, undefined, assignment, configPath));
+  }
+  for (const table of tables.values()) {
+    const mcpDirect = /^mcp_servers\.([A-Za-z0-9_-]{1,80})$/.test(table.name);
+    const mcpPlugin = /^plugins\.[A-Za-z0-9_-]{1,80}\.mcp_servers\.[A-Za-z0-9_-]{1,80}$/.test(table.name);
+    for (const assignment of table.keys.values()) {
+      const fullKey = `${table.name}.${assignment.key}`;
+      if (knownTableKeys.has(fullKey)) continue;
+      if (mcpDirect && mcpUserConfigEditableFields.has(assignment.key)) continue;
+      if (mcpPlugin && mcpPluginPolicyEditableFields.has(assignment.key)) continue;
+      out.push(unknownEntryFromAssignment(fullKey, table.name, assignment, configPath));
+    }
+  }
+  return out.sort((left, right) => left.line - right.line || left.keyPath.localeCompare(right.keyPath)).slice(0, 200);
+}
+
+function unknownEntryFromAssignment(
+  keyPath: string,
+  table: string | undefined,
+  assignment: TopLevelAssignment | ConfigTableAssignment,
+  configPath: string
+): CodexConfigUnknownEntry {
+  const sensitive = isSensitiveTomlLine(assignment.raw);
+  return {
+    id: `unknown.${assignment.line}.${keyPath}`,
+    table,
+    keyPath,
+    line: assignment.line,
+    valueKind: tomlUnknownValueKind(assignment.value),
+    sensitive,
+    displayValue: sensitive ? undefined : truncateText(assignment.value.trim(), 120),
+    warnings: [
+      sensitive
+        ? "Unknown config entry has a sensitive-looking key or value and stays read-only."
+        : "Unknown config entry is preserved. Scalar values can be edited as unverified advanced settings."
+    ],
+    evidence: [
+      {
+        source: "codex.config.unknown",
+        detail: `Unknown config key ${keyPath} was found and preserved.`,
+        path: configPath,
+        field: keyPath
+      }
+    ]
+  };
+}
+
+function unknownWorkbenchItem(
+  entry: CodexConfigUnknownEntry,
+  assignments: Map<string, TopLevelAssignment>,
+  configPath: string,
+  editableAllowed: boolean
+): CodexConfigWorkbenchItem | undefined {
+  if (entry.sensitive) return undefined;
+  if (!safeCustomConfigKeyPath(entry.keyPath)) return undefined;
+  const raw = assignments.get(entry.keyPath)?.value;
+  if (raw === undefined) return undefined;
+  if (entry.valueKind !== "scalar" && entry.valueKind !== "array") return undefined;
+  const valueKind = valueKindForUnknownEntry(entry, assignments);
+  const currentValue = configValueFromToml(raw, valueKind);
+  if (currentValue === undefined) return undefined;
+  const warnings = [
+    `${entry.keyPath} is an unverified advanced Codex config key; AgentScope can write it but cannot prove Codex will use it.`,
+    codexConfigNewSessionWarning,
+    ...entry.warnings
+  ];
+  const reserved = reservedProviderMutationBlocker(entry.keyPath);
+  if (reserved) warnings.unshift(reserved);
+  const sensitive = sensitiveMutationKeyBlocker(entry.keyPath);
+  if (sensitive) warnings.unshift(sensitive);
+  return {
+    id: `config.unknown.${sha256(entry.keyPath).slice(0, 16)}`,
+    group: "unknown",
+    keyPath: entry.keyPath,
+    table: entry.table,
+    label: entry.keyPath,
+    detail: "Unverified advanced Codex config key preserved from config.toml.",
+    valueKind,
+    currentValue,
+    enabled: true,
+    editable: editableAllowed && !reserved && !sensitive,
+    risk: sensitive || reserved ? "blocked" : riskForCustomKeyPath(entry.keyPath),
+    source: "current_code",
+    supportLevel: "unverified",
+    effectiveNote: codexConfigNewSessionWarning,
+    warnings,
+    evidence: [
+      {
+        source: "codex.config.unknown",
+        detail: `Scalar unknown config key ${entry.keyPath} is editable with unverified warnings.`,
+        path: configPath,
+        field: entry.keyPath
+      }
+    ]
+  };
+}
+
+function tomlUnknownValueKind(rawValue: string): CodexConfigUnknownEntry["valueKind"] {
+  const trimmed = rawValue.trim();
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) return "array";
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return "inline";
+  if (tomlScalarReplacementSafe(trimmed)) return "scalar";
+  return "unknown";
+}
+
+function truncateText(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, Math.max(0, maxLength - 3))}...` : value;
+}
+
+function configItemEvidence(configPath: string, keyPath: string, assignment: TopLevelAssignment | undefined): Evidence[] {
+  return [
+    assignment
+      ? {
+          source: "codex.control.config.toml",
+          detail: `Config key ${keyPath} found at line ${assignment.line}.`,
+          path: configPath,
+          field: keyPath
+        }
+      : {
+          source: "codex.control.config.toml",
+          detail: `Config key ${keyPath} is not present; Codex will use defaults, profile, project, or CLI overrides.`,
+          path: configPath,
+          field: keyPath
+        }
+  ];
+}
+
+function mcpWorkbenchWarnings(server: { source: "user_config" | "plugin_config" }, field: string, rawValue?: string): string[] {
+  const warnings: string[] = [];
+  if (server.source === "plugin_config" && !mcpPluginPolicyEditableFields.has(field)) warnings.push("Plugin-owned MCP transport is read-only.");
+  if (rawValue && isSensitiveTomlLine(`${field} = ${rawValue}`)) warnings.push("Sensitive-looking MCP value is not displayed or edited.");
+  if (field === "command" || field === "args" || field === "url") warnings.push("MCP transport changes are high risk and require confirmation.");
+  return warnings;
 }
 
 function parseTopLevelAssignments(content: string, filePath: string): Map<string, TopLevelAssignment> {
@@ -1815,14 +3373,14 @@ function setTopLevelTomlString(content: string, key: string, value: string): str
 }
 
 function removeTopLevelTomlKey(content: string, key: string): string {
-  const assignmentRe = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
+  assertSafeTomlPatch(content, key);
   const lines = content.split(/\r?\n/);
   let inTopLevel = true;
   const next: string[] = [];
   for (const rawLine of lines) {
     const stripped = stripTomlComment(rawLine).trim();
     if (stripped && /^\[+/.test(stripped)) inTopLevel = false;
-    if (inTopLevel && assignmentRe.test(rawLine)) continue;
+    if (inTopLevel && assignmentKey(rawLine) === key) continue;
     next.push(rawLine);
   }
   return next.join("\n");
@@ -1874,9 +3432,23 @@ function changedModeKeyPaths(patch: CodexModeConfigPatch): string[] {
 function stringTomlValue(value?: string): string | undefined {
   if (!value) return undefined;
   const quoted = /^"((?:\\"|[^"])*)"|'([^']*)'/.exec(value);
-  if (quoted) return (quoted[1] ?? quoted[2] ?? "").replace(/\\"/g, '"');
+  if (quoted) return unescapeTomlString(quoted[1] ?? quoted[2] ?? "");
   const bare = /^[A-Za-z0-9._:-]+/.exec(value)?.[0];
   return bare || undefined;
+}
+
+function tomlStringArrayValue(value?: string): string[] | undefined {
+  if (!value?.trim().startsWith("[")) return undefined;
+  const out: string[] = [];
+  for (const match of value.matchAll(/"((?:\\"|[^"])*)"|'([^']*)'/g)) {
+    const item = unescapeTomlString(match[1] ?? match[2] ?? "").trim();
+    if (item && !isSensitiveMutationValue(item)) out.push(item);
+  }
+  return out;
+}
+
+function unescapeTomlString(value: string): string {
+  return value.replace(/\\\\/g, "\\").replace(/\\"/g, '"');
 }
 
 function tomlString(value: string): string {
@@ -1889,11 +3461,16 @@ function escapeRegExp(value: string): string {
 
 function validateTomlShape(content: string): string | undefined {
   const tables = new Set<string>();
+  let state: TomlLineScanState = { single: false, double: false, square: 0, curly: 0 };
   for (const [index, rawLine] of content.split(/\r?\n/).entries()) {
     const lineNumber = index + 1;
     const line = stripTomlComment(rawLine).trim();
     if (!line) continue;
-    if (!balancedDelimiters(line)) return `line ${lineNumber} has unbalanced quotes or brackets`;
+    const inContinuation = tomlLineScanOpen(state);
+    const scanned = scanTomlLine(line, state);
+    if (scanned.error) return `line ${lineNumber} ${scanned.error}`;
+    state = scanned.state;
+    if (inContinuation) continue;
     const tableMatch = /^\[+\s*([^\]]+?)\s*\]+$/.exec(line);
     if (tableMatch) {
       const table = tableMatch[1]!;
@@ -1902,35 +3479,51 @@ function validateTomlShape(content: string): string | undefined {
       if (!arrayTable) tables.add(table);
       continue;
     }
-    if (/^[A-Za-z0-9_.-]+\s*=/.test(line)) continue;
+    if (tomlAssignmentStart(line)) continue;
     return `line ${lineNumber} is not a TOML table or key/value assignment`;
   }
+  if (tomlLineScanOpen(state)) return "file ended inside a TOML multiline value";
   return undefined;
 }
 
-function balancedDelimiters(line: string): boolean {
-  let single = false;
-  let double = false;
-  let square = 0;
-  let curly = 0;
+interface TomlLineScanState {
+  single: boolean;
+  double: boolean;
+  square: number;
+  curly: number;
+}
+
+function tomlLineScanOpen(state: TomlLineScanState): boolean {
+  return state.single || state.double || state.square > 0 || state.curly > 0;
+}
+
+function scanTomlLine(
+  line: string,
+  initial: TomlLineScanState
+): { state: TomlLineScanState; error?: string | undefined } {
+  const state = { ...initial };
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index]!;
-    if (char === "'" && !double && line[index - 1] !== "\\") {
-      single = !single;
+    if (char === "'" && !state.double && line[index - 1] !== "\\") {
+      state.single = !state.single;
       continue;
     }
-    if (char === '"' && !single && line[index - 1] !== "\\") {
-      double = !double;
+    if (char === '"' && !state.single && line[index - 1] !== "\\") {
+      state.double = !state.double;
       continue;
     }
-    if (single || double) continue;
-    if (char === "[") square += 1;
-    if (char === "]") square -= 1;
-    if (char === "{") curly += 1;
-    if (char === "}") curly -= 1;
-    if (square < 0 || curly < 0) return false;
+    if (state.single || state.double) continue;
+    if (char === "[") state.square += 1;
+    if (char === "]") state.square -= 1;
+    if (char === "{") state.curly += 1;
+    if (char === "}") state.curly -= 1;
+    if (state.square < 0 || state.curly < 0) return { state, error: "has unbalanced quotes or brackets" };
   }
-  return !single && !double && square === 0 && curly === 0;
+  return { state };
+}
+
+function tomlAssignmentStart(line: string): boolean {
+  return /^(?:[A-Za-z0-9_-]+|"[^"]+"|'[^']+')(?:\.(?:[A-Za-z0-9_-]+|"[^"]+"|'[^']+'))*\s*=/.test(line);
 }
 
 function stripTomlComment(line: string): string {
@@ -1962,7 +3555,7 @@ function booleanValue(value?: string): boolean | undefined {
 function sensitiveLineNumbers(content: string): number[] {
   const lines: number[] = [];
   content.split(/\r?\n/).forEach((rawLine, index) => {
-    if (isSensitiveTomlLine(rawLine)) lines.push(index + 1);
+    if (isBlockingSensitiveTomlLine(rawLine)) lines.push(index + 1);
   });
   return lines;
 }
@@ -1993,6 +3586,34 @@ function isSensitiveTomlLine(rawLine: string): boolean {
   if (key && sensitiveKeyRe.test(key)) return true;
   const [, value = ""] = line.split(/=(.*)/s);
   return sensitiveTokenRe.test(value);
+}
+
+function isBlockingSensitiveTomlLine(rawLine: string): boolean {
+  const line = stripTomlComment(rawLine).trim();
+  if (!line.includes("=")) return vendorTokenShapeRe.test(line);
+  const match = /^([A-Za-z0-9_.-]+)\s*=\s*(.*)$/.exec(line);
+  if (!match) return vendorTokenShapeRe.test(line);
+  const key = match[1] ?? "";
+  const value = match[2] ?? "";
+  if (sensitiveKeyRe.test(key) && isSafeSensitiveReferenceTomlKey(key, value)) return false;
+  if (sensitiveTokenRe.test(value) || vendorTokenShapeRe.test(value)) return true;
+  if (!sensitiveKeyRe.test(key)) return false;
+  return true;
+}
+
+function isSafeSensitiveReferenceTomlKey(key: string, rawValue: string): boolean {
+  const tail = key.split(".").at(-1) ?? key;
+  const trimmed = rawValue.trim();
+  if (tail === "bearer_token_env_var") {
+    const value = stringTomlValue(trimmed);
+    return !!value && /^[A-Z_][A-Z0-9_]{0,127}$/.test(value);
+  }
+  if (tail === "env_vars") {
+    const values = tomlStringArrayValue(trimmed);
+    return !!values && values.every((value) => /^[A-Z_][A-Z0-9_]{0,127}$/.test(value));
+  }
+  if (tail === "env_http_headers") return trimmed.startsWith("{");
+  return false;
 }
 
 function isSensitiveDocumentLine(rawLine: string): boolean {
@@ -2124,13 +3745,34 @@ async function writeBackup(resolved: ResolvedDocument, bytes: Buffer, home: stri
 async function writeTextAtomically(filePath: string, content: string): Promise<void> {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = path.join(path.dirname(filePath), `${path.basename(filePath)}.agentscope-${Date.now()}.tmp`);
+  let handle: fs.promises.FileHandle | undefined;
   try {
-    await fs.promises.writeFile(tempPath, content, { encoding: textEncoding, flag: "wx" });
+    handle = await fs.promises.open(tempPath, "wx");
+    await handle.writeFile(content, { encoding: textEncoding });
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
     await fs.promises.rename(tempPath, filePath);
   } catch (error) {
+    await handle?.close().catch(() => undefined);
     await fs.promises.rm(tempPath, { force: true }).catch(() => undefined);
-    throw error;
+    throw codexAtomicWriteError(error, filePath);
   }
+}
+
+function codexAtomicWriteError(error: unknown, filePath: string): Error {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
+    const wrapped = new Error(`file_busy_or_denied: config.toml may be open or access denied: ${filePath}`);
+    (wrapped as NodeJS.ErrnoException).code = "file_busy_or_denied";
+    return wrapped;
+  }
+  if (code === "ENOENT") {
+    const wrapped = new Error(`atomic_target_missing: config.toml parent path disappeared: ${filePath}`);
+    (wrapped as NodeJS.ErrnoException).code = "atomic_target_missing";
+    return wrapped;
+  }
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 interface CodexControlJournal extends Record<string, unknown> {
@@ -2147,6 +3789,7 @@ interface CodexControlJournal extends Record<string, unknown> {
   changedKeys: string[];
   highRisk: boolean;
   warnings: string[];
+  verification?: CodexControlWriteVerification | undefined;
   evidence: Evidence[];
   journalPath: string;
   error?: string | undefined;
@@ -2186,10 +3829,13 @@ async function createCodexControlJournal(
 
 async function finishCodexControlJournal(
   journal: CodexControlJournal,
-  result: { status: "succeeded"; nextSha256: string } | { status: "failed"; error: string }
+  result:
+    | { status: "succeeded"; nextSha256: string; verification?: CodexControlWriteVerification | undefined }
+    | { status: "failed"; error: string; verification?: CodexControlWriteVerification | undefined }
 ): Promise<void> {
   journal.updatedAt = new Date().toISOString();
   journal.status = result.status;
+  journal.verification = result.verification;
   if (result.status === "succeeded") {
     journal.nextSha256 = result.nextSha256;
     delete journal.error;

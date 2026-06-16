@@ -10,6 +10,8 @@ import { iterateJsonl } from "./jsonl.js";
 const rolloutNameRe = /^rollout-(.+)\.jsonl$/i;
 const rolloutStartRe = /^rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-/i;
 const uuidTailRe = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const stateDbNameRe = /^state_(\d+)\.sqlite$/i;
+const logsDbNameRe = /^logs_(\d+)\.sqlite$/i;
 
 interface CodexThreadSourceMetadata {
   parentThreadId?: string;
@@ -40,11 +42,12 @@ export function loadCodexIndex(home?: string, options: LoadCodexIndexOptions = {
 } {
   const includeLogMetadata = options.includeLogMetadata ?? true;
   const sqliteRoot = codexSqliteHome(home);
-  const dbPath = path.join(sqliteRoot, "state_5.sqlite");
-  if (!fs.existsSync(dbPath)) return { sessions: [], records: [], relations: [] };
+  const dbPath = findCodexStateDb(sqliteRoot);
+  if (!dbPath) return { sessions: [], records: [], relations: [] };
   const opened = openCodexDb(dbPath);
   if (!opened) return { sessions: [], records: [], relations: [] };
   const { db, evidencePath } = opened;
+  const databaseName = path.basename(dbPath);
   try {
     const logMetadata = includeLogMetadata ? loadCodexLogMetadata(sqliteRoot) : new Map<string, Record<string, unknown>>();
     const rows = selectExistingColumns(db, "threads", [
@@ -87,7 +90,7 @@ export function loadCodexIndex(home?: string, options: LoadCodexIndexOptions = {
       const evidence = [
         {
           source: "codex.sqlite.threads",
-          detail: "Codex thread record loaded from state_5.sqlite threads table.",
+          detail: `Codex thread record loaded from ${databaseName} threads table.`,
           path: evidencePath,
           field: Object.keys(row).join(",")
         }
@@ -170,10 +173,10 @@ export async function scanCodexRollouts(home?: string, options: ScanCodexRollout
   const includeActivity = options.includeActivity ?? true;
   const roots = codexRolloutRoots(home).filter((root) => fs.existsSync(root.path));
   if (!roots.length) return { transcripts: [], sessions: [], records: [], relations: [] };
-  const files: Array<{ filePath: string; archived: boolean; rootPath: string }> = [];
+  const files: Array<{ filePath: string; archived: boolean; rootPath: string; rootLabel: string }> = [];
   for (const root of roots) {
     walk(root.path, (filePath) => {
-      if (rolloutThreadId(filePath)) files.push({ filePath, archived: root.archived, rootPath: root.path });
+      if (rolloutThreadId(filePath)) files.push({ filePath, archived: root.archived, rootPath: root.path, rootLabel: root.label });
     });
   }
   files.sort((left, right) => left.filePath.localeCompare(right.filePath));
@@ -181,7 +184,7 @@ export async function scanCodexRollouts(home?: string, options: ScanCodexRollout
   const sessions: AgentSession[] = [];
   const records: IndexRecord[] = [];
   const relations: Relation[] = [];
-  for (const { filePath, archived, rootPath } of files) {
+  for (const { filePath, archived, rootPath, rootLabel } of files) {
     const sessionId = rolloutThreadId(filePath);
     if (!sessionId) continue;
     const metadata = await readRolloutMetadata(filePath, { maxLines: options.metadataMaxLines });
@@ -193,10 +196,10 @@ export async function scanCodexRollouts(home?: string, options: ScanCodexRollout
       {
         source: "codex.sessions.rollout",
         detail: archived
-          ? "Codex archived rollout JSONL discovered under .codex/archived_sessions."
-          : "Codex rollout JSONL discovered under .codex/sessions/YYYY/MM/DD.",
+          ? `Codex archived rollout JSONL discovered under .codex/${rootLabel}.`
+          : `Codex rollout JSONL discovered under .codex/${rootLabel}.`,
         path: filePath,
-        field: archived ? "archived_sessions,filename,cwd,jsonl" : "sessions,filename,cwd,jsonl"
+        field: `${rootLabel},filename,cwd,jsonl`
       }
     ];
     const kindEvidence = codexSessionKindEvidence(metadata);
@@ -259,12 +262,76 @@ export async function scanCodexRollouts(home?: string, options: ScanCodexRollout
   return { transcripts, sessions, records, relations: mergeRelations(relations) };
 }
 
-export function codexRolloutRoots(home?: string): Array<{ path: string; archived: boolean }> {
+export function codexRolloutRoots(home?: string): Array<{ path: string; archived: boolean; label: string }> {
   const root = codexHome(home);
   return [
-    { path: path.join(root, "sessions"), archived: false },
-    { path: path.join(root, "archived_sessions"), archived: true }
+    { path: path.join(root, "sessions"), archived: false, label: "sessions" },
+    { path: path.join(root, "rollouts"), archived: false, label: "rollouts" },
+    { path: path.join(root, "archived_sessions"), archived: true, label: "archived_sessions" },
+    { path: path.join(root, "archived_rollouts"), archived: true, label: "archived_rollouts" }
   ];
+}
+
+export function findCodexStateDb(sqliteRoot: string): string | undefined {
+  return findCodexVersionedDb(sqliteRoot, stateDbNameRe, (db) => tableColumns(db, "threads").has("id"));
+}
+
+export function findCodexLogsDb(sqliteRoot: string): string | undefined {
+  return findCodexVersionedDb(sqliteRoot, logsDbNameRe, (db) => tableColumns(db, "logs").has("thread_id"));
+}
+
+export function listCodexStateDbFiles(sqliteRoot: string): string[] {
+  return listCodexVersionedDbFiles(sqliteRoot, stateDbNameRe);
+}
+
+export function listCodexLogsDbFiles(sqliteRoot: string): string[] {
+  return listCodexVersionedDbFiles(sqliteRoot, logsDbNameRe);
+}
+
+export function findCodexVersionedDb(
+  sqliteRoot: string,
+  pattern: RegExp,
+  isCompatible: (db: Database.Database) => boolean
+): string | undefined {
+  for (const candidate of listCodexVersionedDbFiles(sqliteRoot, pattern)) {
+    const opened = openCodexDb(candidate);
+    if (!opened) continue;
+    try {
+      if (isCompatible(opened.db)) return candidate;
+    } catch {
+      // Try the next candidate; a malformed future database should not block older readable state.
+    } finally {
+      opened.db.close();
+    }
+  }
+  return undefined;
+}
+
+function listCodexVersionedDbFiles(sqliteRoot: string, pattern: RegExp): string[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(sqliteRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .flatMap((entry) => {
+      if (!entry.isFile()) return [];
+      const match = pattern.exec(entry.name);
+      if (!match) return [];
+      const filePath = path.join(sqliteRoot, entry.name);
+      return [{ path: filePath, version: Number(match[1] ?? 0), mtimeMs: statMtimeMs(filePath) }];
+    })
+    .sort((left, right) => right.version - left.version || right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path))
+    .map((candidate) => candidate.path);
+}
+
+function statMtimeMs(filePath: string): number {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 export function rolloutThreadId(filePath: string): string | undefined {
@@ -303,7 +370,7 @@ export function openCodexDb(dbPath: string): { db: Database.Database; evidencePa
   } catch {
     try {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-sqlite-"));
-      const target = path.join(tempDir, "state_5.sqlite");
+      const target = path.join(tempDir, path.basename(dbPath));
       fs.copyFileSync(dbPath, target);
       for (const suffix of ["-wal", "-shm"]) {
         if (fs.existsSync(dbPath + suffix)) fs.copyFileSync(dbPath + suffix, target + suffix);
@@ -372,8 +439,8 @@ function compactMetadata(values: Record<string, unknown>): Record<string, unknow
 }
 
 function loadCodexLogMetadata(codexRoot: string): Map<string, Record<string, unknown>> {
-  const dbPath = path.join(codexRoot, "logs_2.sqlite");
-  if (!fs.existsSync(dbPath)) return new Map();
+  const dbPath = findCodexLogsDb(codexRoot);
+  if (!dbPath) return new Map();
   const opened = openCodexDb(dbPath);
   if (!opened) return new Map();
   try {

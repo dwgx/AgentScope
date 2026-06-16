@@ -1,6 +1,6 @@
 # AgentScope Next-AI Handoff
 
-Last updated: 2026-06-15.
+Last updated: 2026-06-16.
 
 Read order for the next AI:
 
@@ -70,6 +70,68 @@ Japanese/Korean/Chinese localization, removed the sidebar tagline, and published
 - `docs/mcp-tool-identity-2026-06-15.md`
 - `docs/release-0.1.0-summary-2026-06-15.md`
 
+The 2026-06-16 post-release batch focused on real-world Codex compatibility and
+Codex Control usability:
+
+- Codex SQLite discovery now handles versioned stores such as `state_5.sqlite`
+  and `logs_2.sqlite`, resolves `CODEX_SQLITE_HOME` / `sqlite_home`, and scans
+  rollout roots under `sessions`, `rollouts`, `archived_sessions`, and
+  `archived_rollouts`.
+- Codex Control structured config writes now use backup, journal, atomic write,
+  and read-back verification. A save is not reported as successful unless every
+  changed key parses back to the requested value.
+- Codex parameter templates and the current-state workbench distinguish
+  official keys, locally known keys, and unverified advanced keys. Unknown
+  scalar config entries can be edited as unverified advanced settings; complex,
+  sensitive, duplicate, or unsafe TOML stays blocked/read-only.
+- Built-in provider IDs such as `model_providers.openai.*` are reserved. Use
+  top-level `openai_base_url` for the built-in OpenAI provider; custom provider
+  tables must use custom provider IDs.
+- Codex Control applies changes through a centered Motion-powered run modal
+  with line-by-line patch reveal, spinner/check/error states, reduced-motion
+  support, and automatic success dismissal. Errors stay visible.
+
+The post-release read-only audit was distilled into this handoff and workflow
+notes instead of a standalone audit report. Do not create more one-off audit
+reports unless there is a release, security incident, or the user explicitly
+asks. Do not commit or push documentation cleanup automatically; keep it local
+until the user asks.
+
+Local audit verification at HEAD `5243eaa` before the 2026-06-16 work:
+
+```text
+npm.cmd run check:release
+result: passed
+coverage: audit:repo, lint, typecheck, i18n, tests, app smoke, prebuild,
+artifact verify, packaged smoke, IPC-negative smoke, portable smoke
+```
+
+This produced ignored local artifacts under `apps/desktop/out/`. Existing
+portable-only release output may also remain under ignored
+`apps/desktop/out-portable/`.
+
+Local verification for the 2026-06-16 post-release batch:
+
+```text
+npm.cmd run typecheck
+npm.cmd run i18n:check
+npm.cmd run lint
+npm.cmd test
+npm.cmd --workspace @agentscope/desktop run build
+npm.cmd run audit:repo
+npm.cmd run package
+npm.cmd run smoke:desktop:packaged
+npm.cmd run audit:artifacts
+git diff --check
+
+result: passed
+notes:
+- packaged smoke screenshots: apps/desktop/out/smoke/packaged-clicks
+- Vite emitted the existing >500 kB chunk warning; build succeeded.
+- npm install of motion@12.40.0 reported existing audit vulnerabilities; no
+  broad dependency upgrade was performed.
+```
+
 ## Commands
 
 Run after code changes:
@@ -117,7 +179,10 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 - `packages/core/src/scope.ts`: unified snapshot merge, process/session scoring, evidence, confidence, relations.
 - `packages/core/src/search.ts`: Codex SQLite and JSONL safe-field search.
 - `packages/core/src/jsonl.ts`: JSONL streaming and search allowlist. Privacy-sensitive.
-- `packages/core/src/codexControl.ts`: Codex control surfaces, protected auth metadata, rules/skills editing, structured config mutation, mutation journal. Security-sensitive.
+- `packages/core/src/codexControl.ts`: Codex control surfaces, protected auth
+  metadata, rules/skills editing, structured config mutation, mutation journal,
+  atomic config writes, read-back verification, and advanced-key boundaries.
+  Security-sensitive.
 - `packages/core/src/mcpIdentity.ts`: evidence-backed MCP helper identity from
   safe Codex config metadata, process command/path markers, and parent-tree
   inheritance. Do not read MCP payloads here.
@@ -169,7 +234,16 @@ Codex Control:
 
 - `auth.json` is metadata-only: exists, size, mtime, storage mode. Do not read token content or hash.
 - Raw `config.toml` editing is disabled; use structured controls.
-- Structured mutations use allowlisted key paths, sha256 conflict checks, risk classification, backup, and journal.
+- Structured mutations use supported key paths, sha256 conflict checks, risk
+  classification, backup, journal, atomic write, and read-back verification.
+- Official Codex config keys must stay evidence-backed. Unknown scalar keys may
+  be editable only as unverified advanced settings; do not present them as
+  documented or exact.
+- Reserved built-in provider IDs must not be edited through
+  `model_providers.openai.*`, `model_providers.ollama.*`, or
+  `model_providers.lmstudio.*`.
+- Codex reads most config at new session start. UI should tell the user that
+  current running Codex processes may not hot-reload changed `config.toml`.
 - AGENTS/rules/user skill documents are allowlisted but sensitive-looking content is redacted and cannot be saved.
 
 MCP identity:
@@ -220,6 +294,18 @@ Current hygiene rules:
 
 ## Known Residual Risks
 
+- Process/session `commandLine` values are still displayed in the renderer and
+  can enter launcher evidence. They are useful for matching, but display,
+  notifications, exports, and evidence should use a redacted command summary
+  before expanding process surfaces.
+- Session import/restore file copies need exclusive target creation and
+  realpath/reparse-safe target-parent checks in core. Current validation blocks
+  traversal and unsafe roles, but file writes still have a local TOCTOU window.
+- Electron `shell:openPath` and `shell:revealPath` use allowlists and strict
+  open/reveal role checks, but the path allowlist should be upgraded from
+  string-prefix containment to realpath/reparse-safe containment.
+- Codex metadata uses key allowlists, but metadata values still need
+  token-like/secret-like/long-body filtering in core before display/export.
 - Restore is not fully atomic across files plus multiple SQLite DBs. Current code has preflight, cleanup, rollback attempts, and journals, but rollback itself can fail.
 - Codex process-to-thread mapping remains partly heuristic because parsed local state does not expose a reliable PID-to-thread map.
 - Claude daemon/job/session sidecars are local-observed internals, not stable official API.
@@ -232,16 +318,27 @@ Current hygiene rules:
 
 Highest-value next tasks:
 
-1. Add broader Electron/Playwright smoke coverage for Settings, Relations
+1. Redact process/session command line display and evidence. Keep raw command
+   lines only inside matching logic; renderer, exports, notifications, and
+   launcher evidence should use summaries that strip token/API-key/bearer style
+   arguments.
+2. Harden session import/restore target writes with exclusive file creation and
+   realpath/reparse-safe parent checks. Add tests for Windows junction/symlink
+   escape and import-time target races.
+3. Harden Electron open/reveal path allowlists with the same realpath/reparse
+   containment model used by operation roots.
+4. Add value-based Codex metadata redaction before values reach snapshot,
+   renderer, or export surfaces.
+5. Add broader Electron/Playwright smoke coverage for Settings, Relations
    filters, context menus, notifications, and launch notifications.
-2. Remove or isolate old Claude patch helpers unless reversible patch/restore is
+6. Remove or isolate old Claude patch helpers unless reversible patch/restore is
    implemented.
-3. Add keyboard access to row context menus with `Shift+F10`.
-4. Keep improving Codex subagent/process role classification, but never upgrade
+7. Add keyboard access to row context menus with `Shift+F10`.
+8. Keep improving Codex subagent/process role classification, but never upgrade
    heuristic to exact without evidence.
-5. Continue Codex Control expansion only with safe structured controls and
+9. Continue Codex Control expansion only with safe structured controls and
    protected credentials.
-6. For the next release, use `npm run check:release` when the user allows smoke;
+10. For the next release, use `npm run check:release` when the user allows smoke;
    if smoke is explicitly skipped, record that in the release notes.
 
 ## Source Research Summary

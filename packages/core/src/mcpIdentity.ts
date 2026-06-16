@@ -67,6 +67,7 @@ export function inspectToml(content: string, filePath: string): ConfigInventory 
 
 export function decorateMcpProcessIdentity(processes: AgentProcess[], servers: CodexMcpServerSummary[]): void {
   const byPid = new Map(processes.map((process) => [process.pid, process]));
+  promoteConfigBackedMcpProcesses(processes, servers);
   for (const process of processes) {
     if (process.processRole !== "codex_mcp_tool") continue;
     const parent = process.ppid === undefined ? undefined : byPid.get(process.ppid);
@@ -77,15 +78,93 @@ export function decorateMcpProcessIdentity(processes: AgentProcess[], servers: C
       process.evidence = appendEvidence(process.evidence, direct.evidence);
     }
   }
-  for (const process of processes) {
-    if (process.processRole !== "codex_mcp_tool" || process.mcp) continue;
-    const parent = process.ppid === undefined ? undefined : byPid.get(process.ppid);
-    if (parent?.mcp) {
-      process.mcp = inheritedMcpIdentity(parent.mcp);
-      process.evidence = appendEvidence(process.evidence, process.mcp.evidence);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const process of processes) {
+      if (process.processRole !== "codex_mcp_tool" || process.mcp) continue;
+      const parent = process.ppid === undefined ? undefined : byPid.get(process.ppid);
+      if (parent?.mcp) {
+        process.mcp = inheritedMcpIdentity(parent.mcp);
+        process.evidence = appendEvidence(process.evidence, process.mcp.evidence);
+        changed = true;
+      }
     }
   }
 }
+
+function promoteConfigBackedMcpProcesses(processes: AgentProcess[], servers: CodexMcpServerSummary[]): void {
+  if (!servers.length) return;
+  const byPid = new Map(processes.map((process) => [process.pid, process]));
+  for (const process of processes) {
+    if (process.processRole === "codex_mcp_tool") continue;
+    if (!hasCodexTreeEvidence(process, byPid)) continue;
+    if (!isMcpConfigEligibleProcess(process)) continue;
+    const matched = bestServerMatch(process, undefined, servers);
+    if (!matched || mcpServerMatchScore(matched, processHaystack(process), undefined) < 70) continue;
+    process.processRole = "codex_mcp_tool";
+    process.processRoleDetail = `Codex-launched helper matched MCP config server ${matched.name}.`;
+    process.evidence = appendEvidence(process.evidence, [
+      {
+        source: "process.role.mcp.config",
+        detail: `Codex helper promoted to MCP tool because its command matched MCP config server ${matched.name}.`,
+        field: matched.table
+      }
+    ]);
+  }
+}
+
+function hasCodexTreeEvidence(process: AgentProcess, byPid: Map<number, AgentProcess>): boolean {
+  if (process.agent === "codex") return true;
+  let parent = process.ppid === undefined ? undefined : byPid.get(process.ppid);
+  for (let depth = 0; parent && depth < 6; depth += 1) {
+    if (parent.agent === "codex") return true;
+    if (parent.processRole === "codex_cli" || parent.processRole === "codex_engine" || parent.processRole === "codex_app_server") return true;
+    parent = parent.ppid === undefined ? undefined : byPid.get(parent.ppid);
+  }
+  return false;
+}
+
+function isMcpConfigEligibleProcess(process: AgentProcess): boolean {
+  const name = process.processName.toLowerCase();
+  if (!mcpConfigEligibleProcessNames.has(name)) return false;
+  const haystack = processHaystack(process);
+  return !haystack.includes("@openai\\codex") && !haystack.includes("@openai/codex") && !haystack.includes("@anthropic-ai");
+}
+
+const mcpConfigEligibleProcessNames = new Set([
+  "node.exe",
+  "node",
+  "python.exe",
+  "python",
+  "python3.exe",
+  "python3",
+  "py.exe",
+  "py",
+  "uv.exe",
+  "uv",
+  "uvx.exe",
+  "uvx",
+  "npx.cmd",
+  "npx.exe",
+  "npx",
+  "pnpm.cmd",
+  "pnpm.exe",
+  "pnpm",
+  "yarn.cmd",
+  "yarn.exe",
+  "yarn",
+  "bun.exe",
+  "bun",
+  "deno.exe",
+  "deno",
+  "cmd.exe",
+  "cmd",
+  "powershell.exe",
+  "powershell",
+  "pwsh.exe",
+  "pwsh"
+]);
 
 function mcpServerSummary(
   name: string,
@@ -95,6 +174,25 @@ function mcpServerSummary(
 ): CodexMcpServerSummary {
   const command = tomlScalar(table.keys.get("command"));
   const args = tomlStringArray(table.keys.get("args"));
+  const knownKeys = new Set([
+    "command",
+    "args",
+    "env",
+    "env_vars",
+    "cwd",
+    "experimental_environment",
+    "url",
+    "bearer_token_env_var",
+    "http_headers",
+    "env_http_headers",
+    "startup_timeout_sec",
+    "tool_timeout_sec",
+    "enabled",
+    "required",
+    "enabled_tools",
+    "disabled_tools",
+    "default_tools_approval_mode"
+  ]);
   const transport =
     source === "plugin_config" ? "plugin" : table.keys.has("url") ? "http" : table.keys.has("command") ? "stdio" : "unknown";
   return {
@@ -105,6 +203,15 @@ function mcpServerSummary(
     table: table.name,
     command,
     args,
+    cwd: tomlScalar(table.keys.get("cwd")),
+    url: tomlScalar(table.keys.get("url")),
+    startupTimeoutSec: numberValue(table.keys.get("startup_timeout_sec")),
+    toolTimeoutSec: numberValue(table.keys.get("tool_timeout_sec")),
+    required: booleanValue(table.keys.get("required")),
+    defaultToolsApprovalMode: approvalModeValue(table.keys.get("default_tools_approval_mode")),
+    enabledTools: tomlStringArray(table.keys.get("enabled_tools")),
+    disabledTools: tomlStringArray(table.keys.get("disabled_tools")),
+    unknownKeys: [...table.keys.keys()].filter((key) => !knownKeys.has(key) && !key.startsWith("tools.")).sort(),
     commandSummary: commandSummary(command, args),
     evidence: [
       {
@@ -115,6 +222,17 @@ function mcpServerSummary(
       }
     ]
   };
+}
+
+function numberValue(value?: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function approvalModeValue(value?: string): "auto" | "prompt" | "approve" | undefined {
+  const parsed = tomlScalar(value);
+  return parsed === "auto" || parsed === "prompt" || parsed === "approve" ? parsed : undefined;
 }
 
 function identifyMcpProcess(process: AgentProcess, servers: CodexMcpServerSummary[]): AgentProcessMcpIdentity | undefined {
@@ -193,7 +311,7 @@ function bestServerMatch(
   marker: ProcessMcpMarker | undefined,
   servers: CodexMcpServerSummary[]
 ): CodexMcpServerSummary | undefined {
-  const haystack = `${process.executablePath ?? ""} ${process.commandLine ?? ""}`.toLowerCase();
+  const haystack = processHaystack(process);
   const scored = servers
     .map((server) => ({ server, score: mcpServerMatchScore(server, haystack, marker) }))
     .filter((entry) => entry.score >= 30)
@@ -204,15 +322,39 @@ function bestServerMatch(
 function mcpServerMatchScore(server: CodexMcpServerSummary, haystack: string, marker: ProcessMcpMarker | undefined): number {
   let score = 0;
   const command = server.command?.toLowerCase();
-  if (command && haystack.includes(command)) score += /mcp|modelcontextprotocol|playwright|chrome-devtools|ida-pro/i.test(command) ? 45 : 5;
+  if (command && haystack.includes(command)) {
+    const commandBase = path.basename(command).toLowerCase();
+    const commandPathLike = /[\\/]/.test(command) || /\.(?:mjs|cjs|js|py|cmd|ps1|exe)$/i.test(command);
+    const genericRunner = isGenericMcpRunner(commandBase);
+    score += isStrongMcpToken(command) ? 70 : commandPathLike ? 60 : genericRunner ? 5 : 60;
+    if (commandPathLike && commandBase.length >= 5 && haystack.includes(commandBase)) score += isStrongMcpToken(commandBase) ? 45 : 18;
+  }
   for (const arg of server.args ?? []) {
     const normalized = arg.toLowerCase();
-    if (normalized.length >= 3 && haystack.includes(normalized)) score += normalized.includes("mcp") ? 60 : 8;
+    const pathLike = /[\\/]/.test(normalized) || /\.(?:mjs|cjs|js|py|cmd|ps1|exe)$/i.test(normalized);
+    if (normalized.length >= 3 && haystack.includes(normalized)) score += isStrongMcpToken(normalized) ? 70 : pathLike ? 55 : 35;
+    const basename = path.basename(normalized).toLowerCase();
+    if (pathLike && basename.length >= 5 && haystack.includes(basename)) score += isStrongMcpToken(basename) ? 45 : 18;
   }
   const serverNameTokens = server.name.toLowerCase().split(/[:/\\._-]+/).filter((value) => value.length >= 3);
+  const serverTokenScore = serverNameTokens.filter((token) => haystack.includes(token)).slice(0, 2).length * 15;
+  score += serverTokenScore;
   if (marker && serverNameTokens.some((token) => marker.displayName.toLowerCase().includes(token) || marker.token.includes(token))) score += 30;
   if (marker && server.commandSummary?.toLowerCase().includes(marker.token)) score += 50;
   return score;
+}
+
+function isStrongMcpToken(value: string): boolean {
+  return /mcp|modelcontextprotocol|playwright|chrome-devtools|ida-pro/i.test(value);
+}
+
+function isGenericMcpRunner(commandBase: string): boolean {
+  const normalized = commandBase.replace(/\.(?:cmd|exe|ps1)$/i, "");
+  return new Set(["node", "nodejs", "python", "python3", "py", "uv", "uvx", "npx", "pnpm", "yarn", "bun", "deno", "cmd", "powershell", "pwsh"]).has(normalized);
+}
+
+function processHaystack(process: AgentProcess): string {
+  return `${process.processName} ${process.executablePath ?? ""} ${process.commandLine ?? ""}`.toLowerCase();
 }
 
 function inheritedMcpIdentity(parent: AgentProcessMcpIdentity): AgentProcessMcpIdentity {
@@ -340,7 +482,26 @@ function sensitiveLineNumbers(content: string): number[] {
 function isSensitiveTomlLine(rawLine: string): boolean {
   const line = stripTomlComment(rawLine).trim();
   if (!line) return false;
-  return /(^|[\s{,])(api[_-]?key|token|secret|password|credential|auth|bearer|cookie|session)[A-Za-z0-9_.-]*\s*=/i.test(line);
+  const key = /(^|[\s{,])([A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|credential|auth|bearer|cookie|session)[A-Za-z0-9_.-]*)\s*=/i.exec(line)?.[2];
+  if (!key) return false;
+  const [, value = ""] = line.split(/=(.*)/s);
+  if (isSafeSensitiveReferenceTomlKey(key, value)) return false;
+  return true;
+}
+
+function isSafeSensitiveReferenceTomlKey(key: string, rawValue: string): boolean {
+  const tail = key.split(".").at(-1) ?? key;
+  const trimmed = rawValue.trim();
+  if (tail === "bearer_token_env_var") {
+    const value = tomlScalar(trimmed);
+    return !!value && /^[A-Z_][A-Z0-9_]{0,127}$/.test(value);
+  }
+  if (tail === "env_vars") {
+    const values = tomlStringArray(trimmed);
+    return !!values && values.every((value) => /^[A-Z_][A-Z0-9_]{0,127}$/.test(value));
+  }
+  if (tail === "env_http_headers") return trimmed.startsWith("{");
+  return false;
 }
 
 function isSensitiveValue(value: string): boolean {

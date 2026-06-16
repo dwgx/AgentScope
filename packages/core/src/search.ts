@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { searchJsonl } from "./jsonl.js";
 import { claudeHome, codexSqliteHome, userHome } from "./paths.js";
-import { codexRolloutRoots, openCodexDb, rolloutThreadId } from "./codex.js";
+import { codexRolloutRoots, findCodexStateDb, openCodexDb, rolloutThreadId } from "./codex.js";
 
 export interface SearchOptions {
   includeSqlitePreview?: boolean | undefined;
@@ -16,8 +16,8 @@ export async function searchAll(query: string, home = userHome(), limit = 50, op
 }
 
 function searchCodexSqlite(query: string, home: string, limit: number, options: SearchOptions): Record<string, unknown>[] {
-  const filePath = path.join(codexSqliteHome(home), "state_5.sqlite");
-  if (!fs.existsSync(filePath)) return [];
+  const filePath = findCodexStateDb(codexSqliteHome(home));
+  if (!filePath) return [];
   const opened = openCodexDb(filePath);
   if (!opened) return [];
   const { db } = opened;

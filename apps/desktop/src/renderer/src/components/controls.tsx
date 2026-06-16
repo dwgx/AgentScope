@@ -59,12 +59,13 @@ export function SegmentedControl(props: {
   );
 }
 
-export function SwitchControl(props: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean | undefined }) {
+export function SwitchControl(props: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean | undefined; testId?: string | undefined }) {
   return (
     <button
       className={`switchControl ${props.checked ? "checked" : ""}`}
       aria-pressed={props.checked}
       disabled={props.disabled}
+      data-testid={props.testId}
       onClick={() => props.onChange(!props.checked)}
     >
       <span />

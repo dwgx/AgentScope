@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type { Diagnostic } from "@agentscope/shared";
-import { openCodexDb } from "./codex.js";
+import { codexRolloutRoots, findCodexLogsDb, findCodexStateDb, listCodexLogsDbFiles, listCodexStateDbFiles, openCodexDb } from "./codex.js";
 import { claudeHome, codexHome, codexSqliteHome, userHome } from "./paths.js";
 import { isWindows, listProcesses } from "./processes.js";
 
@@ -12,14 +12,18 @@ export async function runDoctor(home = userHome()): Promise<Diagnostic[]> {
   const codex = codexHome(home);
   const codexSqlite = codexSqliteHome(home);
   const claude = claudeHome(home);
+  const stateDbCandidates = listCodexStateDbFiles(codexSqlite);
+  const logsDbCandidates = listCodexLogsDbFiles(codexSqlite);
+  const rolloutRoots = codexRolloutRoots(home).filter((root) => fs.existsSync(root.path));
+  const rolloutCount = countCodexRolloutFiles(home);
   const checks: Diagnostic[] = [
     check("platform.windows", isWindows(), `platform=${process.platform}`),
     check("home.exists", fs.existsSync(home), home),
     check("codex.home", fs.existsSync(codex), codex),
     check("claude.home", fs.existsSync(claude), claude),
     check("codex.sqlite_home", fs.existsSync(codexSqlite), codexSqlite),
-    check("codex.sqlite", fs.existsSync(path.join(codexSqlite, "state_5.sqlite")), path.join(codexSqlite, "state_5.sqlite")),
-    check("codex.sessions", fs.existsSync(path.join(codex, "sessions")), path.join(codex, "sessions")),
+    check("codex.sqlite", stateDbCandidates.length > 0, stateDbCandidates.length ? stateDbCandidates.join(", ") : `not found: ${path.join(codexSqlite, "state_*.sqlite")}`),
+    check("codex.sessions", rolloutRoots.length > 0, rolloutRoots.length ? rolloutRoots.map((root) => root.path).join(", ") : `not found: ${path.join(codex, "sessions")} or ${path.join(codex, "rollouts")}`),
     checkOptionalDir(
       "codex.archived_sessions",
       path.join(codex, "archived_sessions"),
@@ -27,7 +31,7 @@ export async function runDoctor(home = userHome()): Promise<Diagnostic[]> {
     ),
     check("claude.sessions", fs.existsSync(path.join(claude, "sessions")), path.join(claude, "sessions")),
     check("claude.projects", fs.existsSync(path.join(claude, "projects")), path.join(claude, "projects")),
-    checkOptionalFile("codex.logs.sqlite", path.join(codexSqlite, "logs_2.sqlite")),
+    check("codex.logs.sqlite", logsDbCandidates.length > 0, logsDbCandidates.length ? logsDbCandidates.join(", ") : `optional file not found: ${path.join(codexSqlite, "logs_*.sqlite")}`),
     checkOptionalFile("codex.goals.sqlite", path.join(codexSqlite, "goals_1.sqlite")),
     checkOptionalFile("codex.memories.sqlite", path.join(codexSqlite, "memories_1.sqlite")),
     checkOptionalFile("codex.history", path.join(codex, "history.jsonl")),
@@ -36,14 +40,14 @@ export async function runDoctor(home = userHome()): Promise<Diagnostic[]> {
     checkOptionalDir("claude.file_history", path.join(claude, "file-history")),
     checkOptionalDir("claude.session_env", path.join(claude, "session-env")),
     checkOptionalDir("claude.shell_snapshots", path.join(claude, "shell-snapshots")),
-    check("codex.rollouts", countFiles(path.join(codex, "sessions"), /^rollout-.*\.jsonl$/i) > 0, `${countFiles(path.join(codex, "sessions"), /^rollout-.*\.jsonl$/i)} rollout jsonl files`),
+    check("codex.rollouts", rolloutCount > 0, `${rolloutCount} rollout jsonl files`),
     check("claude.transcripts", countFiles(path.join(claude, "projects"), /\.jsonl$/i) > 0, `${countFiles(path.join(claude, "projects"), /\.jsonl$/i)} transcript jsonl files`)
   ];
   const native = nativeModuleCheck();
   checks.push(native);
   checks.push(
     ...(native.status === "ok"
-      ? [...sqliteChecks(path.join(codexSqlite, "state_5.sqlite")), ...sqliteInventoryChecks(codexSqlite)]
+      ? [...sqliteChecks(codexSqlite), ...sqliteInventoryChecks(codexSqlite)]
       : sqliteBlockedByNativeChecks(codexSqlite, native.detail))
   );
   const processScan = await withTimeout(listProcesses(false, { timeoutMs: 5000, throwOnTimeout: true }), 6000, "win32.process.scan");
@@ -111,17 +115,19 @@ function nativeModuleCheck(): Diagnostic {
 
 function sqliteBlockedByNativeChecks(codexSqlite: string, detail: string): Diagnostic[] {
   const blocked = `blocked by native.better_sqlite3: ${detail}`;
+  const logsPath = listCodexLogsDbFiles(codexSqlite)[0] ?? path.join(codexSqlite, "logs_*.sqlite");
   return [
     check("codex.sqlite.readable", false, blocked),
-    check("codex.logs.tables", false, fs.existsSync(path.join(codexSqlite, "logs_2.sqlite")) ? blocked : `not found: ${path.join(codexSqlite, "logs_2.sqlite")}`),
+    check("codex.logs.tables", false, fs.existsSync(logsPath) ? blocked : `not found: ${logsPath}`),
     check("codex.goals.tables", false, fs.existsSync(path.join(codexSqlite, "goals_1.sqlite")) ? blocked : `not found: ${path.join(codexSqlite, "goals_1.sqlite")}`),
     check("codex.memories.tables", false, fs.existsSync(path.join(codexSqlite, "memories_1.sqlite")) ? blocked : `not found: ${path.join(codexSqlite, "memories_1.sqlite")}`)
   ];
 }
 
 function sqliteInventoryChecks(codexSqlite: string): Diagnostic[] {
+  const logsDb = findCodexLogsDb(codexSqlite);
   return [
-    sqliteInventoryCheck("codex.logs.tables", path.join(codexSqlite, "logs_2.sqlite")),
+    logsDb ? sqliteInventoryCheck("codex.logs.tables", logsDb) : check("codex.logs.tables", false, `not found: ${path.join(codexSqlite, "logs_*.sqlite")}`),
     sqliteInventoryCheck("codex.goals.tables", path.join(codexSqlite, "goals_1.sqlite")),
     sqliteInventoryCheck("codex.memories.tables", path.join(codexSqlite, "memories_1.sqlite"))
   ];
@@ -141,8 +147,14 @@ function sqliteInventoryCheck(name: string, filePath: string): Diagnostic {
   }
 }
 
-function sqliteChecks(filePath: string): Diagnostic[] {
-  if (!fs.existsSync(filePath)) return [];
+function sqliteChecks(codexSqlite: string): Diagnostic[] {
+  const filePath = findCodexStateDb(codexSqlite);
+  if (!filePath) {
+    const candidates = listCodexStateDbFiles(codexSqlite);
+    return candidates.length
+      ? [check("codex.sqlite.readable", false, `no compatible state database with threads.id table: ${candidates.join(", ")}`)]
+      : [];
+  }
   const opened = openCodexDb(filePath);
   if (!opened) return [check("codex.sqlite.readable", false, "unable to open directly or via WAL/SHM copy fallback")];
   const { db, evidencePath } = opened;
@@ -159,6 +171,10 @@ function sqliteChecks(filePath: string): Diagnostic[] {
   } finally {
     db.close();
   }
+}
+
+function countCodexRolloutFiles(home: string): number {
+  return codexRolloutRoots(home).reduce((total, root) => total + countFiles(root.path, /^rollout-.*\.jsonl$/i), 0);
 }
 
 function countFiles(root: string, pattern: RegExp): number {

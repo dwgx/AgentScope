@@ -221,6 +221,52 @@ describe("Codex helpers", () => {
     expect(session?.evidence[0]?.path).toContain("sqlite-state");
   });
 
+  it("discovers compatible versioned Codex state sqlite databases", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-versioned-state-"));
+    tempRoots.push(home);
+    const codexRoot = join(home, ".codex");
+    mkdirSync(codexRoot, { recursive: true });
+    const invalid = new Database(join(codexRoot, "state_7.sqlite"));
+    invalid.exec("CREATE TABLE unrelated (id TEXT PRIMARY KEY);");
+    invalid.close();
+    const db = new Database(join(codexRoot, "state_6.sqlite"));
+    db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, cwd TEXT);");
+    db.prepare("INSERT INTO threads (id, title, cwd) VALUES (?, ?, ?)").run("versioned-thread", "Versioned", String.raw`D:\work`);
+    db.close();
+
+    const snapshot = loadCodexIndex(home);
+    const session = snapshot.sessions.find((item) => item.sessionId === "versioned-thread");
+    expect(session?.title).toBe("Versioned");
+    expect(session?.evidence[0]?.path).toContain("state_6.sqlite");
+    expect(session?.evidence[0]?.detail).toContain("state_6.sqlite");
+  });
+
+  it("discovers compatible versioned Codex logs sqlite databases", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-versioned-logs-"));
+    tempRoots.push(home);
+    const codexRoot = join(home, ".codex");
+    mkdirSync(codexRoot, { recursive: true });
+    const stateDb = new Database(join(codexRoot, "state_6.sqlite"));
+    stateDb.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, cwd TEXT);");
+    stateDb.prepare("INSERT INTO threads (id, title, cwd) VALUES (?, ?, ?)").run("thread-with-versioned-logs", "Logs", String.raw`D:\work`);
+    stateDb.close();
+    const invalidLogs = new Database(join(codexRoot, "logs_4.sqlite"));
+    invalidLogs.exec("CREATE TABLE unrelated (id TEXT PRIMARY KEY);");
+    invalidLogs.close();
+    const logsDb = new Database(join(codexRoot, "logs_3.sqlite"));
+    logsDb.exec("CREATE TABLE logs (thread_id TEXT, level TEXT, ts TEXT, process_uuid TEXT, target TEXT);");
+    logsDb
+      .prepare("INSERT INTO logs (thread_id, level, ts, process_uuid, target) VALUES (?, ?, ?, ?, ?)")
+      .run("thread-with-versioned-logs", "ERROR", "2026-06-12T00:00:00.000Z", "process-a", "target-a");
+    logsDb.close();
+
+    const snapshot = loadCodexIndex(home, { includeLogMetadata: true });
+    const session = snapshot.sessions.find((item) => item.sessionId === "thread-with-versioned-logs");
+    expect(session?.indexMetadata?.log_count).toBe(1);
+    expect(session?.indexMetadata?.log_error_count).toBe(1);
+    expect(session?.indexMetadata?.log_top_target).toBe("target-a");
+  });
+
   it("indexes archived Codex rollout files with explicit archived evidence", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentscope-codex-archived-"));
     tempRoots.push(home);
@@ -242,6 +288,29 @@ describe("Codex helpers", () => {
     expect(session?.title).toBe("Archived");
     expect(session?.indexMetadata?.archived_rollout).toBe(true);
     expect(session?.evidence[0]?.detail).toContain("archived");
+  });
+
+  it("indexes Codex rollout files from the rollouts compatibility root", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-codex-rollouts-root-"));
+    tempRoots.push(home);
+    const sessionId = "019ea000-0000-7000-8000-000000000004";
+    const rolloutPath = join(
+      home,
+      ".codex",
+      "rollouts",
+      "2026",
+      "06",
+      "13",
+      `rollout-2026-06-13T12-00-00-${sessionId}.jsonl`
+    );
+    mkdirSync(dirname(rolloutPath), { recursive: true });
+    writeFileSync(rolloutPath, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\work`, title: "Rollouts root" } }) + "\n");
+
+    const snapshot = await scanCodexRollouts(home, { includeActivity: false });
+    const session = snapshot.sessions.find((item) => item.sessionId === sessionId);
+    expect(session?.title).toBe("Rollouts root");
+    expect(session?.indexMetadata?.archived_rollout).toBe(false);
+    expect(session?.evidence[0]?.field).toContain("rollouts");
   });
 
   it("can index Codex rollout metadata without transcript activity analysis", async () => {

@@ -288,17 +288,18 @@ export const koKR = {
           "복구는 AgentScope 패키지의 SQLite 네이티브 모듈을 다시 빌드합니다. Codex 데이터 손상이 아니라 앱 런타임 문제입니다.",
         nativeCascade:
           "이 SQLite 경고는 native.better_sqlite3 때문에 차단되었습니다. Codex 데이터를 수정하기 전에 네이티브 모듈을 먼저 복구하세요.",
-        rebuild:
-          "복구는 고정된 패키지 재빌드 경로를 실행하고 변경된 디렉터리와 파일을 보고합니다.",
+        rebuild: "복구는 고정된 패키지 재빌드 경로를 실행하고 변경된 디렉터리와 파일을 보고합니다.",
         revealPath: "증거 경로 표시: {{path}}",
-        manual: "등록된 자동 복구가 없습니다. 증거 경로를 확인하고 데이터는 읽기 전용으로 유지하세요."
+        manual:
+          "등록된 자동 복구가 없습니다. 증거 경로를 확인하고 데이터는 읽기 전용으로 유지하세요."
       }
     },
     loading: {
       title: "로컬 Agent 상태 읽는 중",
       detail: "Win32_Process, Codex SQLite/JSONL, Claude 세션 파일을 확인하고 있습니다.",
       errorTitle: "Agent 상태 로드 실패",
-      errorDetail: "{{message}}. 새로 고침해 다시 시도하세요. 새 스냅샷이 로드될 때까지 AgentScope는 데이터를 읽기 전용으로 유지합니다."
+      errorDetail:
+        "{{message}}. 새로 고침해 다시 시도하세요. 새 스냅샷이 로드될 때까지 AgentScope는 데이터를 읽기 전용으로 유지합니다."
     }
   },
   settings: {
@@ -330,7 +331,8 @@ export const koKR = {
     },
     controlMode: {
       label: "제어 모드",
-      detail: "안전 모드는 백업된 세션 제어를 허용합니다. 읽기 전용은 백업, 삭제, 가져오기, 수리를 차단합니다.",
+      detail:
+        "안전 모드는 백업된 세션 제어를 허용합니다. 읽기 전용은 백업, 삭제, 가져오기, 수리를 차단합니다.",
       safe: "안전",
       readOnly: "읽기 전용",
       readOnlyBlocked: "현재 제어 모드는 읽기 전용입니다."
@@ -344,11 +346,13 @@ export const koKR = {
     },
     searchScope: {
       label: "검색 범위",
-      detail: "SQLite 식별 필드와 로컬 Codex/Claude JSONL 안전 메타데이터를 검색합니다. transcript 본문이나 hidden/internal 필드는 검색하지 않습니다."
+      detail:
+        "SQLite 식별 필드와 로컬 Codex/Claude JSONL 안전 메타데이터를 검색합니다. transcript 본문이나 hidden/internal 필드는 검색하지 않습니다."
     },
     searchPreview: {
       label: "SQLite preview 검색",
-      detail: "Codex SQLite preview 텍스트를 매칭에 포함합니다. 결과에는 preview 본문을 표시하지 않습니다."
+      detail:
+        "Codex SQLite preview 텍스트를 매칭에 포함합니다. 결과에는 preview 본문을 표시하지 않습니다."
     },
     searchLimit: { label: "검색 결과 제한", detail: "명령줄 검색이 반환하는 최대 결과 수입니다." },
     notifications: {
@@ -410,22 +414,33 @@ export const koKR = {
       emptyDetail: "Codex 설정 표면을 선택해 증거를 확인하거나 백업되는 문서를 편집하세요.",
       save: "저장",
       controlSaved: "Codex 제어 저장됨",
+      verification: "쓰기 검증",
+      verificationStatus: {
+        passed: "읽기 검증 일치",
+        failed: "읽기 검증 실패"
+      },
+      effectiveScope: "적용 범위",
+      newSessionEffect: "config.toml에 기록했습니다. 보통 새로 시작한 Codex 세션에서 읽힙니다.",
       saved: "저장됨. 이전 파일이 없어서 백업은 필요하지 않았습니다.",
       savedWithBackup: "저장됨. 백업: {{path}}",
       backupBeforeSave: "저장 전 sha256을 확인하고 먼저 ~/.agentscope 아래에 백업을 작성합니다.",
-      redacted: "민감한 키 이름은 마스킹되었습니다. 다시 로드하거나 위치를 표시한 뒤 AgentScope 밖에서 편집하세요.",
+      redacted:
+        "민감한 키 이름은 마스킹되었습니다. 다시 로드하거나 위치를 표시한 뒤 AgentScope 밖에서 편집하세요.",
       exists: "있음",
       bytes: "바이트",
       updated: "업데이트",
       modeTitle: "Codex 모드 기본값",
-      modeDetail: "문서화된 config.toml 키만 작성합니다. Plan 모드는 기본 모델을 상속하고 reasoning effort만 덮어쓸 수 있습니다.",
+      modeDetail:
+        "문서화된 config.toml 키만 작성합니다. Plan 모드는 기본 모델을 상속하고 reasoning effort만 덮어쓸 수 있습니다.",
       model: "모델",
       reasoning: "추론",
       inheritDefault: "기본값 상속",
       unset: "설정 안 됨",
-      planModelNote: "별도 Plan 모델 키는 문서화되어 있지 않습니다. AgentScope는 상속된 기본 모델만 표시합니다.",
+      planModelNote:
+        "별도 Plan 모델 키는 문서화되어 있지 않습니다. AgentScope는 상속된 기본 모델만 표시합니다.",
       reviewReasoningNote: "Review reasoning은 기본 reasoning 설정을 상속합니다.",
-      modeEvidence: "증거 출처: OpenAI Codex manual의 설정 키 설명 및 로컬 config.toml 최상위 할당.",
+      modeEvidence:
+        "증거 출처: OpenAI Codex manual의 설정 키 설명 및 로컬 config.toml 최상위 할당.",
       mode: {
         default: "Default 모드",
         plan: "Plan 모드",
@@ -437,6 +452,7 @@ export const koKR = {
         unset: "설정 안 됨"
       },
       tabs: {
+        templates: "템플릿",
         overview: "개요",
         models: "모델",
         safety: "안전",
@@ -466,10 +482,109 @@ export const koKR = {
         codexHome: "공식 CODEX_HOME 루트입니다. AgentScope는 메타데이터만 인벤토리합니다.",
         sqliteHome: "config/env 해석 후 SQLite 상태 루트입니다."
       },
+      templates: {
+        title: "Codex 파라미터 템플릿",
+        detail:
+          "로컬 config.toml을 먼저 읽고 정확한 key patch를 미리 본 뒤, 선택한 허용 목록 scalar 키만 백업, journal, 고위험 확인, 원자적 쓰기를 거쳐 적용합니다. 알 수 없는 고급 설정은 보존하며 안전하게 매칭되지 않으면 차단합니다.",
+        list: "Codex 파라미터 템플릿",
+        preview: "템플릿 미리보기",
+        previewEmpty: "템플릿을 선택하면 config.toml 변경 내용을 미리 볼 수 있습니다.",
+        apply: "선택 항목 적용",
+        current: "현재값",
+        templateValue: "템플릿값",
+        changed: "변경됨",
+        same: "동일",
+        footer: "선택된 변경 키 {{count}}개: {{keys}}",
+        customName: "사용자 템플릿 이름",
+        customDescription: "사용자 템플릿 설명",
+        saveCustom: "선택 항목을 템플릿으로 저장",
+        delete: "사용자 템플릿 삭제",
+        savedCustom: "사용자 Codex 템플릿을 저장했습니다.",
+        deletedCustom: "사용자 Codex 템플릿을 삭제했습니다.",
+        applied: "Codex 템플릿을 적용했습니다",
+        customEmpty: "아직 사용자 템플릿이 없습니다. 미리보기에서 선택한 행을 저장해 만들 수 있습니다.",
+        group: {
+          current: "현황",
+          builtin: "내장",
+          custom: "사용자"
+        },
+        currentTemplate: {
+          name: "현황",
+          description:
+            "config.toml에서 인식 가능한 현재값의 읽기 전용 스냅샷입니다. 알 수 없는 고급 설정은 보존되지만 템플릿으로 복사하지 않습니다."
+        },
+        builtin: {
+          "yolo-full-access": {
+            name: "YOLO / Full Access",
+            description:
+              "최대 로컬 자율성: 승인 없음, danger-full-access, Windows elevated sandbox, live 검색, xhigh reasoning, multi-agent."
+          },
+          "safe-workspace": {
+            name: "Safe Workspace",
+            description: "workspace-write sandbox, on-request 승인, cached 검색, 사용자 검토."
+          },
+          "readonly-audit": {
+            name: "Read-only Audit",
+            description:
+              "read-only sandbox, on-request 승인, cached 검색, high reasoning, xhigh plan reasoning."
+          },
+          "deep-planning": {
+            name: "Deep Planning",
+            description: "권한 변경 없이 xhigh 구현 reasoning과 plan reasoning을 사용합니다."
+          },
+          "live-research": {
+            name: "Live Research",
+            description:
+              "승인 또는 sandbox 권한을 바꾸지 않고 live 웹 검색과 high reasoning을 사용합니다."
+          }
+        }
+      },
+      workbench: {
+        title: "Codex 설정 워크벤치",
+        detail: "먼저 현재 config 상태를 편집합니다. 템플릿은 변경을 스테이징할 뿐이며 적용 시 선택 항목만 원자적으로 씁니다.",
+        sections: "Codex 설정 섹션",
+        section: {
+          current: "현황",
+          mcp: "MCP 서버",
+          templates: "템플릿",
+          unknown: "알 수 없음"
+        },
+        enabled: "활성화됨",
+        disabled: "비활성",
+        enable: "활성화",
+        reset: "되돌리기",
+        staged: "스테이징된 변경",
+        stagedDetail: "선택된 변경 {{count}}개",
+        stageTemplate: "스테이징",
+        templateStaged: "템플릿 변경을 스테이징했습니다. 적용 전에 검토하세요.",
+        mcpName: "server-name",
+        mcpCommand: "command",
+        stageMcp: "MCP 스테이징",
+        line: "{{line}}행",
+        noUnknown: "알 수 없는 config 항목이 없습니다.",
+        editableUnknown:
+          "알 수 없는 scalar 항목 {{count}}개를 검증되지 않은 고급 설정으로 위에 표시합니다. 편집할 수 있지만 Codex가 사용한다고 증명할 수는 없습니다.",
+        noReadOnlyUnknown: "복잡하거나 민감한 값 때문에 읽기 전용으로 표시할 남은 알 수 없는 항목이 없습니다."
+      },
+      applyModal: {
+        animating: "config patch 계획 중",
+        writing: "원자적 쓰기 진행 중",
+        success: "config 적용됨",
+        error: "config 적용 실패",
+        detail: "AgentScope는 매칭된 구조화 설정만 쓰고 알 수 없는 config는 보존합니다.",
+        atomicWrite: "임시 파일, fsync, rename, journal 실행",
+        verified: "{{count}}개 key의 읽기 검증 통과"
+      },
       items: {
         model: {
           label: "기본 모델",
-          detail: "CLI, 앱, profile 또는 project 설정이 덮어쓰지 않을 때 쓰는 Codex 최상위 모델입니다."
+          detail:
+            "CLI, 앱, profile 또는 project 설정이 덮어쓰지 않을 때 쓰는 Codex 최상위 모델입니다."
+        },
+        model_provider: {
+          label: "모델 Provider",
+          detail:
+            "model_providers에서 선택하는 provider id입니다. 추천 id는 후보일 뿐이며 custom provider도 허용됩니다."
         },
         review_model: {
           label: "Review 모델",
@@ -482,6 +597,38 @@ export const koKR = {
         plan_mode_reasoning_effort: {
           label: "Plan 추론 강도",
           detail: "Plan 모드 reasoning override입니다. 모델은 여전히 기본 모델을 상속합니다."
+        },
+        model_reasoning_summary: {
+          label: "Reasoning summary",
+          detail: "Responses API 지원 모델에서 쓰는 reasoning summary 정책입니다."
+        },
+        model_verbosity: {
+          label: "모델 verbosity",
+          detail: "provider가 Responses API를 사용할 때 GPT-5 family text verbosity를 제어합니다."
+        },
+        model_supports_reasoning_summaries: {
+          label: "Reasoning summaries 강제",
+          detail: "현재 모델의 reasoning summaries를 강제로 켜거나 끕니다."
+        },
+        project_doc_max_bytes: {
+          label: "Project doc 최대 bytes",
+          detail: "첫 turn instructions에 포함할 AGENTS.md / project instructions 최대 bytes입니다."
+        },
+        openai_base_url: {
+          label: "OpenAI base URL",
+          detail: "기본 제공 OpenAI provider의 base URL override입니다."
+        },
+        model_providers_OpenAI_name: {
+          label: "OpenAI Provider 이름",
+          detail: "OpenAI라는 custom model provider table의 표시 이름입니다."
+        },
+        model_providers_OpenAI_base_url: {
+          label: "OpenAI Provider base URL",
+          detail: "OpenAI라는 custom model provider table의 base URL입니다."
+        },
+        model_providers_OpenAI_requires_openai_auth: {
+          label: "OpenAI Provider 인증",
+          detail: "OpenAI라는 custom model provider table에서 OpenAI authentication을 사용합니다."
         },
         approval_policy: {
           label: "승인 정책",
@@ -505,7 +652,8 @@ export const koKR = {
         },
         show_raw_agent_reasoning: {
           label: "raw reasoning 표시",
-          detail: "고위험 표시 설정입니다. 이 값과 관계없이 AgentScope는 hidden vendor reasoning을 표시하지 않습니다."
+          detail:
+            "고위험 표시 설정입니다. 이 값과 관계없이 AgentScope는 hidden vendor reasoning을 표시하지 않습니다."
         },
         service_tier: {
           label: "서비스 tier",
@@ -519,19 +667,34 @@ export const koKR = {
           label: "Multi-agent 기능",
           detail: "현재 Codex build에 multi-agent/subagent 지원이 있을 때 쓰는 feature flag입니다."
         },
+        features_goals: {
+          label: "Goals 기능",
+          detail: "현재 Codex build에서 Goal mode가 지원될 때 쓰는 feature flag입니다."
+        },
+        features_memories: {
+          label: "Memories 기능",
+          detail: "Codex Memories를 전역으로 켭니다. AgentScope는 memory 본문을 읽지 않습니다."
+        },
+        features_js_repl: {
+          label: "JS REPL 기능",
+          detail: "현재 Codex build에 JavaScript REPL capability가 있을 때 쓰는 feature flag입니다."
+        },
         memories_generate_memories: {
           label: "기억 생성",
-          detail: "Codex가 memory record를 생성할지 제어합니다. AgentScope는 memory 본문을 읽지 않습니다."
+          detail:
+            "Codex가 memory record를 생성할지 제어합니다. AgentScope는 memory 본문을 읽지 않습니다."
         },
         memories_use_memories: {
           label: "기억 사용",
-          detail: "Codex가 저장된 memory를 주입할지 제어합니다. AgentScope는 memory 본문을 표시하지 않습니다."
+          detail:
+            "Codex가 저장된 memory를 주입할지 제어합니다. AgentScope는 memory 본문을 표시하지 않습니다."
         }
       },
       surfaceText: {
         config_global: {
           label: "config.toml",
-          detail: "CLI, IDE, desktop이 공유하는 Codex 사용자 설정입니다. 안전 편집은 위 구조화 컨트롤을 사용합니다."
+          detail:
+            "CLI, IDE, desktop이 공유하는 Codex 사용자 설정입니다. 안전 편집은 위 구조화 컨트롤을 사용합니다."
         },
         agents_global: {
           label: "AGENTS.md",
@@ -543,15 +706,18 @@ export const koKR = {
         },
         archive_summary: {
           label: "보관된 threads",
-          detail: "보관 thread 수만 표시합니다. AgentScope는 여기서 보관 대화 본문을 표시하지 않습니다."
+          detail:
+            "보관 thread 수만 표시합니다. AgentScope는 여기서 보관 대화 본문을 표시하지 않습니다."
         },
         memory_summary: {
           label: "기억",
-          detail: "memory database 존재만 표시합니다. AgentScope는 memory content를 읽거나 편집하지 않습니다."
+          detail:
+            "memory database 존재만 표시합니다. AgentScope는 memory content를 읽거나 편집하지 않습니다."
         },
         database_state: {
           label: "state_5.sqlite",
-          detail: "Codex state database schema와 행 수 summary만 표시합니다. transcript 본문은 읽지 않습니다."
+          detail:
+            "Codex state database schema와 행 수 summary만 표시합니다. transcript 본문은 읽지 않습니다."
         },
         database_goals: {
           label: "goals_1.sqlite",
@@ -559,11 +725,13 @@ export const koKR = {
         },
         database_memories: {
           label: "memories_1.sqlite",
-          detail: "Codex memories database schema와 행 수 summary만 표시합니다. memory content는 읽지 않습니다."
+          detail:
+            "Codex memories database schema와 행 수 summary만 표시합니다. memory content는 읽지 않습니다."
         },
         database_logs: {
           label: "logs_2.sqlite",
-          detail: "Codex logs database schema와 행 수 summary만 표시합니다. log body text는 복원하거나 표시하지 않습니다."
+          detail:
+            "Codex logs database schema와 행 수 summary만 표시합니다. log body text는 복원하거나 표시하지 않습니다."
         },
         database_dev: {
           label: "sqlite/codex-dev.db",
@@ -571,31 +739,38 @@ export const koKR = {
         },
         browser_state: {
           label: "Browser 통합",
-          detail: "browser profile/cache 존재만 표시합니다. AgentScope는 browsing data를 읽지 않습니다."
+          detail:
+            "browser profile/cache 존재만 표시합니다. AgentScope는 browsing data를 읽지 않습니다."
         },
         browser_output: {
           label: "Browser automation 출력",
-          detail: "Playwright console/page artifacts를 확장자별로 세기만 합니다. page snapshots나 console 본문은 읽지 않습니다."
+          detail:
+            "Playwright console/page artifacts를 확장자별로 세기만 합니다. page snapshots나 console 본문은 읽지 않습니다."
         },
         computer_use_state: {
           label: "Computer Use 통합",
-          detail: "Computer Use local state 존재만 표시합니다. AgentScope는 desktop control을 실행하지 않습니다."
+          detail:
+            "Computer Use local state 존재만 표시합니다. AgentScope는 desktop control을 실행하지 않습니다."
         },
         mcp_node_runtime: {
           label: "MCP Node 런타임",
-          detail: "설치된 MCP Node 런타임 메타데이터입니다. package scripts 실행이나 source bodies 검사는 하지 않습니다."
+          detail:
+            "설치된 MCP Node 런타임 메타데이터입니다. package scripts 실행이나 source bodies 검사는 하지 않습니다."
         },
         node_repl_runtime: {
           label: "Node REPL 런타임",
-          detail: "Node REPL 런타임 존재와 항목 수만 표시합니다. active exec bodies는 읽지 않습니다."
+          detail:
+            "Node REPL 런타임 존재와 항목 수만 표시합니다. active exec bodies는 읽지 않습니다."
         },
         tmp_arg0: {
           label: "Codex 인수 임시 파일",
-          detail: "temporary command argument folders만 셉니다. 생성된 command files는 열지 않습니다."
+          detail:
+            "temporary command argument folders만 셉니다. 생성된 command files는 열지 않습니다."
         },
         vendor_imports_cache: {
           label: "Vendor imports 캐시",
-          detail: "vendor import cache 존재만 표시합니다. cached marketplace bodies는 읽지 않습니다."
+          detail:
+            "vendor import cache 존재만 표시합니다. cached marketplace bodies는 읽지 않습니다."
         },
         pets_state: {
           label: "Pets 상태",
@@ -603,7 +778,8 @@ export const koKR = {
         },
         plugins_summary: {
           label: "플러그인",
-          detail: "installed plugin cache와 config summary입니다. AgentScope는 plugin cache bytes를 직접 편집하지 않습니다."
+          detail:
+            "installed plugin cache와 config summary입니다. AgentScope는 plugin cache bytes를 직접 편집하지 않습니다."
         },
         rules: {
           label: "규칙 파일",
@@ -621,14 +797,19 @@ export const koKR = {
       warning: {
         authMetadataOnly:
           "auth.json에는 자격 증명 자료가 포함됩니다. AgentScope는 메타데이터만 표시하며 token 필드를 열거나 편집하거나 표시하지 않습니다.",
-        rawConfigBlocked: "고위험 키가 구조화된 확인을 우회하지 못하도록 raw config 편집을 차단합니다.",
+        rawConfigBlocked:
+          "고위험 키가 구조화된 확인을 우회하지 못하도록 raw config 편집을 차단합니다.",
         sensitiveKeysBlocked: "민감한 키 이름이 감지되었습니다. raw config 편집을 차단합니다.",
         systemSkillsReadOnly: "시스템 또는 플러그인 제공 Skills는 읽기 전용입니다.",
-        pluginWorkflowOnly: "install/remove에는 Codex plugin 워크플로를 사용하세요. AgentScope는 증거만 표시합니다.",
+        pluginWorkflowOnly:
+          "install/remove에는 Codex plugin 워크플로를 사용하세요. AgentScope는 증거만 표시합니다.",
         sensitiveConfigBlocked: "민감한 config 키가 감지되었습니다. raw 편집을 차단합니다.",
         highRiskConfirm: "고위험 설정입니다. 실행하려면 명시적 확인이 필요합니다.",
         archivedCountUnreadable: "state_5.sqlite에서 보관된 thread 수를 읽지 못했습니다.",
-        sqliteMetadataUnreadable: "이 SQLite 데이터베이스를 메타데이터용 읽기 전용으로 열지 못했습니다."
+        sqliteMetadataUnreadable:
+          "이 SQLite 데이터베이스를 메타데이터용 읽기 전용으로 열지 못했습니다.",
+        complexTomlReplace:
+          "현재 값은 복잡한 TOML입니다. 템플릿 적용 시 스칼라 값으로 대체될 수 있습니다."
       },
       mcpTitle: "config.toml의 MCP 서버",
       noMcp: "현재 config.toml에서 MCP 서버 테이블을 찾지 못했습니다.",
@@ -713,7 +894,8 @@ export const koKR = {
     },
     fonts: {
       unified: "통합 UI 글꼴",
-      unifiedDetail: "통합 모드에서 사용합니다. PingFang, Inter, Anthropic Sans 등도 직접 입력할 수 있습니다.",
+      unifiedDetail:
+        "통합 모드에서 사용합니다. PingFang, Inter, Anthropic Sans 등도 직접 입력할 수 있습니다.",
       latin: "영문 / 라틴 글꼴",
       latinDetail: "영문 메뉴, 라벨, 숫자의 기본 글꼴입니다.",
       chinese: "중국어 글꼴",
@@ -729,7 +911,10 @@ export const koKR = {
     fontPreview: {
       title: "글꼴 미리보기"
     },
-    codeFont: { label: "코드 글꼴", detail: "코드, 경로, 명령줄, ID, 표 형태의 증거에 사용합니다." },
+    codeFont: {
+      label: "코드 글꼴",
+      detail: "코드, 경로, 명령줄, ID, 표 형태의 증거에 사용합니다."
+    },
     links: {
       githubLabel: "GitHub 열기",
       githubDetail: "issues, actions, releases를 위한 공개 저장소입니다.",
@@ -790,7 +975,8 @@ export const koKR = {
     endpoints: "엔드포인트",
     evidence: "증거",
     searchHit: "검색 hit",
-    safeSearchHitDetail: "안전 검색은 이벤트 메타데이터, 매칭 필드, 파일 위치만 표시하며 transcript 본문은 표시하지 않습니다.",
+    safeSearchHitDetail:
+      "안전 검색은 이벤트 메타데이터, 매칭 필드, 파일 위치만 표시하며 transcript 본문은 표시하지 않습니다.",
     activity: "활동",
     topEvents: "주요 이벤트",
     topTools: "주요 도구",

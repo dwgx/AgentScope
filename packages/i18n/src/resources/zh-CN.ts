@@ -343,7 +343,8 @@ export const zhCN = {
     },
     searchScope: {
       label: "搜索范围",
-      detail: "SQLite 身份字段与本地 Codex/Claude JSONL 安全元数据。不会搜索转录正文或隐藏/内部字段。"
+      detail:
+        "SQLite 身份字段与本地 Codex/Claude JSONL 安全元数据。不会搜索转录正文或隐藏/内部字段。"
     },
     searchPreview: {
       label: "SQLite 预览搜索",
@@ -408,6 +409,13 @@ export const zhCN = {
       emptyDetail: "选择一个 Codex 配置面查看证据，或编辑会先备份的文档。",
       save: "保存",
       controlSaved: "Codex 控制已保存",
+      verification: "写入校验",
+      verificationStatus: {
+        passed: "读回匹配",
+        failed: "读回失败"
+      },
+      effectiveScope: "生效范围",
+      newSessionEffect: "已写入 config.toml；通常需要新启动的 Codex 会话才会读取。",
       saved: "已保存。原文件不存在，无需备份。",
       savedWithBackup: "已保存。备份：{{path}}",
       backupBeforeSave: "保存前会校验 sha256，并先写入 ~/.agentscope 备份。",
@@ -424,8 +432,7 @@ export const zhCN = {
       unset: "未设置",
       planModelNote: "官方文档没有独立 Plan 模型键；AgentScope 只展示继承的默认模型。",
       reviewReasoningNote: "Review 的 reasoning 继承默认 reasoning 设置。",
-      modeEvidence:
-        "证据来源：OpenAI Codex 手册中的配置键说明，以及本机 config.toml 顶层赋值。",
+      modeEvidence: "证据来源：OpenAI Codex 手册中的配置键说明，以及本机 config.toml 顶层赋值。",
       mode: {
         default: "Default 模式",
         plan: "Plan 模式",
@@ -437,6 +444,7 @@ export const zhCN = {
         unset: "未设置"
       },
       tabs: {
+        templates: "模板",
         overview: "概览",
         models: "模型",
         safety: "安全",
@@ -466,10 +474,103 @@ export const zhCN = {
         codexHome: "官方 CODEX_HOME 根目录。AgentScope 只盘点元数据。",
         sqliteHome: "解析 config/env 后的 SQLite 状态根目录。"
       },
+      templates: {
+        title: "Codex 参数模板",
+        detail:
+          "先读取本机 config.toml，再逐项预览精确 key patch；只把勾选的 allowlist 标量键通过备份、journal、高风险确认和原子写入落盘。未知高级配置会保留，匹配不安全时直接阻止。",
+        list: "Codex 参数模板",
+        preview: "模板预览",
+        previewEmpty: "选择模板后预览它会改动的 config.toml 项。",
+        apply: "应用勾选项",
+        current: "当前值",
+        templateValue: "模板值",
+        changed: "将改动",
+        same: "相同",
+        footer: "{{count}} 个已勾选改动键：{{keys}}",
+        customName: "自定义模板名称",
+        customDescription: "自定义模板说明",
+        saveCustom: "保存勾选项为模板",
+        delete: "删除自定义模板",
+        savedCustom: "自定义 Codex 模板已保存。",
+        deletedCustom: "自定义 Codex 模板已删除。",
+        applied: "Codex 模板已应用",
+        customEmpty: "还没有自定义模板。可从预览中保存已勾选项。",
+        group: {
+          current: "现状",
+          builtin: "内置",
+          custom: "自定义"
+        },
+        currentTemplate: {
+          name: "现状",
+          description: "只读显示 config.toml 中已识别的当前值；未知高级配置会保留，但不会被复制成模板。"
+        },
+        builtin: {
+          "yolo-full-access": {
+            name: "YOLO / 最高权限",
+            description:
+              "最大本机自主权：不询问、danger-full-access、Windows elevated sandbox、live 搜索、xhigh 推理和 multi-agent。"
+          },
+          "safe-workspace": {
+            name: "安全工作区",
+            description: "workspace-write 沙箱、on-request 审批、cached 搜索和用户审核。"
+          },
+          "readonly-audit": {
+            name: "只读审计",
+            description: "read-only 沙箱、on-request 审批、cached 搜索、高推理和 xhigh 计划推理。"
+          },
+          "deep-planning": {
+            name: "深度计划",
+            description: "xhigh 实现与计划推理，不默认改变权限。"
+          },
+          "live-research": {
+            name: "实时研究",
+            description: "live 联网搜索和 high 推理，不改变审批或沙箱权限。"
+          }
+        }
+      },
+      workbench: {
+        title: "Codex 配置工作台",
+        detail: "先编辑真实现状。模板只把改动加入待应用列表；最终只原子写入勾选项。",
+        sections: "Codex 配置分区",
+        section: {
+          current: "现状",
+          mcp: "MCP Server",
+          templates: "模板",
+          unknown: "未知项"
+        },
+        enabled: "已启用",
+        disabled: "未启用",
+        enable: "启用",
+        reset: "恢复",
+        staged: "待应用改动",
+        stagedDetail: "{{count}} 个已选择改动",
+        stageTemplate: "加入待应用",
+        templateStaged: "模板改动已加入待应用列表，请先复查再应用。",
+        mcpName: "server-name",
+        mcpCommand: "command",
+        stageMcp: "加入 MCP",
+        line: "第 {{line}} 行",
+        noUnknown: "没有发现未知配置项。",
+        editableUnknown: "{{count}} 个未知标量项已作为未验证高级设置显示在上方，可编辑但不保证 Codex 会使用。",
+        noReadOnlyUnknown: "其余未知项没有复杂或敏感值需要只读展示。"
+      },
+      applyModal: {
+        animating: "正在规划配置补丁",
+        writing: "正在原子写入",
+        success: "配置已应用",
+        error: "配置应用失败",
+        detail: "AgentScope 只写入匹配到的结构化设置，并保留未知高级配置。",
+        atomicWrite: "写入临时文件、fsync、rename、journal",
+        verified: "读回校验通过：{{count}} 个 key 匹配"
+      },
       items: {
         model: {
           label: "默认模型",
           detail: "CLI、应用、profile 或项目设置未覆盖时使用的顶层 Codex 模型。"
+        },
+        model_provider: {
+          label: "模型 Provider",
+          detail: "从 model_providers 中选择的 provider id。内置项只是建议，也允许自定义 provider。"
         },
         review_model: {
           label: "Review 模型",
@@ -482,6 +583,38 @@ export const zhCN = {
         plan_mode_reasoning_effort: {
           label: "Plan 推理强度",
           detail: "Plan 模式的 reasoning 覆盖；模型仍继承默认模型。"
+        },
+        model_reasoning_summary: {
+          label: "Reasoning 摘要",
+          detail: "支持 Responses API 的模型使用的 reasoning summary 策略。"
+        },
+        model_verbosity: {
+          label: "模型输出详略",
+          detail: "Provider 使用 Responses API 时，控制 GPT-5 系列模型的文本 verbosity。"
+        },
+        model_supports_reasoning_summaries: {
+          label: "强制 reasoning 摘要",
+          detail: "为当前模型强制启用或禁用 reasoning summaries。"
+        },
+        project_doc_max_bytes: {
+          label: "项目文档字节上限",
+          detail: "Codex 首轮指令中可嵌入的 AGENTS.md / 项目指令最大字节数。"
+        },
+        openai_base_url: {
+          label: "OpenAI base URL",
+          detail: "内置 OpenAI provider 的 base URL 覆盖。"
+        },
+        model_providers_OpenAI_name: {
+          label: "OpenAI Provider 名称",
+          detail: "名为 OpenAI 的自定义 model provider 表显示名称。"
+        },
+        model_providers_OpenAI_base_url: {
+          label: "OpenAI Provider base URL",
+          detail: "名为 OpenAI 的自定义 model provider 表 base URL。"
+        },
+        model_providers_OpenAI_requires_openai_auth: {
+          label: "OpenAI Provider 认证",
+          detail: "让名为 OpenAI 的自定义 model provider 使用 OpenAI authentication。"
         },
         approval_policy: {
           label: "审批策略",
@@ -518,6 +651,18 @@ export const zhCN = {
         features_multi_agent: {
           label: "多 Agent 功能",
           detail: "当前 Codex 构建支持时，用于 multi-agent/subagent 的功能开关。"
+        },
+        features_goals: {
+          label: "Goals 功能",
+          detail: "当前 Codex 构建支持时，用于 Goal mode 的功能开关。"
+        },
+        features_memories: {
+          label: "Memories 功能",
+          detail: "全局启用 Codex Memories。AgentScope 仍不会读取 memory 正文。"
+        },
+        features_js_repl: {
+          label: "JS REPL 功能",
+          detail: "当前 Codex 构建存在 JavaScript REPL 能力时使用的功能开关。"
         },
         memories_generate_memories: {
           label: "生成记忆",
@@ -583,7 +728,8 @@ export const zhCN = {
         },
         mcp_node_runtime: {
           label: "MCP Node 运行时",
-          detail: "已安装 MCP Node runtime 元数据。AgentScope 不执行 package scripts，也不检查源码正文。"
+          detail:
+            "已安装 MCP Node runtime 元数据。AgentScope 不执行 package scripts，也不检查源码正文。"
         },
         node_repl_runtime: {
           label: "Node REPL 运行时",
@@ -619,7 +765,8 @@ export const zhCN = {
         }
       },
       warning: {
-        authMetadataOnly: "auth.json 包含凭据材料。AgentScope 只显示元数据，绝不打开、编辑或展示 token 字段。",
+        authMetadataOnly:
+          "auth.json 包含凭据材料。AgentScope 只显示元数据，绝不打开、编辑或展示 token 字段。",
         rawConfigBlocked: "已阻止原始配置编辑，避免高风险键绕过结构化确认。",
         sensitiveKeysBlocked: "检测到敏感键名。已阻止原始配置编辑。",
         systemSkillsReadOnly: "系统或插件提供的 Skills 为只读。",
@@ -627,7 +774,8 @@ export const zhCN = {
         sensitiveConfigBlocked: "检测到敏感 config 键；已阻止原始编辑。",
         highRiskConfirm: "高风险设置；执行前需要显式确认。",
         archivedCountUnreadable: "无法从 state_5.sqlite 读取归档线程数量。",
-        sqliteMetadataUnreadable: "无法以只读方式打开此 SQLite 数据库读取元数据。"
+        sqliteMetadataUnreadable: "无法以只读方式打开此 SQLite 数据库读取元数据。",
+        complexTomlReplace: "当前值是复杂 TOML，应用模板可能会用标量值覆盖它。"
       },
       mcpTitle: "config.toml 中的 MCP 服务器",
       noMcp: "当前 config.toml 没有找到 MCP 服务器表。",

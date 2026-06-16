@@ -147,7 +147,8 @@ export const jaJP = {
       emptyDetail:
         "Codex、Claude、node_repl、app-server、daemon のプロセスは見つかりませんでした。",
       captureOffTitle: "ランタイム取得がオフです",
-      captureOffDetail: "ライブ Agent プロセスを表示するには、設定 > ランタイムで Win32_Process をオンにしてください。",
+      captureOffDetail:
+        "ライブ Agent プロセスを表示するには、設定 > ランタイムで Win32_Process をオンにしてください。",
       subtitle_one: "{{count}} 件の関連 Win32 行",
       subtitle_other: "{{count}} 件の関連 Win32 行",
       noCandidate: "セッション候補はまだありません",
@@ -292,14 +293,16 @@ export const jaJP = {
         rebuild:
           "修復は固定されたパッケージ再構築手順を実行し、変更されたディレクトリとファイルを報告します。",
         revealPath: "証拠パスを表示: {{path}}",
-        manual: "自動修復は登録されていません。証拠パスを確認し、データは読み取り専用のままにしてください。"
+        manual:
+          "自動修復は登録されていません。証拠パスを確認し、データは読み取り専用のままにしてください。"
       }
     },
     loading: {
       title: "ローカル Agent 状態を読み込み中",
       detail: "Win32_Process、Codex SQLite/JSONL、Claude セッションファイルを確認しています。",
       errorTitle: "Agent 状態の読み込みに失敗しました",
-      errorDetail: "{{message}}。更新して再試行してください。新しいスナップショットが読み込まれるまで AgentScope はデータを読み取り専用に保ちます。"
+      errorDetail:
+        "{{message}}。更新して再試行してください。新しいスナップショットが読み込まれるまで AgentScope はデータを読み取り専用に保ちます。"
     }
   },
   settings: {
@@ -346,11 +349,13 @@ export const jaJP = {
     },
     searchScope: {
       label: "検索範囲",
-      detail: "SQLite の識別フィールドとローカル Codex/Claude JSONL の安全なメタデータを検索します。転写本文や hidden/internal フィールドは検索しません。"
+      detail:
+        "SQLite の識別フィールドとローカル Codex/Claude JSONL の安全なメタデータを検索します。転写本文や hidden/internal フィールドは検索しません。"
     },
     searchPreview: {
       label: "SQLite preview 検索",
-      detail: "Codex SQLite preview テキストを一致判定に含めます。結果には preview 本文を表示しません。"
+      detail:
+        "Codex SQLite preview テキストを一致判定に含めます。結果には preview 本文を表示しません。"
     },
     searchLimit: { label: "検索結果数", detail: "コマンドバー検索で返す最大一致数です。" },
     notifications: {
@@ -367,7 +372,8 @@ export const jaJP = {
     },
     suggestions: {
       label: "コンテキスト候補",
-      detail: "現在のページ、選択中のプロセス/セッション、cwd、モデル、ツール、診断から検索候補を表示します。"
+      detail:
+        "現在のページ、選択中のプロセス/セッション、cwd、モデル、ツール、診断から検索候補を表示します。"
     },
     transcriptPreview: {
       label: "転写ヒットプレビュー",
@@ -410,25 +416,38 @@ export const jaJP = {
       readOnlyDetail:
         "このサーフェスは証拠としてのみ表示されます。状態、キャッシュ、ベンダー管理、または本文を含むため AgentScope は変更しません。",
       emptyTitle: "サーフェスが選択されていません",
-      emptyDetail: "Codex 設定サーフェスを選び、証拠を確認するか、バックアップ付きドキュメントを編集してください。",
+      emptyDetail:
+        "Codex 設定サーフェスを選び、証拠を確認するか、バックアップ付きドキュメントを編集してください。",
       save: "保存",
       controlSaved: "Codex 制御を保存しました",
+      verification: "書き込み検証",
+      verificationStatus: {
+        passed: "読み戻し一致",
+        failed: "読み戻し失敗"
+      },
+      effectiveScope: "有効範囲",
+      newSessionEffect: "config.toml へ書き込み済みです。通常、新しく開始した Codex セッションで読み込まれます。",
       saved: "保存しました。以前のファイルは存在しないため、バックアップは不要でした。",
       savedWithBackup: "保存しました。バックアップ: {{path}}",
-      backupBeforeSave: "保存前に sha256 を確認し、先に ~/.agentscope へバックアップを書き込みます。",
-      redacted: "機密キー名は伏せられました。再読み込みまたは場所を表示し、AgentScope の外で編集してください。",
+      backupBeforeSave:
+        "保存前に sha256 を確認し、先に ~/.agentscope へバックアップを書き込みます。",
+      redacted:
+        "機密キー名は伏せられました。再読み込みまたは場所を表示し、AgentScope の外で編集してください。",
       exists: "存在",
       bytes: "バイト",
       updated: "更新",
       modeTitle: "Codex モード既定値",
-      modeDetail: "documented config.toml キーだけを書き込みます。Plan モードは既定モデルを継承し、reasoning effort だけ上書きできます。",
+      modeDetail:
+        "documented config.toml キーだけを書き込みます。Plan モードは既定モデルを継承し、reasoning effort だけ上書きできます。",
       model: "モデル",
       reasoning: "推論",
       inheritDefault: "既定を継承",
       unset: "未設定",
-      planModelNote: "独立した Plan モデルキーは文書化されていません。AgentScope は継承される既定モデルだけを表示します。",
+      planModelNote:
+        "独立した Plan モデルキーは文書化されていません。AgentScope は継承される既定モデルだけを表示します。",
       reviewReasoningNote: "Review reasoning は既定の reasoning 設定を継承します。",
-      modeEvidence: "証拠元: OpenAI Codex manual の設定キー説明、およびローカル config.toml のトップレベル代入。",
+      modeEvidence:
+        "証拠元: OpenAI Codex manual の設定キー説明、およびローカル config.toml のトップレベル代入。",
       mode: {
         default: "Default モード",
         plan: "Plan モード",
@@ -440,6 +459,7 @@ export const jaJP = {
         unset: "未設定"
       },
       tabs: {
+        templates: "テンプレート",
         overview: "概要",
         models: "モデル",
         safety: "安全",
@@ -469,10 +489,108 @@ export const jaJP = {
         codexHome: "公式 CODEX_HOME ルート。AgentScope はメタデータだけを一覧化します。",
         sqliteHome: "config/env 解決後の SQLite 状態ルート。"
       },
+      templates: {
+        title: "Codex パラメータテンプレート",
+        detail:
+          "ローカル config.toml を先に読み取り、正確な key patch をプレビューしてから、選択された許可リスト内の scalar キーだけをバックアップ、journal、高リスク確認、atomic write 付きで適用します。未知の高度な設定は保持し、安全に一致しない場合はブロックします。",
+        list: "Codex パラメータテンプレート",
+        preview: "テンプレートプレビュー",
+        previewEmpty: "テンプレートを選択すると config.toml の変更内容を確認できます。",
+        apply: "選択項目を適用",
+        current: "現在値",
+        templateValue: "テンプレート値",
+        changed: "変更あり",
+        same: "同じ",
+        footer: "選択済みの変更キー {{count}} 件: {{keys}}",
+        customName: "カスタムテンプレート名",
+        customDescription: "カスタムテンプレート説明",
+        saveCustom: "選択項目をテンプレートとして保存",
+        delete: "カスタムテンプレートを削除",
+        savedCustom: "カスタム Codex テンプレートを保存しました。",
+        deletedCustom: "カスタム Codex テンプレートを削除しました。",
+        applied: "Codex テンプレートを適用しました",
+        customEmpty: "カスタムテンプレートはまだありません。プレビューで選択した行を保存して作成できます。",
+        group: {
+          current: "現状",
+          builtin: "組み込み",
+          custom: "カスタム"
+        },
+        currentTemplate: {
+          name: "現状",
+          description:
+            "config.toml で認識できる現在値の読み取り専用スナップショットです。未知の高度な設定は保持されますが、テンプレートにはコピーしません。"
+        },
+        builtin: {
+          "yolo-full-access": {
+            name: "YOLO / Full Access",
+            description:
+              "最大のローカル自律性: 確認なし、danger-full-access、Windows elevated sandbox、live 検索、xhigh reasoning、multi-agent。"
+          },
+          "safe-workspace": {
+            name: "Safe Workspace",
+            description: "workspace-write sandbox、on-request 承認、cached 検索、ユーザーレビュー。"
+          },
+          "readonly-audit": {
+            name: "Read-only Audit",
+            description:
+              "read-only sandbox、on-request 承認、cached 検索、high reasoning、xhigh plan reasoning。"
+          },
+          "deep-planning": {
+            name: "Deep Planning",
+            description: "権限を変えずに xhigh の実装 reasoning と plan reasoning を使います。"
+          },
+          "live-research": {
+            name: "Live Research",
+            description: "承認や sandbox 権限を変えずに live Web 検索と high reasoning を使います。"
+          }
+        }
+      },
+      workbench: {
+        title: "Codex 設定ワークベンチ",
+        detail: "まず現在の config 状態を編集します。テンプレートは変更をステージするだけで、適用時に選択項目だけを atomic write します。",
+        sections: "Codex 設定セクション",
+        section: {
+          current: "現状",
+          mcp: "MCP サーバー",
+          templates: "テンプレート",
+          unknown: "未知項目"
+        },
+        enabled: "有効",
+        disabled: "未有効",
+        enable: "有効化",
+        reset: "戻す",
+        staged: "ステージ済み変更",
+        stagedDetail: "{{count}} 件の選択済み変更",
+        stageTemplate: "ステージ",
+        templateStaged: "テンプレート変更をステージしました。適用前に確認してください。",
+        mcpName: "server-name",
+        mcpCommand: "command",
+        stageMcp: "MCP をステージ",
+        line: "{{line}} 行目",
+        noUnknown: "未知の config 項目はありません。",
+        editableUnknown:
+          "{{count}} 件の未知 scalar 項目を未検証の詳細設定として上に表示しています。編集できますが、Codex が使うとは証明できません。",
+        noReadOnlyUnknown: "複雑または機密値として読み取り専用表示が必要な残りの未知項目はありません。"
+      },
+      applyModal: {
+        animating: "config patch を計画中",
+        writing: "atomic write 実行中",
+        success: "config を適用しました",
+        error: "config 適用に失敗",
+        detail: "AgentScope は一致した構造化設定だけを書き込み、未知の config を保持します。",
+        atomicWrite: "一時ファイル、fsync、rename、journal を実行",
+        verified: "{{count}} 件の key で読み戻し検証に成功"
+      },
       items: {
         model: {
           label: "デフォルトモデル",
-          detail: "CLI、アプリ、profile、project 設定で上書きされない場合に使う Codex のトップレベルモデル。"
+          detail:
+            "CLI、アプリ、profile、project 設定で上書きされない場合に使う Codex のトップレベルモデル。"
+        },
+        model_provider: {
+          label: "モデル Provider",
+          detail:
+            "model_providers から選択する provider id。推奨 id は候補であり、custom provider も許可されます。"
         },
         review_model: {
           label: "Review モデル",
@@ -485,6 +603,38 @@ export const jaJP = {
         plan_mode_reasoning_effort: {
           label: "Plan 推論強度",
           detail: "Plan モードの reasoning 上書き。モデルはデフォルトモデルを継承します。"
+        },
+        model_reasoning_summary: {
+          label: "Reasoning summary",
+          detail: "Responses API 対応モデルで使う reasoning summary ポリシー。"
+        },
+        model_verbosity: {
+          label: "モデル verbosity",
+          detail: "provider が Responses API を使う場合の GPT-5 family text verbosity。"
+        },
+        model_supports_reasoning_summaries: {
+          label: "Reasoning summaries を強制",
+          detail: "現在のモデルで reasoning summaries を強制的に有効または無効にします。"
+        },
+        project_doc_max_bytes: {
+          label: "Project doc 最大 bytes",
+          detail: "初回 turn instruction に埋め込む AGENTS.md / project instructions の最大 bytes。"
+        },
+        openai_base_url: {
+          label: "OpenAI base URL",
+          detail: "組み込み OpenAI provider の base URL override。"
+        },
+        model_providers_OpenAI_name: {
+          label: "OpenAI Provider 名",
+          detail: "OpenAI という名前の custom model provider table の表示名。"
+        },
+        model_providers_OpenAI_base_url: {
+          label: "OpenAI Provider base URL",
+          detail: "OpenAI という名前の custom model provider table の base URL。"
+        },
+        model_providers_OpenAI_requires_openai_auth: {
+          label: "OpenAI Provider 認証",
+          detail: "OpenAI という名前の custom model provider table で OpenAI authentication を使います。"
         },
         approval_policy: {
           label: "承認ポリシー",
@@ -508,7 +658,8 @@ export const jaJP = {
         },
         show_raw_agent_reasoning: {
           label: "raw reasoning を表示",
-          detail: "高リスク表示設定です。この値に関係なく AgentScope は hidden vendor reasoning を表示しません。"
+          detail:
+            "高リスク表示設定です。この値に関係なく AgentScope は hidden vendor reasoning を表示しません。"
         },
         service_tier: {
           label: "サービス tier",
@@ -522,19 +673,34 @@ export const jaJP = {
           label: "Multi-agent 機能",
           detail: "この Codex build に multi-agent/subagent サポートがある場合の feature flag。"
         },
+        features_goals: {
+          label: "Goals 機能",
+          detail: "この Codex build で Goal mode がサポートされる場合の feature flag。"
+        },
+        features_memories: {
+          label: "Memories 機能",
+          detail: "Codex Memories をグローバルに有効化します。AgentScope は memory 本文を読みません。"
+        },
+        features_js_repl: {
+          label: "JS REPL 機能",
+          detail: "この Codex build に JavaScript REPL capability がある場合の feature flag。"
+        },
         memories_generate_memories: {
           label: "記憶を生成",
-          detail: "Codex が memory record を生成するかを制御します。AgentScope は memory 本文を読みません。"
+          detail:
+            "Codex が memory record を生成するかを制御します。AgentScope は memory 本文を読みません。"
         },
         memories_use_memories: {
           label: "記憶を使用",
-          detail: "Codex が保存済み memory を注入するかを制御します。AgentScope は memory 本文を表示しません。"
+          detail:
+            "Codex が保存済み memory を注入するかを制御します。AgentScope は memory 本文を表示しません。"
         }
       },
       surfaceText: {
         config_global: {
           label: "config.toml",
-          detail: "CLI、IDE、desktop で共有される Codex ユーザー設定。安全な編集には上の構造化コントロールを使います。"
+          detail:
+            "CLI、IDE、desktop で共有される Codex ユーザー設定。安全な編集には上の構造化コントロールを使います。"
         },
         agents_global: {
           label: "AGENTS.md",
@@ -542,7 +708,8 @@ export const jaJP = {
         },
         mcp_summary: {
           label: "MCP サーバー",
-          detail: "config.toml の MCP サーバーテーブル。変更する場合は設定ドキュメントを編集します。"
+          detail:
+            "config.toml の MCP サーバーテーブル。変更する場合は設定ドキュメントを編集します。"
         },
         archive_summary: {
           label: "アーカイブ済みスレッド",
@@ -550,11 +717,13 @@ export const jaJP = {
         },
         memory_summary: {
           label: "記憶",
-          detail: "memory database の存在のみ。AgentScope は memory content を読んだり編集したりしません。"
+          detail:
+            "memory database の存在のみ。AgentScope は memory content を読んだり編集したりしません。"
         },
         database_state: {
           label: "state_5.sqlite",
-          detail: "Codex state database の schema と行数 summary のみ。transcript 本文は読みません。"
+          detail:
+            "Codex state database の schema と行数 summary のみ。transcript 本文は読みません。"
         },
         database_goals: {
           label: "goals_1.sqlite",
@@ -562,11 +731,13 @@ export const jaJP = {
         },
         database_memories: {
           label: "memories_1.sqlite",
-          detail: "Codex memories database の schema と行数 summary のみ。memory content は読みません。"
+          detail:
+            "Codex memories database の schema と行数 summary のみ。memory content は読みません。"
         },
         database_logs: {
           label: "logs_2.sqlite",
-          detail: "Codex logs database の schema と行数 summary のみ。log body text は復元または表示しません。"
+          detail:
+            "Codex logs database の schema と行数 summary のみ。log body text は復元または表示しません。"
         },
         database_dev: {
           label: "sqlite/codex-dev.db",
@@ -578,15 +749,18 @@ export const jaJP = {
         },
         browser_output: {
           label: "Browser automation 出力",
-          detail: "Playwright console/page artifacts を拡張子別に数えるだけです。page snapshots や console 本文は読みません。"
+          detail:
+            "Playwright console/page artifacts を拡張子別に数えるだけです。page snapshots や console 本文は読みません。"
         },
         computer_use_state: {
           label: "Computer Use 連携",
-          detail: "Computer Use local state の存在のみ。AgentScope は desktop control を起動しません。"
+          detail:
+            "Computer Use local state の存在のみ。AgentScope は desktop control を起動しません。"
         },
         mcp_node_runtime: {
           label: "MCP Node 実行環境",
-          detail: "インストール済み MCP Node 実行環境メタデータ。package scripts の実行や source bodies の検査はしません。"
+          detail:
+            "インストール済み MCP Node 実行環境メタデータ。package scripts の実行や source bodies の検査はしません。"
         },
         node_repl_runtime: {
           label: "Node REPL 実行環境",
@@ -594,7 +768,8 @@ export const jaJP = {
         },
         tmp_arg0: {
           label: "Codex 引数一時ファイル",
-          detail: "temporary command argument folders を数えるだけです。生成された command files は開きません。"
+          detail:
+            "temporary command argument folders を数えるだけです。生成された command files は開きません。"
         },
         vendor_imports_cache: {
           label: "Vendor imports キャッシュ",
@@ -606,7 +781,8 @@ export const jaJP = {
         },
         plugins_summary: {
           label: "プラグイン",
-          detail: "installed plugin cache と config summary。AgentScope は plugin cache bytes を直接編集しません。"
+          detail:
+            "installed plugin cache と config summary。AgentScope は plugin cache bytes を直接編集しません。"
         },
         rules: {
           label: "ルールファイル",
@@ -614,7 +790,8 @@ export const jaJP = {
         },
         skill: {
           label: "ユーザー Skill",
-          detail: "ユーザー Skill 作成サーフェス。AgentScope は SKILL.md のみ編集し、先にバックアップします。"
+          detail:
+            "ユーザー Skill 作成サーフェス。AgentScope は SKILL.md のみ編集し、先にバックアップします。"
         },
         skillReadOnly: {
           label: "読み取り専用 Skill",
@@ -624,14 +801,20 @@ export const jaJP = {
       warning: {
         authMetadataOnly:
           "auth.json には認証情報が含まれます。AgentScope はメタデータのみを表示し、token フィールドを開く、編集する、表示することはありません。",
-        rawConfigBlocked: "高リスクキーが構造化確認を迂回しないよう、raw config 編集はブロックされています。",
+        rawConfigBlocked:
+          "高リスクキーが構造化確認を迂回しないよう、raw config 編集はブロックされています。",
         sensitiveKeysBlocked: "機密キー名を検出しました。raw config 編集はブロックされています。",
         systemSkillsReadOnly: "システムまたはプラグイン提供の Skills は読み取り専用です。",
-        pluginWorkflowOnly: "install/remove には Codex plugin ワークフローを使用してください。AgentScope は証拠のみを表示します。",
+        pluginWorkflowOnly:
+          "install/remove には Codex plugin ワークフローを使用してください。AgentScope は証拠のみを表示します。",
         sensitiveConfigBlocked: "機密 config キーを検出しました。raw 編集はブロックされています。",
         highRiskConfirm: "高リスク設定です。実行には明示的な確認が必要です。",
-        archivedCountUnreadable: "state_5.sqlite からアーカイブ済みスレッド数を読み取れませんでした。",
-        sqliteMetadataUnreadable: "この SQLite データベースをメタデータ用に読み取り専用で開けませんでした。"
+        archivedCountUnreadable:
+          "state_5.sqlite からアーカイブ済みスレッド数を読み取れませんでした。",
+        sqliteMetadataUnreadable:
+          "この SQLite データベースをメタデータ用に読み取り専用で開けませんでした。",
+        complexTomlReplace:
+          "現在の値は複雑な TOML です。テンプレート適用でスカラー値に置き換わる可能性があります。"
       },
       mcpTitle: "config.toml の MCP サーバー",
       noMcp: "現在の config.toml に MCP サーバーテーブルは見つかりませんでした。",
@@ -681,7 +864,8 @@ export const jaJP = {
     },
     resetAppearance: {
       label: "外観をリセット",
-      detail: "テーマ、密度、モーション、アクセント、フォントプリセット、フォントファミリー、行高を戻します。"
+      detail:
+        "テーマ、密度、モーション、アクセント、フォントプリセット、フォントファミリー、行高を戻します。"
     },
     uiScale: {
       label: "UI スケール",
@@ -726,13 +910,18 @@ export const jaJP = {
       korean: "韓国語フォント",
       koreanDetail: "Malgun Gothic は Windows 標準の韓国語 UI 基準です。",
       detected: "インストール済みフォント",
-      detectedDetail_one: "この Windows プロファイルで {{count}} 件のフォントファミリーを検出しました。",
-      detectedDetail_other: "この Windows プロファイルで {{count}} 件のフォントファミリーを検出しました。"
+      detectedDetail_one:
+        "この Windows プロファイルで {{count}} 件のフォントファミリーを検出しました。",
+      detectedDetail_other:
+        "この Windows プロファイルで {{count}} 件のフォントファミリーを検出しました。"
     },
     fontPreview: {
       title: "フォントプレビュー"
     },
-    codeFont: { label: "コードフォント", detail: "コード、パス、コマンドライン、ID、表形式の証拠に使います。" },
+    codeFont: {
+      label: "コードフォント",
+      detail: "コード、パス、コマンドライン、ID、表形式の証拠に使います。"
+    },
     links: {
       githubLabel: "GitHub を開く",
       githubDetail: "issues、actions、releases 用の公開リポジトリです。",
@@ -793,7 +982,8 @@ export const jaJP = {
     endpoints: "端点",
     evidence: "証拠",
     searchHit: "検索ヒット",
-    safeSearchHitDetail: "安全検索ではイベントメタデータ、命中フィールド、ファイル位置だけを表示し、転写本文は表示しません。",
+    safeSearchHitDetail:
+      "安全検索ではイベントメタデータ、命中フィールド、ファイル位置だけを表示し、転写本文は表示しません。",
     activity: "アクティビティ",
     topEvents: "主要イベント",
     topTools: "主要ツール",

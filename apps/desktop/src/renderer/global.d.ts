@@ -12,6 +12,11 @@ import type {
   SessionLaunchResult,
   CodexControlDocument,
   CodexControlCenterSnapshot,
+  CodexConfigTemplateDraft,
+  CodexConfigTemplateList,
+  CodexConfigTemplatePreview,
+  CodexConfigTemplatePreviewRequest,
+  CodexConfigWorkbenchSnapshot,
   CodexControlMutationPlan,
   CodexControlMutationRequest,
   CodexControlRevealResult,
@@ -57,8 +62,14 @@ export interface AgentScopeApi {
     patch: CodexModeConfigPatch,
     expectedSha256: string
   ): Promise<CodexModeConfigSaveResult>;
+  listCodexConfigTemplates(): Promise<CodexConfigTemplateList>;
+  saveCodexConfigTemplate(template: CodexConfigTemplateDraft): Promise<CodexConfigTemplateList>;
+  deleteCodexConfigTemplate(id: string): Promise<CodexConfigTemplateList>;
+  previewCodexConfigTemplate(request: CodexConfigTemplatePreviewRequest): Promise<CodexConfigTemplatePreview>;
+  getCodexConfigWorkbench(): Promise<CodexConfigWorkbenchSnapshot>;
   planCodexControlMutation(request: CodexControlMutationRequest): Promise<CodexControlMutationPlan>;
   executeCodexControlMutation(request: CodexControlMutationRequest): Promise<CodexControlSaveResult>;
+  pickCodexConfigPath(kind: "file" | "directory"): Promise<{ canceled: boolean; path?: string }>;
   reloadApp(): Promise<boolean>;
   clearCache(): Promise<{ ok: boolean; directories: string[]; files: string[] }>;
   quitApp(): Promise<boolean>;

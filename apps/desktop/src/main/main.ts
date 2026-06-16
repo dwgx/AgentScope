@@ -6,7 +6,7 @@ import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, ipcMain, session as electronSession, shell } from "electron";
-import type { IpcMainInvokeEvent } from "electron";
+import type { IpcMainInvokeEvent, OpenDialogOptions } from "electron";
 import {
   isSafeSessionId,
   type SessionLaunchAction,
@@ -14,7 +14,17 @@ import {
   type SessionLaunchResolution,
   type SessionLaunchResult
 } from "@agentscope/shared";
-import type { AgentProcess, CodexControlMutationRequest, CodexModeConfigPatch, Evidence, IndexRecord, Relation, ScopeSnapshot } from "@agentscope/shared";
+import type {
+  AgentProcess,
+  CodexConfigTemplateDraft,
+  CodexConfigTemplatePreviewRequest,
+  CodexControlMutationRequest,
+  CodexModeConfigPatch,
+  Evidence,
+  IndexRecord,
+  Relation,
+  ScopeSnapshot
+} from "@agentscope/shared";
 import type * as AgentScopeCore from "@agentscope/core";
 import { runIpcNegativeSmoke } from "./ipcNegativeSmoke.js";
 import { launchResult, resolveLaunchCommand, waitForLaunchAccepted } from "./launcherRuntime.js";
@@ -209,6 +219,37 @@ handleTrustedIpc("codexControl:saveModes", async (_event, patch, expectedSha256)
   const core = await loadCore();
   return core.saveCodexModeConfig(patch as CodexModeConfigPatch, asSha256(expectedSha256));
 });
+handleTrustedIpc("codexControl:listTemplates", async () => {
+  const core = await loadCore();
+  return core.listCodexConfigTemplates();
+});
+handleTrustedIpc("codexControl:saveTemplate", async (_event, template) => {
+  assertWriteControlAllowed("Codex config template save");
+  const core = await loadCore();
+  return core.saveCodexConfigTemplate(validateCodexConfigTemplateDraft(template));
+});
+handleTrustedIpc("codexControl:deleteTemplate", async (_event, id) => {
+  assertWriteControlAllowed("Codex config template delete");
+  const core = await loadCore();
+  return core.deleteCodexConfigTemplate(validateCodexConfigTemplateId(id));
+});
+handleTrustedIpc("codexControl:previewTemplate", async (_event, request) => {
+  const core = await loadCore();
+  return core.previewCodexConfigTemplate(validateCodexConfigTemplatePreviewRequest(request));
+});
+handleTrustedIpc("codexControl:workbench", async () => {
+  const core = await loadCore();
+  return core.getCodexConfigWorkbenchSnapshot();
+});
+handleTrustedIpc("codexControl:pickPath", async (_event, kind) => {
+  const mode = kind === "directory" ? "directory" : kind === "file" ? "file" : undefined;
+  if (!mode) throw new Error("Invalid Codex config path picker kind.");
+  const dialogOptions: OpenDialogOptions = {
+    properties: mode === "directory" ? ["openDirectory", "dontAddToRecent"] : ["openFile", "dontAddToRecent"]
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, dialogOptions) : await dialog.showOpenDialog(dialogOptions);
+  return { canceled: result.canceled, path: result.filePaths[0] };
+});
 handleTrustedIpc("codexControl:planMutation", async (_event, request) => {
   const core = await loadCore();
   const validated = validateCodexControlMutationRequest(request);
@@ -218,15 +259,14 @@ handleTrustedIpc("codexControl:planMutation", async (_event, request) => {
     highRiskConfirmationToken: undefined
   });
   if (unconfirmedPlan.highRisk && validated.confirmedHighRisk) {
+    const confirmedByMain = await confirmHighRiskCodexControlMutation(validated);
+    if (!confirmedByMain) return unconfirmedPlan;
     const confirmedPlan = await core.planCodexControlMutation({
       ...validated,
       confirmedHighRisk: true,
       highRiskConfirmationToken: undefined
     });
     if (confirmedPlan.blockers.length > 0) return confirmedPlan;
-    if (!(await confirmHighRiskCodexControlMutation(confirmedPlan.changedKeys, confirmedPlan.warnings))) {
-      return unconfirmedPlan;
-    }
     return {
       ...confirmedPlan,
       highRiskConfirmationToken: createHighRiskCodexControlConfirmation(validated),
@@ -680,17 +720,102 @@ async function exportSnapshot() {
 
 function appInfo() {
   const home = appHome();
+  const codexHome = process.env.CODEX_HOME?.trim() || path.join(home, ".codex");
+  const codexSqliteHome = codexSqliteHomeForAppInfo(codexHome);
+  const codexStateDbPath = firstVersionedDbPath(codexSqliteHome, /^state_(\d+)\.sqlite$/i);
+  const codexLogsDbPath = firstVersionedDbPath(codexSqliteHome, /^logs_(\d+)\.sqlite$/i);
   return {
     userData: app.getPath("userData"),
     locale: app.getLocale(),
     home,
-    codexHome: process.env.CODEX_HOME?.trim() || path.join(home, ".codex"),
+    codexHome,
+    codexSqliteHome,
+    codexStateDbPath,
+    codexLogsDbPath,
     claudeHome: process.env.CLAUDE_HOME?.trim() || path.join(home, ".claude"),
     githubUrl: "https://github.com/dwgx/AgentScope",
     actionsUrl: "https://github.com/dwgx/AgentScope/actions",
     issuesUrl: "https://github.com/dwgx/AgentScope/issues",
     readmeUrl: "https://github.com/dwgx/AgentScope#readme"
   };
+}
+
+function codexSqliteHomeForAppInfo(codexRoot: string): string {
+  const configured = readTopLevelTomlString(path.join(codexRoot, "config.toml"), "sqlite_home");
+  if (configured) return resolveConfiguredPath(configured);
+  const env = process.env.CODEX_SQLITE_HOME?.trim();
+  if (env) return resolveConfiguredPath(env);
+  return codexRoot;
+}
+
+function resolveConfiguredPath(value: string): string {
+  const normalized = value.replace(/^"|"$/g, "").replaceAll("/", "\\");
+  return path.isAbsolute(normalized) ? normalized : path.resolve(process.cwd(), normalized);
+}
+
+function readTopLevelTomlString(filePath: string, key: string): string | undefined {
+  let content: string;
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size > 512 * 1024) return undefined;
+    content = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return undefined;
+  }
+  let inTopLevel = true;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = stripTomlComment(rawLine).trim();
+    if (!line) continue;
+    if (/^\[+/.test(line)) {
+      inTopLevel = false;
+      continue;
+    }
+    if (!inTopLevel) continue;
+    const match = new RegExp(`^${escapeRegExp(key)}\\s*=\\s*(.+)$`).exec(line);
+    if (!match) continue;
+    return tomlStringValue(match[1]!.trim());
+  }
+  return undefined;
+}
+
+function tomlStringValue(value: string): string | undefined {
+  const quoted = /^"((?:\\"|[^"])*)"|'([^']*)'/.exec(value);
+  if (quoted) return (quoted[1] ?? quoted[2] ?? "").replace(/\\"/g, '"').trim() || undefined;
+  return /^[^\s#]+/.exec(value)?.[0]?.trim() || undefined;
+}
+
+function stripTomlComment(line: string): string {
+  let quoted = false;
+  let quote = "";
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]!;
+    if ((char === "'" || char === '"') && line[index - 1] !== "\\") {
+      if (!quoted) {
+        quoted = true;
+        quote = char;
+      } else if (quote === char) {
+        quoted = false;
+        quote = "";
+      }
+    }
+    if (char === "#" && !quoted) return line.slice(0, index);
+  }
+  return line;
+}
+
+function firstVersionedDbPath(root: string, pattern: RegExp): string | undefined {
+  try {
+    return fs.readdirSync(root, { withFileTypes: true })
+      .flatMap((entry) => {
+        if (!entry.isFile()) return [];
+        const match = pattern.exec(entry.name);
+        if (!match) return [];
+        return [{ path: path.join(root, entry.name), version: Number(match[1] ?? 0) }];
+      })
+      .sort((left, right) => right.version - left.version || left.path.localeCompare(right.path))[0]?.path;
+  } catch {
+    return undefined;
+  }
 }
 
 function appHome(): string {
@@ -758,6 +883,8 @@ function allowedLocalPathPrefixes(): string[] {
     normalizeFsPath(agentScopeDataRoot()),
     normalizeFsPath(path.join(info.codexHome, "sessions")),
     normalizeFsPath(path.join(info.codexHome, "rollouts")),
+    normalizeFsPath(path.join(info.codexHome, "archived_sessions")),
+    normalizeFsPath(path.join(info.codexHome, "archived_rollouts")),
     normalizeFsPath(path.join(info.codexHome, "browser-profiles")),
     normalizeFsPath(path.join(info.codexHome, "sqlite")),
     normalizeFsPath(path.join(info.claudeHome, "sessions")),
@@ -837,8 +964,10 @@ async function allowedLocalPaths(): Promise<string[]> {
   addAllowedPath(paths, info.userData);
   addAllowedPath(paths, agentScopeDataRoot());
   addAllowedPath(paths, info.codexHome);
+  addAllowedPath(paths, info.codexSqliteHome);
+  addAllowedPath(paths, info.codexStateDbPath);
+  addAllowedPath(paths, info.codexLogsDbPath);
   addAllowedPath(paths, info.claudeHome);
-  addAllowedPath(paths, path.join(info.codexHome, "state_5.sqlite"));
 
   const snapshot = await buildSnapshot();
   for (const session of snapshot.sessions) {
@@ -1028,21 +1157,22 @@ async function confirmControlModeSafe(): Promise<boolean> {
   return result.response === 1;
 }
 
-async function confirmHighRiskCodexControlMutation(changedKeys: string[], warnings: string[]): Promise<boolean> {
+async function confirmHighRiskCodexControlMutation(request: CodexControlMutationRequest): Promise<boolean> {
   if (isSmoke && process.env.AGENTSCOPE_SMOKE_AUTO_CONFIRM_HIGH_RISK === "1") return true;
+  const changedKeys = request.mutations.map((mutation) => mutation.keyPath).join(", ");
   const options = {
     type: "warning" as const,
-    buttons: ["Cancel", "Save high-risk changes"],
+    buttons: ["Cancel", "Apply high-risk changes"],
     defaultId: 0,
     cancelId: 0,
     noLink: true,
-    title: "Confirm Codex Control change",
-    message: "Save high-risk Codex Control changes?",
+    title: "Confirm high-risk Codex config changes",
+    message: "Apply high-risk Codex configuration changes?",
     detail: [
-      changedKeys.length ? `Keys: ${changedKeys.join(", ")}` : undefined,
-      warnings.length ? `Warnings: ${warnings.join("\n")}` : undefined,
-      "AgentScope will write only allowlisted Codex config keys and record a backup plus journal."
-    ].filter(Boolean).join("\n\n")
+      `Keys: ${changedKeys || "unknown"}`,
+      "High-risk Codex settings can allow commands to run without approval or expand local filesystem/process access.",
+      "AgentScope will only write allowlisted structured keys and will create its normal journal/backup, but this confirmation must happen in the main process."
+    ].join("\n")
   };
   const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
   return result.response === 1;
@@ -1207,9 +1337,13 @@ function validateCodexControlMutationRequest(value: unknown): CodexControlMutati
       rawValue !== null &&
       typeof rawValue !== "string" &&
       typeof rawValue !== "number" &&
-      typeof rawValue !== "boolean"
+      typeof rawValue !== "boolean" &&
+      !Array.isArray(rawValue)
     ) {
       throw new Error("Invalid Codex control mutation value.");
+    }
+    if (Array.isArray(rawValue) && rawValue.some((entry) => typeof entry !== "string" || entry.length > 200)) {
+      throw new Error("Invalid Codex control mutation array value.");
     }
     if (typeof rawValue === "string" && rawValue.length > 200) {
       throw new Error("Codex control mutation value is too long.");
@@ -1217,7 +1351,8 @@ function validateCodexControlMutationRequest(value: unknown): CodexControlMutati
     if (typeof rawValue === "number" && !Number.isFinite(rawValue)) {
       throw new Error("Codex control mutation number must be finite.");
     }
-    return { itemId, keyPath, value: rawValue };
+    const comment = typeof item.comment === "string" ? item.comment.trim().slice(0, 160) : undefined;
+    return { itemId, keyPath, value: rawValue, ...(comment ? { comment } : {}) };
   });
   return {
     expectedSha256: request.expectedSha256,
@@ -1225,6 +1360,94 @@ function validateCodexControlMutationRequest(value: unknown): CodexControlMutati
     highRiskConfirmationToken: typeof request.highRiskConfirmationToken === "string" ? request.highRiskConfirmationToken : undefined,
     mutations
   };
+}
+
+function validateCodexConfigTemplatePreviewRequest(value: unknown): CodexConfigTemplatePreviewRequest {
+  if (!value || typeof value !== "object") throw new Error("Invalid Codex config template preview request.");
+  const request = value as Partial<CodexConfigTemplatePreviewRequest>;
+  const selectedItemIds = Array.isArray(request.selectedItemIds)
+    ? request.selectedItemIds.map((item) => asTemplateItemId(item)).slice(0, 32)
+    : undefined;
+  if (request.template !== undefined) {
+    return {
+      template: validateCodexConfigTemplateDraft(request.template),
+      ...(selectedItemIds ? { selectedItemIds } : {})
+    };
+  }
+  return {
+    templateId: validateCodexConfigTemplateId(request.templateId),
+    ...(selectedItemIds ? { selectedItemIds } : {})
+  };
+}
+
+function validateCodexConfigTemplateDraft(value: unknown): CodexConfigTemplateDraft {
+  if (!value || typeof value !== "object") throw new Error("Invalid Codex config template.");
+  const draft = value as Partial<CodexConfigTemplateDraft>;
+  const id = draft.id === undefined ? undefined : validateOptionalTemplateId(draft.id);
+  const name = asString(draft.name, "Codex config template name").trim();
+  if (!name || name.length > 80) throw new Error("Invalid Codex config template name.");
+  const description = draft.description === undefined ? undefined : asString(draft.description, "Codex config template description").trim().slice(0, 240);
+  if (!Array.isArray(draft.items) || draft.items.length < 1 || draft.items.length > 32) {
+    throw new Error("Invalid Codex config template item count.");
+  }
+  const items = draft.items.map((item) => {
+    if (!item || typeof item !== "object") throw new Error("Invalid Codex config template item.");
+    const raw = item as unknown as Record<string, unknown>;
+    const itemId = asTemplateItemId(raw.itemId);
+    const keyPath = asTemplateKeyPath(raw.keyPath);
+    const value = raw.value;
+    if (
+      value !== null &&
+      typeof value !== "string" &&
+      typeof value !== "number" &&
+      typeof value !== "boolean" &&
+      !Array.isArray(value)
+    ) {
+      throw new Error("Invalid Codex config template item value.");
+    }
+    if (Array.isArray(value) && value.some((entry) => typeof entry !== "string" || entry.length > 200)) {
+      throw new Error("Invalid Codex config template item array value.");
+    }
+    if (typeof value === "string" && value.length > 200) throw new Error("Codex config template item value is too long.");
+    if (typeof value === "number" && !Number.isFinite(value)) throw new Error("Codex config template item number must be finite.");
+    const comment = typeof raw.comment === "string" ? raw.comment.trim().slice(0, 160) : undefined;
+    return {
+      itemId,
+      keyPath,
+      value,
+      defaultSelected: raw.defaultSelected !== false,
+      ...(comment ? { comment } : {})
+    };
+  });
+  return { ...(id ? { id } : {}), name, ...(description ? { description } : {}), items };
+}
+
+function validateOptionalTemplateId(value: unknown): string {
+  if (typeof value !== "string" || !/^(?:custom\.)?[A-Za-z0-9][A-Za-z0-9._-]{1,95}$/.test(value)) {
+    throw new Error("Invalid Codex config template id.");
+  }
+  return value.startsWith("custom.") ? value : `custom.${value}`;
+}
+
+function validateCodexConfigTemplateId(value: unknown): string {
+  if (typeof value !== "string" || !/^(?:builtin|custom)\.[A-Za-z0-9][A-Za-z0-9._-]{1,95}$/.test(value)) {
+    throw new Error("Invalid Codex config template id.");
+  }
+  return value;
+}
+
+function asTemplateItemId(value: unknown): string {
+  if (typeof value !== "string" || !/^config\.[A-Za-z0-9_.-]{1,120}$/.test(value)) {
+    throw new Error("Invalid Codex config template item id.");
+  }
+  return value;
+}
+
+function asTemplateKeyPath(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_.-]{1,120}$/.test(value)) {
+    throw new Error("Invalid Codex config template key path.");
+  }
+  return value;
 }
 
 function validateCodexControlSurfaceId(value: unknown): string {

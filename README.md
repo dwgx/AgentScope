@@ -26,11 +26,19 @@ and React/TypeScript renderer for the control surface.
   `Get-Process` when Windows exposes it.
 - Parses Claude session PID files from `%USERPROFILE%\.claude\sessions`.
 - Resolves Claude transcripts under `%USERPROFILE%\.claude\projects`.
-- Reads Codex `%USERPROFILE%\.codex\state_5.sqlite`.
-- Scans Codex rollout JSONL under `%USERPROFILE%\.codex\sessions`.
+- Reads Codex versioned SQLite stores such as
+  `%USERPROFILE%\.codex\state_*.sqlite` and `logs_*.sqlite`, including
+  `CODEX_SQLITE_HOME` / `sqlite_home` resolution.
+- Scans Codex rollout JSONL under `%USERPROFILE%\.codex\sessions`,
+  `%USERPROFILE%\.codex\rollouts`, and archived rollout roots.
 - Inventories safe Codex control surfaces such as config modes, MCP summary,
   rules, user skills, archives, memories, browser/computer-use state, and
   protected auth metadata.
+- Applies structured Codex config changes with backup, mutation journal, atomic
+  write, read-back verification, and clear new-session-effect warnings.
+- Shows current Codex config, templates, MCP server child fields, and
+  unverified advanced scalar keys without treating heuristics as official
+  configuration facts.
 - Labels Codex-launched MCP helper processes with evidence-backed identities
   such as Playwright, IDA Pro, or Model Context Protocol package names without
   reading MCP payloads.
@@ -154,6 +162,10 @@ Current behavior:
   deleted.
 - Never imports or deletes credentials, auth files, global settings, plugins,
   skills, rules, or full global history as a session side effect.
+- Does not raw-edit `config.toml`; Codex config changes go through structured
+  controls, high-risk confirmation, atomic write, and read-back verification.
+- Treats unknown Codex config keys as unverified advanced settings. Sensitive,
+  complex, duplicate, or unsafe TOML remains blocked/read-only.
 - Electron main only opens AgentScope-owned text evidence such as journals,
   manifests, and redacted exports. Transcripts, histories, logs, executables,
   scripts, SQLite/DB files, native modules, credentials, auth, config, plugins,

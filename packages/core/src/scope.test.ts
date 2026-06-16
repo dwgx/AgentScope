@@ -257,11 +257,21 @@ describe("scope confidence", () => {
               commandLine: String.raw`python worker.py`,
               agent: "unknown",
               evidence: []
+            },
+            {
+              pid: 303,
+              ppid: 302,
+              processName: "python.exe",
+              executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
+              commandLine: String.raw`python child_worker.py`,
+              agent: "unknown",
+              evidence: []
             }
           ])
       });
 
       const child = snapshot.processes.find((process) => process.pid === 302);
+      const grandchild = snapshot.processes.find((process) => process.pid === 303);
       expect(child).toMatchObject({
         processRole: "codex_mcp_tool",
         displayTitle: "MCP Tool / IDA Pro",
@@ -273,6 +283,17 @@ describe("scope confidence", () => {
         }
       });
       expect(child?.mcp?.evidence.map((item) => item.source)).toContain("process.mcp.parent_tree");
+      expect(grandchild).toMatchObject({
+        processRole: "codex_mcp_tool",
+        displayTitle: "MCP Tool / IDA Pro",
+        mcp: {
+          displayName: "IDA Pro",
+          serverKind: "ida_pro",
+          configSource: "process_only",
+          confidence: "heuristic"
+        }
+      });
+      expect(grandchild?.mcp?.evidence.map((item) => item.source)).toContain("process.mcp.parent_tree");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -392,6 +413,158 @@ describe("scope confidence", () => {
       expect(snapshot.processes[0]?.mcp?.serverName).toBeUndefined();
       expect(snapshot.processes[0]?.mcp?.configSource).toBe("process_only");
       expect(snapshot.processes[0]?.evidence.map((item) => item.source)).not.toContain("process.mcp.config");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("promotes Codex helpers to MCP tools when they match a configured server", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-config-promotion-"));
+    try {
+      const configPath = join(home, ".codex", "config.toml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(
+        configPath,
+        [
+          "[mcp_servers.debugger-router]",
+          'command = "node"',
+          'args = ["D:\\\\Tool\\\\debugger\\\\router.mjs"]',
+          "enabled = true",
+          ""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 100,
+              processName: "codex.exe",
+              commandLine: "codex",
+              agent: "codex",
+              evidence: []
+            },
+            {
+              pid: 404,
+              ppid: 100,
+              processName: "node.exe",
+              commandLine: String.raw`node D:\Tool\debugger\router.mjs`,
+              agent: "codex",
+              evidence: []
+            }
+          ])
+      });
+
+      const process = snapshot.processes.find((entry) => entry.pid === 404);
+      expect(process).toMatchObject({
+        processRole: "codex_mcp_tool",
+        displayTitle: "MCP Tool / Debugger Router",
+        mcp: {
+          serverName: "debugger-router",
+          configSource: "user_config",
+          configTable: "mcp_servers.debugger-router",
+          confidence: "heuristic"
+        }
+      });
+      expect(process?.evidence.map((item) => item.source)).toContain("process.role.mcp.config");
+      expect(process?.evidence.map((item) => item.source)).toContain("process.mcp.config");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("promotes Codex-launched MCP wrappers when the configured package token matches", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-wrapper-promotion-"));
+    try {
+      const configPath = join(home, ".codex", "config.toml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(
+        configPath,
+        [
+          "[mcp_servers.filesystem]",
+          'command = "npx"',
+          'args = ["-y", "@modelcontextprotocol/server-filesystem", "D:\\\\Project"]',
+          ""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 100,
+              processName: "codex.exe",
+              commandLine: "codex",
+              agent: "codex",
+              evidence: []
+            },
+            {
+              pid: 406,
+              ppid: 100,
+              processName: "cmd.exe",
+              commandLine: String.raw`C:\Windows\System32\cmd.exe /d /s /c npx -y @modelcontextprotocol/server-filesystem D:\Project`,
+              agent: "unknown",
+              evidence: []
+            }
+          ])
+      });
+
+      const process = snapshot.processes.find((entry) => entry.pid === 406);
+      expect(process).toMatchObject({
+        processRole: "codex_mcp_tool",
+        displayTitle: "MCP Tool / Filesystem",
+        mcp: {
+          serverName: "filesystem",
+          configSource: "user_config",
+          configTable: "mcp_servers.filesystem",
+          confidence: "heuristic"
+        }
+      });
+      expect(process?.evidence.map((item) => item.source)).toContain("process.role.mcp.config");
+      expect(process?.evidence.map((item) => item.source)).toContain("process.mcp.config");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("does not promote standalone helpers from MCP config without Codex tree evidence", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-config-no-tree-"));
+    try {
+      const configPath = join(home, ".codex", "config.toml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(
+        configPath,
+        [
+          "[mcp_servers.debugger-router]",
+          'command = "node"',
+          'args = ["D:\\\\Tool\\\\debugger\\\\router.mjs"]',
+          ""
+        ].join("\n"),
+        "utf8"
+      );
+
+      const snapshot = await buildSnapshot(home, {
+        includeProcesses: true,
+        processProvider: async () =>
+          annotateProcessTree([
+            {
+              pid: 405,
+              ppid: 999,
+              processName: "node.exe",
+              commandLine: String.raw`node D:\Tool\debugger\router.mjs`,
+              agent: "unknown",
+              evidence: []
+            }
+          ])
+      });
+
+      expect(snapshot.processes[0]?.processRole).toBe("unknown");
+      expect(snapshot.processes[0]?.mcp).toBeUndefined();
+      expect(snapshot.processes[0]?.evidence.map((item) => item.source)).not.toContain("process.role.mcp.config");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

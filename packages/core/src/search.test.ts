@@ -99,4 +99,25 @@ describe("search privacy", () => {
     expect(match?.matchedFields).toEqual(["preview"]);
     expect(JSON.stringify(match)).not.toContain("private AgentScope preview");
   });
+
+  it("searches compatible versioned Codex state sqlite databases", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agentscope-search-versioned-sqlite-"));
+    const codexRoot = path.join(home, ".codex");
+    fs.mkdirSync(codexRoot, { recursive: true });
+    const Database = await import("better-sqlite3");
+    const db = new Database.default(path.join(codexRoot, "state_6.sqlite"));
+    db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, preview TEXT, cwd TEXT, rollout_path TEXT, updated_at TEXT);");
+    db.prepare("INSERT INTO threads (id, title, preview, cwd, rollout_path) VALUES (?, ?, ?, ?, ?)").run(
+      "versioned-search-thread",
+      "AgentScope versioned search",
+      "private preview",
+      String.raw`D:\work`,
+      String.raw`C:\Users\dwgx1\.codex\rollouts\rollout-versioned-search-thread.jsonl`
+    );
+    db.close();
+
+    const [match] = await searchAll("versioned search", home, 5);
+    expect(match?.sessionId).toBe("versioned-search-thread");
+    expect(match?.matchedFields).toEqual(["title"]);
+  });
 });

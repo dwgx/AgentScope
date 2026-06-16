@@ -2031,6 +2031,11 @@ button.statusChip:hover {
   justify-content: flex-end;
 }
 
+.codexCenterTabs.compactTabs {
+  padding: 0 14px 10px;
+  margin-bottom: 0;
+}
+
 .codexOverviewGrid,
 .codexSummaryGrid {
   display: grid;
@@ -2160,6 +2165,10 @@ button.statusChip:hover {
   border-color: color-mix(in srgb, var(--warn) 34%, var(--border-soft));
 }
 
+.codexControlItem.risk-blocked {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border-soft));
+}
+
 .codexControlItemMeta,
 .codexControlItemControl {
   min-width: 0;
@@ -2194,6 +2203,562 @@ button.statusChip:hover {
 
 .codexControlItemControl .settingInlineActions {
   justify-content: flex-start;
+}
+
+.codexWorkbench {
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px 14px;
+}
+
+.codexWorkbenchToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.codexWorkbenchToolbar strong,
+.codexWorkbenchToolbar span,
+.codexWorkbenchToolbar code {
+  display: block;
+  min-width: 0;
+}
+
+.codexWorkbenchToolbar strong {
+  font-size: 13px;
+}
+
+.codexWorkbenchToolbar span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.codexWorkbenchToolbar code {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+
+.codexWorkbenchLayout {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr) minmax(220px, 25%);
+  gap: 12px;
+  align-items: start;
+}
+
+.codexWorkbenchNav {
+  display: grid;
+  gap: 6px;
+}
+
+.codexWorkbenchNav button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 48%, transparent);
+  color: var(--text);
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.codexWorkbenchNav button.active {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+}
+
+.codexWorkbenchNav strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codexWorkbenchNav span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.codexWorkbenchMain,
+.codexWorkbenchItems,
+.codexWorkbenchTemplates,
+.codexWorkbenchStage,
+.codexStageList {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.codexWorkbenchTemplates {
+  grid-template-columns: minmax(220px, 30%) minmax(0, 1fr);
+  align-items: start;
+}
+
+.codexTemplateList.compact {
+  max-height: 560px;
+}
+
+.codexTemplatePreview.workbench {
+  min-height: 420px;
+}
+
+.codexWorkbenchStage {
+  position: sticky;
+  top: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 58%, transparent);
+  padding: 12px;
+}
+
+.codexWorkbenchStage > strong {
+  font-size: 13px;
+}
+
+.codexMcpServerGroups {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.codexMcpServerGroup {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 46%, transparent);
+  overflow: hidden;
+}
+
+.codexMcpServerGroup.enabled {
+  border-color: color-mix(in srgb, var(--ok) 38%, var(--border-soft));
+}
+
+.codexMcpServerGroup.disabled {
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--border-soft));
+}
+
+.codexMcpServerHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+}
+
+.codexMcpServerHeader span,
+.codexMcpServerHeader strong,
+.codexMcpServerHeader em,
+.codexMcpServerHeader code {
+  display: block;
+  min-width: 0;
+}
+
+.codexMcpServerHeader strong {
+  font-size: 13px;
+}
+
+.codexMcpServerHeader em {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.codexMcpServerHeader code {
+  margin-top: 4px;
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.codexMcpServerChildren {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.codexMcpServerChildren .codexControlItem.workbench {
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.codexStageItem {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.codexStageItem code,
+.codexStageItem strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.codexStageItem.risk-high {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border-soft));
+}
+
+.codexArrayInput {
+  min-height: 64px;
+  max-height: 120px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px;
+  font-size: 12px;
+}
+
+.codexPathField {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 6px;
+  align-items: center;
+}
+
+.mcpAddStrip {
+  display: grid;
+  grid-template-columns: 18px minmax(120px, 0.7fr) minmax(160px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px dashed color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface2));
+}
+
+.mcpAddStrip input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 7px 8px;
+}
+
+.codexUnknownList {
+  display: grid;
+  gap: 8px;
+}
+
+.codexUnknownList > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 38%) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 48%, transparent);
+  padding: 10px;
+}
+
+.codexUnknownList > div.sensitive {
+  border-color: color-mix(in srgb, var(--warn) 44%, var(--border-soft));
+}
+
+.codexControlItem.workbench[data-item-id^="config.unknown."] {
+  border-color: color-mix(in srgb, var(--warn) 36%, var(--border-soft));
+  background: color-mix(in srgb, var(--warn) 5%, var(--surface2));
+}
+
+.codexUnknownList span,
+.codexUnknownList strong,
+.codexUnknownList em,
+.codexUnknownList code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.codexUnknownList span {
+  display: grid;
+  gap: 3px;
+}
+
+.codexUnknownList em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.codexTemplatePanel {
+  border-top: 1px solid var(--border-soft);
+  padding: 12px 14px;
+}
+
+.codexTemplateHeader,
+.codexTemplatePreviewBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.codexTemplateHeader strong,
+.codexTemplateHeader span,
+.codexTemplateHeader code,
+.codexTemplatePreviewBar strong,
+.codexTemplatePreviewBar span {
+  display: block;
+  min-width: 0;
+}
+
+.codexTemplateHeader strong,
+.codexTemplatePreviewBar strong {
+  font-size: 13px;
+}
+
+.codexTemplateHeader span,
+.codexTemplatePreviewBar span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.codexTemplateHeader code {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+
+.codexTemplateLayout {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(230px, 30%) minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.codexTemplateList,
+.codexTemplateRows {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.codexTemplateList {
+  position: sticky;
+  top: 10px;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.codexTemplateGroup {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.codexTemplateGroup > span {
+  color: var(--muted2);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.codexTemplateCard {
+  min-width: 0;
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 56%, transparent);
+  color: var(--text);
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.codexTemplateCard:hover,
+.codexTemplateCard.active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+}
+
+.codexTemplateCard:active {
+  transform: translateY(1px);
+}
+
+.codexTemplateIcon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.codexTemplateCard > span:not(.codexTemplateIcon),
+.codexTemplateCard strong,
+.codexTemplateCard em {
+  min-width: 0;
+}
+
+.codexTemplateCard strong {
+  display: block;
+  font-size: 12px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codexTemplateCard em {
+  display: -webkit-box;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.codexTemplatePreview {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 34%, transparent);
+  padding: 12px;
+}
+
+.codexTemplateCustomBar {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.65fr) minmax(200px, 1fr);
+  gap: 8px;
+}
+
+.codexTemplateCustomBar input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--control) 76%, var(--surface));
+  color: var(--text);
+  padding: 0 9px;
+  outline: none;
+}
+
+.codexTemplateCustomBar input:focus {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.codexTemplateRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(150px, 210px) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 66%, transparent);
+  padding: 10px;
+}
+
+.codexTemplateRow[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.codexTemplateRow.risk-high {
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--border-soft));
+}
+
+.codexTemplateRow input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.codexTemplateRowMain,
+.codexTemplateValues,
+.codexTemplateValues span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.codexTemplateRowMain strong,
+.codexTemplateRowMain em,
+.codexTemplateRowMain code,
+.codexTemplateRowMain small,
+.codexTemplateValues em,
+.codexTemplateValues strong {
+  min-width: 0;
+  display: block;
+}
+
+.codexTemplateRowMain strong {
+  font-size: 12px;
+}
+
+.codexTemplateRowMain em,
+.codexTemplateRowMain small {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.codexTemplateRowMain code {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.codexTemplateValues {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.codexTemplateValues span {
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface2) 55%, transparent);
+  padding: 5px 7px;
+}
+
+.codexTemplateValues em {
+  color: var(--muted2);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.codexTemplateValues strong {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 .codexModePanel {
@@ -2559,6 +3124,11 @@ button.statusChip:hover {
 
 @container (max-width: 899px) {
   .codexCenterTabs,
+  .codexTemplateHeader,
+  .codexTemplatePreviewBar,
+  .codexTemplateLayout,
+  .codexTemplateRow,
+  .codexTemplateCustomBar,
   .codexControlItem,
   .codexControlHeader,
   .codexModeHeader,
@@ -2567,10 +3137,17 @@ button.statusChip:hover {
   }
 
   .codexControlItemControl .settingInlineActions,
+  .codexTemplateHeader .settingInlineActions,
+  .codexTemplatePreviewBar .settingInlineActions,
   .codexControlHeader .settingInlineActions,
   .codexModeHeader .settingInlineActions,
   .codexControlMeta .settingInlineActions {
     justify-content: flex-start;
+  }
+
+  .codexTemplateList {
+    position: static;
+    max-height: 260px;
   }
 
   .codexCenterTabs .segmented {
@@ -3623,6 +4200,166 @@ button.statusChip:hover {
   animation: spin 1s linear infinite;
 }
 
+.codexApplyOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #111827 32%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.codexApplyModal {
+  width: min(720px, calc(100vw - 36px));
+  max-height: min(680px, calc(100vh - 42px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, white);
+  box-shadow: 0 24px 70px color-mix(in srgb, #111827 28%, transparent);
+  padding: 14px;
+}
+
+.codexApplyHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.codexApplyHeader strong,
+.codexApplyHeader span {
+  display: block;
+  min-width: 0;
+}
+
+.codexApplyHeader strong {
+  font-size: 14px;
+}
+
+.codexApplyHeader span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.codexApplyBody {
+  min-height: 320px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.codexApplyStatus {
+  display: grid;
+  place-items: center;
+  align-self: start;
+  width: 82px;
+  height: 82px;
+  border: 1px solid var(--border-soft);
+  border-radius: 50%;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface2));
+}
+
+.codexApplyStatus > span {
+  display: grid;
+  place-items: center;
+}
+
+.codexApplyStatus.writing {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--border-soft));
+}
+
+.codexApplyStatus.success {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 48%, var(--border-soft));
+  background: color-mix(in srgb, var(--ok) 10%, var(--surface2));
+}
+
+.codexApplyStatus.error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--border-soft));
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface2));
+}
+
+.codexApplyCode {
+  min-width: 0;
+  height: clamp(240px, 42vh, 360px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, #0f172a 92%, var(--surface));
+  color: #d7e0ed;
+  padding: 12px;
+}
+
+.codexApplyLine {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  opacity: 1;
+  transform: translateY(0);
+  border-left: 2px solid transparent;
+  padding-left: 6px;
+  transition: border-color 180ms ease, background 180ms ease;
+}
+
+.codexApplyLine.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.codexApplyLine[data-active="true"] {
+  border-left-color: color-mix(in srgb, var(--accent) 72%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.codexApplyLine span {
+  color: #94a3b8;
+  text-align: right;
+  user-select: none;
+}
+
+.codexApplyLine code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.codexApplyLine.ok code,
+.codexApplyLine.ok span {
+  color: #86efac;
+}
+
+.codexApplyLine.warn code,
+.codexApplyLine.warn span,
+.codexApplyLine.writing code,
+.codexApplyLine.writing span {
+  color: #facc15;
+}
+
+.codexApplyLine.danger code,
+.codexApplyLine.danger span {
+  color: #fca5a5;
+}
+
+.codexApplyPath {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .animatedPane {
   animation: fadeSlide 180ms ease both;
 }
@@ -3680,6 +4417,31 @@ button.statusChip:hover {
 
   .relationFlow > .arrow {
     display: none;
+  }
+
+  .codexWorkbenchLayout,
+  .codexWorkbenchTemplates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .codexWorkbenchNav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .codexWorkbenchStage {
+    position: static;
+  }
+
+  .codexControlItem {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .codexApplyBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .codexApplyStatus {
+    justify-self: center;
   }
 }
 
@@ -4013,6 +4775,17 @@ button.statusChip:hover {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes codexApplyIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 

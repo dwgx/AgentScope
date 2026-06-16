@@ -555,6 +555,13 @@ export const enUS = {
       emptyDetail: "Choose a Codex config surface to inspect evidence or edit a backed-up document.",
       save: "Save",
       controlSaved: "Codex control saved",
+      verification: "Write verification",
+      verificationStatus: {
+        passed: "read-back matched",
+        failed: "read-back failed"
+      },
+      effectiveScope: "Effective scope",
+      newSessionEffect: "Written to config.toml; newly started Codex sessions usually need to reload it.",
       saved: "Saved. No prior file existed, so no backup was needed.",
       savedWithBackup: "Saved. Backup: {{path}}",
       backupBeforeSave: "Saving checks the sha256 and writes a backup under ~/.agentscope first.",
@@ -584,6 +591,7 @@ export const enUS = {
         unset: "unset"
       },
       tabs: {
+        templates: "Templates",
         overview: "Overview",
         models: "Models",
         safety: "Safety",
@@ -620,16 +628,110 @@ export const enUS = {
         sensitiveConfigBlocked: "Sensitive config keys were detected; raw editing is blocked.",
         highRiskConfirm: "High-risk setting; execution requires explicit confirmation.",
         archivedCountUnreadable: "Could not read archived thread count from state_5.sqlite.",
-        sqliteMetadataUnreadable: "Could not open this SQLite database read-only for metadata."
+        sqliteMetadataUnreadable: "Could not open this SQLite database read-only for metadata.",
+        complexTomlReplace: "The current value is complex TOML and may be replaced by a scalar."
       },
       overview: {
         codexHome: "Official CODEX_HOME root. AgentScope inventories metadata only.",
         sqliteHome: "SQLite state root after config/env resolution."
       },
+      templates: {
+          title: "Codex parameter templates",
+          detail:
+            "Reads local config.toml first, previews exact key patches, then applies only selected allowlisted scalar keys through backup, journal, high-risk confirmation, and atomic write. Unknown advanced config is preserved; unsafe matches are blocked.",
+          list: "Codex parameter templates",
+          preview: "Template preview",
+          previewEmpty: "Select a template to preview its config.toml changes.",
+          apply: "Apply selected",
+          current: "current",
+        templateValue: "template",
+        changed: "changed",
+        same: "same",
+        footer: "{{count}} selected changed key(s): {{keys}}",
+        customName: "Custom template name",
+        customDescription: "Custom template description",
+        saveCustom: "Save selected as template",
+          delete: "Delete custom template",
+          savedCustom: "Custom Codex template saved.",
+          deletedCustom: "Custom Codex template deleted.",
+          applied: "Codex template applied",
+          customEmpty: "No custom templates yet. Save selected rows from a preview to create one.",
+          group: {
+            current: "Current",
+            builtin: "Built-in",
+            custom: "Custom"
+          },
+          currentTemplate: {
+            name: "Current config",
+            description:
+              "Read-only snapshot of recognized config.toml values. Unknown advanced settings are preserved but not copied."
+          },
+          builtin: {
+          "yolo-full-access": {
+            name: "YOLO / Full Access",
+            description: "Maximum local autonomy: never ask, danger-full-access sandbox, elevated Windows sandbox, live web search, xhigh reasoning, and multi-agent."
+          },
+          "safe-workspace": {
+            name: "Safe Workspace",
+            description: "Workspace-write sandbox with on-request approvals, cached search, and user review."
+          },
+          "readonly-audit": {
+            name: "Read-only Audit",
+            description: "Read-only sandbox, on-request approvals, cached search, high reasoning, and xhigh plan reasoning."
+          },
+          "deep-planning": {
+            name: "Deep Planning",
+            description: "xhigh implementation and plan reasoning without permission changes."
+          },
+          "live-research": {
+            name: "Live Research",
+            description: "Live web search with high reasoning, without changing approval or sandbox permissions."
+          }
+        }
+      },
+      workbench: {
+        title: "Codex configuration workbench",
+        detail: "Edit current config state first. Templates only stage changes; atomic write applies selected staged items.",
+        sections: "Codex configuration sections",
+        section: {
+          current: "Current",
+          mcp: "MCP servers",
+          templates: "Templates",
+          unknown: "Unknown"
+        },
+        enabled: "enabled",
+        disabled: "not enabled",
+        enable: "Enable",
+        reset: "Reset",
+        staged: "Staged changes",
+        stagedDetail: "{{count}} selected change(s)",
+        stageTemplate: "Stage template",
+        templateStaged: "Template changes staged. Review them before applying.",
+        mcpName: "server-name",
+        mcpCommand: "command",
+        stageMcp: "Stage MCP",
+        line: "line {{line}}",
+        noUnknown: "No unknown config entries found.",
+        editableUnknown: "{{count}} unknown scalar item(s) are shown above as unverified advanced settings. They can be edited, but AgentScope cannot prove Codex uses them.",
+        noReadOnlyUnknown: "No remaining unknown entries need read-only display for complex or sensitive values.",
+      },
+      applyModal: {
+        animating: "Planning config patch",
+        writing: "Atomic write in progress",
+        success: "Config applied",
+        error: "Config apply failed",
+        detail: "AgentScope is applying only matched structured settings and preserving unknown config.",
+        atomicWrite: "writing temp file, fsync, rename, journal",
+        verified: "read-back verification passed for {{count}} key(s)"
+      },
       items: {
         model: {
           label: "Default model",
           detail: "Top-level Codex model used when CLI, app, profile, or project settings do not override it."
+        },
+        model_provider: {
+          label: "Model provider",
+          detail: "Provider id selected from model_providers. Recommended ids are suggestions; custom providers are allowed."
         },
         review_model: {
           label: "Review model",
@@ -642,6 +744,38 @@ export const enUS = {
         plan_mode_reasoning_effort: {
           label: "Plan reasoning",
           detail: "Plan mode reasoning override; model still inherits the default model."
+        },
+        model_reasoning_summary: {
+          label: "Reasoning summary",
+          detail: "Reasoning summary policy for supported Responses API models."
+        },
+        model_verbosity: {
+          label: "Model verbosity",
+          detail: "Text verbosity for GPT-5 family models when the provider uses the Responses API."
+        },
+        model_supports_reasoning_summaries: {
+          label: "Force reasoning summaries",
+          detail: "Force-enable or disable reasoning summaries for the current model."
+        },
+        project_doc_max_bytes: {
+          label: "Project doc max bytes",
+          detail: "Maximum bytes from AGENTS.md/project instructions embedded into first-turn instructions."
+        },
+        openai_base_url: {
+          label: "OpenAI base URL",
+          detail: "Base URL override for the built-in OpenAI provider."
+        },
+        model_providers_OpenAI_name: {
+          label: "OpenAI provider name",
+          detail: "Display name for a custom model provider table named OpenAI."
+        },
+        model_providers_OpenAI_base_url: {
+          label: "OpenAI provider base URL",
+          detail: "Base URL for the custom model provider table named OpenAI."
+        },
+        model_providers_OpenAI_requires_openai_auth: {
+          label: "OpenAI provider auth",
+          detail: "Use OpenAI authentication for the custom model provider table named OpenAI."
         },
         approval_policy: {
           label: "Approval policy",
@@ -678,6 +812,18 @@ export const enUS = {
         features_multi_agent: {
           label: "Multi-agent feature",
           detail: "Feature flag for Codex multi-agent/subagent support when present in this Codex build."
+        },
+        features_goals: {
+          label: "Goals feature",
+          detail: "Feature flag for Codex Goal mode when supported by this Codex build."
+        },
+        features_memories: {
+          label: "Memories feature",
+          detail: "Enable Codex Memories globally. AgentScope still does not read memory bodies."
+        },
+        features_js_repl: {
+          label: "JS REPL feature",
+          detail: "Feature flag for the JavaScript REPL capability when present in this Codex build."
         },
         memories_generate_memories: {
           label: "Generate memories",

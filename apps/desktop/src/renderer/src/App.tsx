@@ -29,6 +29,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { useTranslation } from "react-i18next";
+import { MotionConfig } from "motion/react";
 import type { LanguageSetting } from "@agentscope/i18n";
 import type {
   AgentKind,
@@ -44,6 +45,10 @@ import type {
   SessionRestoreResult,
   ScopeSnapshot,
   SessionCandidate,
+  CodexConfigTemplateDraft,
+  CodexConfigTemplateList,
+  CodexConfigTemplatePreview,
+  CodexConfigWorkbenchSnapshot,
   CodexControlDocument,
   CodexControlCenterSnapshot,
   CodexControlMutationRequest,
@@ -56,9 +61,12 @@ import { AgentPill, Badge, ConfidenceBadge } from "./components/common.js";
 import { ActionButton, MiniSegmentedControl, SearchableComboBox, SegmentedControl, SwitchControl, ToolbarControl } from "./components/controls.js";
 import {
   CodexControlCenterPanel,
+  CodexConfigWorkbenchPanel,
+  CodexApplyRunModal,
+  codexWorkbenchMutationsFromDraft,
   CodexControlDetail,
   CodexModeConfigPanel,
-  codexControlDraftFromCenter,
+  codexCombinedDraftFromSnapshots,
   codexControlMutationsFromDraft,
   codexModeDraftFromSnapshot,
   codexModePatchFromDraft,
@@ -67,6 +75,7 @@ import {
   localizedCodexSurfaceLabel,
   type CodexControlDraftMap,
   type CodexControlTab,
+  type CodexApplyModalState,
   type CodexModeDraft
 } from "./components/codexControl.js";
 import { EvidenceList, Field, FieldGroup, InspectorHeader } from "./components/inspector.js";
@@ -209,6 +218,9 @@ interface AppInfo {
   locale: string;
   home: string;
   codexHome: string;
+  codexSqliteHome?: string | undefined;
+  codexStateDbPath?: string | undefined;
+  codexLogsDbPath?: string | undefined;
   claudeHome: string;
   githubUrl: string;
   actionsUrl: string;
@@ -1113,7 +1125,8 @@ function App() {
   );
 
   return (
-    <main
+    <MotionConfig reducedMotion={settings.motion === "off" ? "always" : settings.motion === "full" ? "never" : "user"}>
+      <main
       className="shell"
       data-theme={settings.theme}
       data-density={settings.density}
@@ -1342,13 +1355,14 @@ function App() {
         </div>
       </section>
       {notice && <Notification notice={notice} onClose={() => setNotice(null)} onRevealPath={revealPath} />}
-      {confirmDialog && (
-        <ConfirmDialog
-          value={confirmDialog}
-          onClose={() => setConfirmDialog(null)}
-        />
-      )}
-    </main>
+        {confirmDialog && (
+          <ConfirmDialog
+            value={confirmDialog}
+            onClose={() => setConfirmDialog(null)}
+          />
+        )}
+      </main>
+    </MotionConfig>
   );
 }
 
@@ -1749,11 +1763,12 @@ function TopMenus(props: {
         <MenuItem
           icon={<Database size={15} />}
           label={t("menu.trace.revealCodexSqlite")}
-          disabled={!props.appInfo?.codexHome}
+          disabled={!props.appInfo?.codexStateDbPath && !props.appInfo?.codexSqliteHome && !props.appInfo?.codexHome}
           onClick={() =>
             run(
               () =>
-                props.appInfo && props.onRevealPath(`${props.appInfo.codexHome}\\state_5.sqlite`)
+                props.appInfo &&
+                props.onRevealPath(props.appInfo.codexStateDbPath ?? props.appInfo.codexSqliteHome ?? props.appInfo.codexHome)
             )
           }
         />
@@ -3018,11 +3033,19 @@ function SettingsPanel(props: {
   );
   const [codexControl, setCodexControl] = useState<CodexControlSnapshot | null>(null);
   const [codexCenter, setCodexCenter] = useState<CodexControlCenterSnapshot | null>(null);
+  const [codexWorkbench, setCodexWorkbench] = useState<CodexConfigWorkbenchSnapshot | null>(null);
   const [codexControlLoading, setCodexControlLoading] = useState(false);
   const [codexControlError, setCodexControlError] = useState<string | undefined>();
-  const [codexControlTab, setCodexControlTab] = useState<CodexControlTab>(smokeInitialCodexControlTab() ?? "overview");
+  const [codexControlTab, setCodexControlTab] = useState<CodexControlTab>(smokeInitialCodexControlTab() ?? "templates");
   const [codexCenterDraft, setCodexCenterDraft] = useState<CodexControlDraftMap>({});
   const [codexCenterStatus, setCodexCenterStatus] = useState<string | undefined>();
+  const [codexTemplates, setCodexTemplates] = useState<CodexConfigTemplateList | null>(null);
+  const [selectedCodexTemplateId, setSelectedCodexTemplateId] = useState<string | undefined>();
+  const [selectedCodexTemplateItemIds, setSelectedCodexTemplateItemIds] = useState<string[]>([]);
+  const [codexTemplatePreview, setCodexTemplatePreview] = useState<CodexConfigTemplatePreview | null>(null);
+  const [codexTemplateStatus, setCodexTemplateStatus] = useState<string | undefined>();
+  const [codexTemplateLoading, setCodexTemplateLoading] = useState(false);
+  const [codexApplyModal, setCodexApplyModal] = useState<CodexApplyModalState | null>(null);
   const [selectedCodexSurfaceId, setSelectedCodexSurfaceId] = useState<string | undefined>();
   const [codexDocument, setCodexDocument] = useState<CodexControlDocument | null>(null);
   const [codexDraft, setCodexDraft] = useState("");
@@ -3053,16 +3076,52 @@ function SettingsPanel(props: {
     setCodexControlLoading(true);
     setCodexControlError(undefined);
     setCodexCenterStatus(undefined);
-    void Promise.all([window.agentscope.listCodexControl(), window.agentscope.getCodexControlCenter()])
-      .then(([snapshot, center]) => {
+    setCodexTemplateStatus(undefined);
+    void Promise.all([
+      window.agentscope.listCodexControl(),
+      window.agentscope.getCodexControlCenter(),
+      window.agentscope.listCodexConfigTemplates(),
+      window.agentscope.getCodexConfigWorkbench()
+    ])
+      .then(([snapshot, center, templates, workbench]) => {
         setCodexControl(snapshot);
         setCodexCenter(center);
-        setCodexCenterDraft(codexControlDraftFromCenter(center));
+        setCodexTemplates(templates);
+        setCodexWorkbench(workbench);
+        setCodexCenterDraft(codexCombinedDraftFromSnapshots(center, workbench));
         setSelectedCodexSurfaceId((current) => current ?? firstEditableSurface(snapshot)?.id ?? snapshot.surfaces[0]?.id);
+        const templateId =
+          selectedCodexTemplateId && templates.templates.some((entry) => entry.id === selectedCodexTemplateId && entry.origin !== "current")
+            ? selectedCodexTemplateId
+            : templates.templates.find((entry) => entry.origin === "builtin")?.id ?? templates.templates.find((entry) => entry.origin === "custom")?.id;
+        setSelectedCodexTemplateId(templateId);
+        if (templateId) {
+          const template = templates.templates.find((entry) => entry.id === templateId) ?? templates.templates[0];
+          const selected = selectedCodexTemplateItemIds.length
+            ? selectedCodexTemplateItemIds
+            : template?.items.filter((item) => item.defaultSelected !== false).map((item) => item.itemId) ?? [];
+          setSelectedCodexTemplateItemIds(selected);
+          refreshCodexTemplatePreview(templateId, selected);
+        }
       })
       .catch((error: unknown) => setCodexControlError(errorMessage(error)))
       .finally(() => setCodexControlLoading(false));
     refreshCodexModes();
+  };
+  const refreshCodexTemplatePreview = (templateId = selectedCodexTemplateId, selectedItemIds = selectedCodexTemplateItemIds) => {
+    if (!templateId) return;
+    setCodexTemplateLoading(true);
+    setCodexTemplateStatus(undefined);
+    void window.agentscope
+      .previewCodexConfigTemplate({ templateId, selectedItemIds })
+      .then((preview) => {
+        setCodexTemplatePreview(preview);
+        if (!selectedItemIds.length) {
+          setSelectedCodexTemplateItemIds(preview.items.filter((item) => item.selected).map((item) => item.itemId));
+        }
+      })
+      .catch((error: unknown) => setCodexTemplateStatus(errorMessage(error)))
+      .finally(() => setCodexTemplateLoading(false));
   };
   const refreshCodexModes = () => {
     setCodexModeLoading(true);
@@ -3225,7 +3284,188 @@ function SettingsPanel(props: {
       .catch((error: unknown) => setCodexModeStatus(errorMessage(error)))
       .finally(() => setCodexModeLoading(false));
   };
-  const saveCodexCenter = (confirmedHighRisk = false) => {
+  const selectCodexTemplate = (templateId: string) => {
+    const template = codexTemplates?.templates.find((entry) => entry.id === templateId);
+    const selected = template?.items.filter((item) => item.defaultSelected !== false).map((item) => item.itemId) ?? [];
+    setSelectedCodexTemplateId(templateId);
+    setSelectedCodexTemplateItemIds(selected);
+    refreshCodexTemplatePreview(templateId, selected);
+  };
+  const stageCodexTemplate = () => {
+    if (!codexTemplatePreview || !codexWorkbench) return;
+    const selected = new Set(selectedCodexTemplateItemIds);
+    const next = { ...codexCenterDraft };
+    for (const mutation of codexTemplatePreview.mutations) {
+      if (!selected.has(mutation.itemId)) continue;
+      next[mutation.itemId] = Array.isArray(mutation.value) ? [...mutation.value] : mutation.value ?? undefined;
+    }
+    setCodexCenterDraft(next);
+    setCodexTemplateStatus(t("settings.codexControl.workbench.templateStaged"));
+  };
+  const toggleCodexTemplateItem = (itemId: string, selected: boolean) => {
+    const next = selected
+      ? [...new Set([...selectedCodexTemplateItemIds, itemId])]
+      : selectedCodexTemplateItemIds.filter((entry) => entry !== itemId);
+    setSelectedCodexTemplateItemIds(next);
+    refreshCodexTemplatePreview(selectedCodexTemplateId, next);
+  };
+  const saveCustomCodexTemplate = (template: CodexConfigTemplateDraft) => {
+    if (readOnlyMode) {
+      setCodexTemplateStatus(t("settings.controlMode.readOnlyBlocked"));
+      return;
+    }
+    setCodexTemplateLoading(true);
+    setCodexTemplateStatus(undefined);
+    window.agentscope
+      .saveCodexConfigTemplate(template)
+      .then((list) => {
+        setCodexTemplates(list);
+        const saved = list.templates.find((item) => item.name === template.name && item.origin === "custom");
+        if (saved) {
+          const selected = saved.items.filter((item) => item.defaultSelected !== false).map((item) => item.itemId);
+          setSelectedCodexTemplateId(saved.id);
+          setSelectedCodexTemplateItemIds(selected);
+          refreshCodexTemplatePreview(saved.id, selected);
+        }
+        setCodexTemplateStatus(t("settings.codexControl.templates.savedCustom"));
+      })
+      .catch((error: unknown) => setCodexTemplateStatus(errorMessage(error)))
+      .finally(() => setCodexTemplateLoading(false));
+  };
+  const deleteCustomCodexTemplate = (templateId: string) => {
+    if (readOnlyMode) {
+      setCodexTemplateStatus(t("settings.controlMode.readOnlyBlocked"));
+      return;
+    }
+    setCodexTemplateLoading(true);
+    setCodexTemplateStatus(undefined);
+    window.agentscope
+      .deleteCodexConfigTemplate(templateId)
+      .then((list) => {
+        setCodexTemplates(list);
+        const nextId = list.templates[0]?.id;
+        setSelectedCodexTemplateId(nextId);
+        const selected = list.templates[0]?.items.filter((item) => item.defaultSelected !== false).map((item) => item.itemId) ?? [];
+        setSelectedCodexTemplateItemIds(selected);
+        setCodexTemplatePreview(null);
+        if (nextId) refreshCodexTemplatePreview(nextId, selected);
+        setCodexTemplateStatus(t("settings.codexControl.templates.deletedCustom"));
+      })
+      .catch((error: unknown) => setCodexTemplateStatus(errorMessage(error)))
+      .finally(() => setCodexTemplateLoading(false));
+  };
+  const runCodexApplyAnimation = async (request: CodexControlMutationRequest) => {
+    setCodexApplyModal({ phase: "animating", mutations: request.mutations, activeIndex: -1 });
+    await delay(props.settings.motion === "off" ? 0 : 120);
+    setCodexApplyModal({
+      phase: "animating",
+      mutations: request.mutations,
+      activeIndex: request.mutations.length - 1
+    });
+    await delay(props.settings.motion === "off" ? 0 : Math.min(980, 300 + request.mutations.length * 82));
+    setCodexApplyModal({ phase: "writing", mutations: request.mutations, activeIndex: request.mutations.length - 1 });
+    try {
+      const result = await window.agentscope.executeCodexControlMutation(request);
+      setCodexApplyModal({
+        phase: "success",
+        mutations: request.mutations,
+        activeIndex: request.mutations.length - 1,
+        resultPath: result.path,
+        verification: result.verification,
+        effectiveWarnings: result.effectiveWarnings
+      });
+      window.setTimeout(
+        () => setCodexApplyModal((current) => (current?.phase === "success" ? null : current)),
+        props.settings.motion === "off" ? 700 : 1800
+      );
+      return result;
+    } catch (error) {
+      setCodexApplyModal({
+        phase: "error",
+        mutations: request.mutations,
+        activeIndex: request.mutations.length - 1,
+        error: errorMessage(error)
+      });
+      throw error;
+    }
+  };
+  const applyCodexWorkbench = () => {
+    if (!codexWorkbench) return;
+    if (readOnlyMode) {
+      setCodexTemplateStatus(t("settings.controlMode.readOnlyBlocked"));
+      return;
+    }
+    const mutations = codexWorkbenchMutationsFromDraft(codexCenterDraft, codexWorkbench);
+    if (!mutations.length) {
+      setCodexTemplateStatus(t("settings.codexControl.noChanges"));
+      return;
+    }
+    const request: CodexControlMutationRequest = {
+      expectedSha256: codexWorkbench.configSha256,
+      confirmedHighRisk: true,
+      mutations
+    };
+    setCodexTemplateLoading(true);
+    setCodexTemplateStatus(undefined);
+    window.agentscope
+      .planCodexControlMutation(request)
+      .then((plan) => {
+        if (plan.blockers.length > 0) {
+          throw new Error(plan.blockers.join("; "));
+        }
+        return runCodexApplyAnimation({
+          ...request,
+          highRiskConfirmationToken: plan.highRiskConfirmationToken
+        });
+      })
+      .then((result) => {
+        if (!result) return;
+        props.onNotice({
+          message: t("settings.codexControl.templates.applied"),
+          items: [
+            { label: t("settings.codexControl.changedKeys"), value: (result.changedKeys ?? []).join(", "), tone: "ok" },
+            ...(result.verification
+              ? [
+                  {
+                    label: t("settings.codexControl.verification"),
+                    value: t(`settings.codexControl.verificationStatus.${result.verification.status}`),
+                    tone: result.verification.status === "passed" ? ("ok" as const) : ("warn" as const)
+                  }
+                ]
+              : []),
+            ...(result.effectiveWarnings?.length
+              ? [{ label: t("settings.codexControl.effectiveScope"), value: t("settings.codexControl.newSessionEffect"), tone: "warn" as const }]
+              : []),
+            { label: "Config", value: compactPath(result.path) ?? result.path, tone: "ok" },
+            ...(result.backupPath
+              ? [{ label: "Backup", value: result.backupPath, path: result.backupPath, tone: "ok" as const }]
+              : []),
+            ...(result.journalPath
+              ? [{ label: "Journal", value: result.journalPath, path: result.journalPath, tone: "ok" as const }]
+              : [])
+          ],
+          actions: [
+            ...(result.journalPath ? props.noticePathActions(result.journalPath, "journal") : []),
+            ...(result.backupPath ? props.noticePathActions(result.backupPath, "backup") : [])
+          ],
+          ttlMs: 30000
+        });
+        setCodexTemplateStatus(
+          result.journalPath
+            ? t("settings.codexControl.savedWithJournal", { path: result.journalPath })
+            : t("settings.codexControl.saved")
+        );
+        setCodexCenterDraft({});
+        refreshCodexControl();
+      })
+      .catch((error: unknown) => {
+        const message = errorMessage(error);
+        setCodexApplyModal((current) => current ? { ...current, phase: "error", error: message } : null);
+        setCodexTemplateStatus(message);
+      })
+      .finally(() => setCodexTemplateLoading(false));
+  };
+  const saveCodexCenter = () => {
     if (!codexCenter) return;
     if (readOnlyMode) {
       setCodexCenterStatus(t("settings.controlMode.readOnlyBlocked"));
@@ -3238,7 +3478,7 @@ function SettingsPanel(props: {
     }
     const request: CodexControlMutationRequest = {
       expectedSha256: codexCenter.configSha256,
-      confirmedHighRisk,
+      confirmedHighRisk: true,
       mutations
     };
     setCodexControlLoading(true);
@@ -3247,22 +3487,9 @@ function SettingsPanel(props: {
       .planCodexControlMutation(request)
       .then((plan) => {
         if (plan.blockers.length > 0) {
-          if (plan.highRisk && !confirmedHighRisk && plan.blockers.some((blocker) => /confirmation/i.test(blocker))) {
-            props.onConfirm({
-              title: t("settings.codexControl.highRiskTitle"),
-              detail: t("settings.codexControl.highRiskConfirm", {
-                keys: plan.changedKeys.join(", "),
-                warnings: plan.warnings.join("\n")
-              }),
-              confirmLabel: t("settings.codexControl.confirmSave"),
-              danger: true,
-              onConfirm: () => saveCodexCenter(true)
-            });
-            return undefined;
-          }
           throw new Error(plan.blockers.join("; "));
         }
-        return window.agentscope.executeCodexControlMutation({
+        return runCodexApplyAnimation({
           ...request,
           highRiskConfirmationToken: plan.highRiskConfirmationToken
         });
@@ -3273,6 +3500,18 @@ function SettingsPanel(props: {
           message: t("settings.codexControl.controlSaved"),
           items: [
             { label: t("settings.codexControl.changedKeys"), value: (result.changedKeys ?? []).join(", "), tone: "ok" },
+            ...(result.verification
+              ? [
+                  {
+                    label: t("settings.codexControl.verification"),
+                    value: t(`settings.codexControl.verificationStatus.${result.verification.status}`),
+                    tone: result.verification.status === "passed" ? ("ok" as const) : ("warn" as const)
+                  }
+                ]
+              : []),
+            ...(result.effectiveWarnings?.length
+              ? [{ label: t("settings.codexControl.effectiveScope"), value: t("settings.codexControl.newSessionEffect"), tone: "warn" as const }]
+              : []),
             { label: "Config", value: compactPath(result.path) ?? result.path, tone: "ok" },
             ...(result.backupPath
               ? [{ label: "Backup", value: result.backupPath, path: result.backupPath, tone: "ok" as const }]
@@ -3743,7 +3982,7 @@ function SettingsPanel(props: {
               <SettingGroup title={t("settings.sections.codex")}>
                 <SettingRow
                   label={t("settings.indexing.sqliteLabel")}
-                  detail="%USERPROFILE%\\.codex\\state_5.sqlite"
+                  detail={props.appInfo?.codexStateDbPath ?? props.appInfo?.codexSqliteHome ?? "%USERPROFILE%\\.codex\\state_*.sqlite"}
                 >
                   <Badge text={t("common.status.read")} tone="ok" />
                 </SettingRow>
@@ -3759,7 +3998,7 @@ function SettingsPanel(props: {
                 </SettingRow>
                 <SettingRow
                   label={t("settings.indexing.rolloutLabel")}
-                  detail="%USERPROFILE%\\.codex\\sessions\\YYYY\\MM\\DD\\rollout-*.jsonl"
+                  detail="%USERPROFILE%\\.codex\\sessions|rollouts\\...\\rollout-*.jsonl"
                 >
                   <Badge text={t("common.status.stream")} />
                 </SettingRow>
@@ -3889,21 +4128,64 @@ function SettingsPanel(props: {
                   </div>
                 </div>
                 {codexControlError && <p className="inlineError">{codexControlError}</p>}
-                <CodexControlCenterPanel
-                  snapshot={codexCenter}
-                  surfaces={codexControl?.surfaces}
-                  draft={codexCenterDraft}
-                  tab={codexControlTab}
-                  loading={codexControlLoading}
-                  status={codexCenterStatus}
-                  readOnlyMode={readOnlyMode}
-                  onTabChange={setCodexControlTab}
-                  onDraftChange={setCodexCenterDraft}
-                  onRefresh={refreshCodexControl}
-                  onSave={() => saveCodexCenter(false)}
-                  onRevealPath={props.onRevealPath}
-                  onSelectSurface={selectCodexSurface}
-                />
+                <div className="codexCenterTabs compactTabs">
+                  <MiniSegmentedControl
+                    value={codexControlTab}
+                    values={["templates", "overview", "models", "safety", "runtime", "mcp", "skills", "storage", "files"]}
+                    label={(tab) => t(`settings.codexControl.tabs.${tab}`)}
+                    testId="codex-control-tabs"
+                    onChange={setCodexControlTab}
+                  />
+                </div>
+                {codexControlTab !== "templates" && (
+                  <CodexControlCenterPanel
+                    snapshot={codexCenter}
+                    surfaces={codexControl?.surfaces}
+                    draft={codexCenterDraft}
+                    tab={codexControlTab}
+                    loading={codexControlLoading}
+                    status={codexCenterStatus}
+                    readOnlyMode={readOnlyMode}
+                    hideTabs
+                    onTabChange={setCodexControlTab}
+                    onDraftChange={setCodexCenterDraft}
+                    onRefresh={refreshCodexControl}
+                    onSave={saveCodexCenter}
+                    onRevealPath={props.onRevealPath}
+                    onSelectSurface={selectCodexSurface}
+                  />
+                )}
+                {codexControlTab === "templates" && (
+                  <CodexConfigWorkbenchPanel
+                    snapshot={codexWorkbench}
+                    draft={codexCenterDraft}
+                    selectedTemplateId={selectedCodexTemplateId}
+                    selectedTemplateItemIds={selectedCodexTemplateItemIds}
+                    templatePreview={codexTemplatePreview}
+                    loading={codexTemplateLoading || codexControlLoading}
+                    status={codexTemplateStatus}
+                    readOnlyMode={readOnlyMode}
+                    onDraftChange={setCodexCenterDraft}
+                    onRefresh={() => {
+                      refreshCodexControl();
+                      refreshCodexTemplatePreview();
+                    }}
+                    onSelectTemplate={selectCodexTemplate}
+                    onToggleTemplateItem={toggleCodexTemplateItem}
+                    onStageTemplate={stageCodexTemplate}
+                    onSaveCustom={saveCustomCodexTemplate}
+                    onDeleteCustom={deleteCustomCodexTemplate}
+                    onApply={applyCodexWorkbench}
+                    onPickPath={(kind, itemId) => {
+                      window.agentscope
+                        .pickCodexConfigPath(kind)
+                        .then((result) => {
+                          if (!result.canceled && result.path) setCodexCenterDraft((current) => ({ ...current, [itemId]: result.path }));
+                        })
+                        .catch((error: unknown) => setCodexTemplateStatus(errorMessage(error)));
+                    }}
+                  />
+                )}
                 {codexControlTab === "models" && (
                   <CodexModeConfigPanel
                     snapshot={codexModes}
@@ -4019,6 +4301,7 @@ function SettingsPanel(props: {
           )}
         </section>
       </div>
+      <CodexApplyRunModal state={codexApplyModal} onClose={() => setCodexApplyModal(null)} />
     </>
   );
 }
@@ -6548,6 +6831,10 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return typeof value === "number" && Number.isFinite(value)
     ? Math.min(max, Math.max(min, Math.round(value)))
     : fallback;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

@@ -17,6 +17,7 @@ const views = [
   { name: "sessions", env: { AGENTSCOPE_SMOKE_VIEW: "sessions" } },
   { name: "relations", env: { AGENTSCOPE_SMOKE_VIEW: "graph" } },
   { name: "settings-codex-control", env: { AGENTSCOPE_SMOKE_VIEW: "settings", AGENTSCOPE_SMOKE_SETTINGS_SECTION: "codexControl" } },
+  { name: "codex-control-templates", env: { AGENTSCOPE_SMOKE_VIEW: "codexControl", AGENTSCOPE_SMOKE_CODEX_CONTROL_TAB: "templates" } },
   { name: "codex-control-overview", env: { AGENTSCOPE_SMOKE_VIEW: "codexControl", AGENTSCOPE_SMOKE_CODEX_CONTROL_TAB: "overview" } },
   { name: "codex-control-files", env: { AGENTSCOPE_SMOKE_VIEW: "codexControl", AGENTSCOPE_SMOKE_CODEX_CONTROL_TAB: "files" } },
   { name: "codex-control-models", env: { AGENTSCOPE_SMOKE_VIEW: "codexControl", AGENTSCOPE_SMOKE_CODEX_CONTROL_TAB: "models" } },

@@ -1,12 +1,12 @@
 # Repository Hygiene And Leak Audit
 
-Last updated: 2026-06-13.
+Last updated: 2026-06-16.
 
 This document records repository-level hygiene rules for AgentScope handoff work. It covers repository contents, generated artifacts, screenshots, and accidental sensitive data exposure. It does not replace runtime security checks in Electron main or `packages/core`.
 
 ## Current Audit Result
 
-Source: local repository inspection, artifact audit, and subagent read-only audit on 2026-06-13.
+Source: local repository inspection, artifact audit, and local verification on 2026-06-16.
 
 - No real credential/API key/PAT/JWT leak was found in tracked or untracked non-ignored files, or targeted git-history scans.
 - No tracked `node_modules`, `dist`, `out`, real `.jsonl`, or real `.sqlite` files were found.
@@ -18,6 +18,12 @@ Source: local repository inspection, artifact audit, and subagent read-only audi
 - `apps/desktop/out/builder-debug.yml` is a local Electron Builder debug file and can contain machine-local paths. It must not be included in release manifests or uploaded artifacts.
 - Some tests still use realistic Windows paths and fake tokens as fixtures. They are allowed but should be gradually migrated to clearly synthetic values.
 - Documentation should prefer `%USERPROFILE%` and `%WORKSPACE%` over real user names and project roots.
+- `motion@12.40.0` was added as a desktop runtime dependency for renderer
+  animation. Keep it in `apps/desktop/package.json` and `package-lock.json`;
+  do not vendor animation libraries or generated bundles into the repo.
+- The 2026-06-16 `npm install motion@12.40.0` run reported existing npm audit
+  vulnerabilities. Do not run broad `npm audit fix --force` as part of routine
+  handoff cleanup; treat dependency remediation as a separate reviewed change.
 
 ## Do Not Commit
 
@@ -43,6 +49,7 @@ npm run typecheck
 npm test
 npm run i18n:check
 npm run package
+npm run smoke:desktop:packaged
 npm run audit:artifacts
 git diff --check
 git status --short

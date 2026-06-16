@@ -1,6 +1,6 @@
 # AgentScope 当前项目状态与下一 Agent 工作流
 
-Last updated: 2026-06-13.
+Last updated: 2026-06-16.
 
 ## 证据来源
 
@@ -41,6 +41,11 @@ AgentScope 的目标不是做聊天 UI，也不是 Kanban。它是 Windows-only 
 当前已支持：
 
 - Codex `state_5.sqlite`、rollout JSONL、archived/session metadata、thread spawn edges、subagent/process role evidence。
+- Versioned Codex SQLite stores such as `state_*.sqlite`, `logs_*.sqlite`,
+  `goals_*.sqlite`, and `memories_*.sqlite`, with `CODEX_SQLITE_HOME` /
+  `sqlite_home` resolution.
+- Codex rollout JSONL roots under `sessions`, `rollouts`,
+  `archived_sessions`, and `archived_rollouts`.
 - Claude `.claude/sessions` PID map、`.claude/projects` transcript、jobs/daemon/session sidecar 的本地观测解析。
 - 统一 Sessions、Relations、Processes、Doctor、Codex Control、Settings 视图。
 
@@ -58,7 +63,7 @@ AgentScope 的目标不是做聊天 UI，也不是 Kanban。它是 Windows-only 
 - Codex SQLite delete 会先备份数据库/WAL/SHM，再做事务化 row-level mutation，并有 rollback evidence。
 - import 会验证 AgentScope manifest、hash、path traversal、目标冲突、DB/table/payload allowlist。
 
-本轮 `9d774dc` 新增的关键点：
+2026-06-15 `9d774dc` 批次新增的关键点：
 
 - delete 成功时 journal 现在写 `operation/deleteSession/succeeded`。
 - 如果文件 quarantine 中途失败，已移动文件会反向搬回原路径，并写 `rollback_move` journal。
@@ -75,14 +80,30 @@ AgentScope 的目标不是做聊天 UI，也不是 Kanban。它是 Windows-only 
 - `auth.json` metadata-only：不读 token 内容，不返回 hash。
 - raw `config.toml` 文档编辑禁用，只能走 structured allowlist。
 - structured mutation 有 allowlisted key path、sha256 conflict check、risk classification、backup、journal。
+- structured mutation 写入 `config.toml` 后会读回校验 changed keys。读回不匹配或 TOML 解析失败时不报告成功。
+- Codex 参数模板和当前状态 workbench 区分 official、known local 和 unverified advanced config。
+- 未知 scalar / string-array config 项可以作为 unverified advanced settings 编辑；复杂值、敏感键、重复/不安全 TOML 仍阻止或只读。
+- 内置 provider id 不能通过 `model_providers.openai.*` 等方式改写。内置 OpenAI base URL 使用顶层 `openai_base_url`。
+- UI 明确提示 `config.toml` 改动通常只对新启动的 Codex session 生效，不能承诺正在运行的 Codex 热加载。
 - AGENTS/rules/user skill 文档允许编辑，但 sensitive-looking 内容会 redacted 并拒绝保存。
 
-本轮 `9d774dc` 新增的关键点：
+2026-06-15 `9d774dc` 批次新增的关键点：
 
 - structured mutation、mode config save、allowlisted document save 都改成两阶段 journal：先 `started`，写入成功后 `succeeded`，失败则 `failed`。
 - `auth.json` 如果是 symlink，只读 link metadata，不 follow target。
 - `windows.sandbox = "elevated"` 纳入 high-risk mutation，需要显式确认。
 - 对应测试在 `packages/core/src/codexControl.test.ts`。
+
+2026-06-16 后续批次新增的关键点：
+
+- `executeCodexControlMutation()` 成功条件包含 read-back verification。
+- `CodexControlSaveResult` 和 journal 记录 `verification`、`effectiveScope`、
+  `effectiveWarnings`。
+- `model_providers.OpenAI.*` 不再作为官方固定项展示；现有自定义 provider
+  表会按 unknown/unverified 规则处理。
+- 新增 `motion@12.40.0`，Codex Control 应用弹窗使用 Motion 的 enter/exit、
+  stagger、layout 和 reduced-motion 支持。
+- 传统 Codex Control 保存和模板/workbench 应用都走同一个中心运行弹窗。
 
 ### 5. 搜索与隐私边界
 
@@ -121,16 +142,18 @@ AgentScope 的目标不是做聊天 UI，也不是 Kanban。它是 Windows-only 
 - Settings
 - Global `Ctrl+F` command/search palette
 
-本轮 `9d774dc` 新增的 UI 点：
+2026-06-15 `9d774dc` 批次新增的 UI 点：
 
 - Processes task tree 支持节点级折叠，适合多 Codex/Claude/MCP/tool helper 进程场景。
 - Sessions recycle panel 不再硬切前 6 条，改为完整列表滚动。
+- Codex Control 参数应用使用中心运行弹窗：显示结构化 patch 行、风险颜色、atomic write、读回校验、成功/失败状态。成功短暂停留后自动关闭，失败保留。
+- Unknown advanced config 在“未知项”页签中分成可编辑 scalar 和只读复杂/敏感项。
 
 smoke 证据：
 
 - `npm run smoke:desktop:packaged` 通过。
 - `npm run smoke:desktop:portable` 通过。
-- 本轮截图在 ignored `apps/desktop/out/smoke/`，不提交。
+- smoke 截图在 ignored `apps/desktop/out/smoke/`，不提交。
 
 ## AgentScope 的独特点
 
@@ -191,12 +214,23 @@ git diff --stat
 git log --oneline -8
 ```
 
+如果涉及 Codex Control UI 或 config 写入，还要至少跑：
+
+```powershell
+npm run lint
+npm --workspace @agentscope/desktop run build
+npm run smoke:desktop:packaged
+```
+
 ### 修改规则
 
 - 手工编辑用 `apply_patch`。
 - 不回滚用户未要求回滚的改动。
 - 核心逻辑改动必须补测试。
 - UI/Electron main 改动后要跑 packaged 或 dev desktop smoke，并检查截图。
+- Codex config 写入改动必须补 core 测试，证明 atomic write/read-back
+  verification、敏感键阻止、未知高级项边界、reserved provider id 规则。
+- 动效改动必须尊重 Settings 的 `motion = full | reduced | off`，错误态不能自动消失。
 - 不要提交 `node_modules`、`dist`、`out`、`tmp`、真实 `.codex/.claude/.agentscope`、真实 session data、凭据。
 - 任何结论都标来源：官方文档、本机文件实测、当前代码、或者明确说是推断。
 
@@ -299,28 +333,25 @@ npm run clean:artifacts -- --apply
 
 按优先级：
 
-1. Electron IPC sender/origin boundary
-   给所有 high-risk IPC handler 加统一 `assertTrustedIpcSender(event)`，限定 sender ownership 和 app URL/dev URL。配套测试非可信 sender 不能调 `session:delete`、`session:import`、`codexControl:executeMutation`。
+1. process/session command line redaction
+   当前原始 `commandLine` 仍会显示在 Processes/Inspector，并可能进入 launcher evidence。保留 raw value 给 core matching 使用，但 renderer、export、notification、evidence 应展示 redacted summary，剥离 `--token value`、`--token=value`、API key、bearer、cookie/session/password 等敏感参数。
 
-2. backup/quarantine realpath/junction hardening
-   `isAllowedAgentScopeOperationPath()`、import/restore/reveal/open 入口需要 lstat/realpath，拒绝 Windows symlink/junction/reparse point 指向外部路径。
+2. session import/restore target hardening
+   import/restore 文件落地要使用 exclusive create/copy，避免 preflight 后目标出现而被覆盖；core 侧目标父目录也要做 lstat/realpath/reparse containment，拒绝 Windows symlink/junction 指向外部路径。
 
-3. JSONL metadata value redaction
+3. Electron open/reveal realpath hardening
+   `shell:openPath` 和 `shell:revealPath` 已有 sender 校验、allowlist 和 open/reveal 角色限制，但本地路径 allowlist 仍应从字符串前缀升级为 realpath/reparse-safe containment。
+
+4. Codex metadata value redaction
    `source/thread_source/agent_*` 等 metadata 字段值要做 token-like、secret-like、过长正文过滤。字段名安全不等于字段值安全。
 
-4. session delete child modes
-   当前 parent with children 默认 block 是对的。下一步要设计明确模式：`block`、`include children`、`detach`，不能默认静默 detach。
-
-5. restore journal 细化
-   当前已有 restore journal 和 rollback steps，但还应记录每个文件和每个 DB rollback 细节，让失败恢复更可审计。
-
-6. 旧 Claude patch helper 隔离
+5. 旧 Claude patch helper 隔离
    旧 patch helper 仍在 `sessionOps.ts` 中。除非实现完整 reversible restore，否则应移除或隔离，保持 execution path inspect-only。
 
-7. smoke 补洞
+6. smoke 补洞
    继续补真正可点击 smoke：session context delete confirm/cancel/execute、read-only session UI 阻断、notification body click 不关闭、process node collapse、Settings 保存阻断。
 
-8. process/subagent/MCP role 识别
+7. process/subagent/MCP role 识别
    继续改进 Codex subagent、MCP、tool kernel、app-server 识别，但每一步都必须保留 evidence/confidence，不要为了 UI 好看升级 confidence。
 
 ## 低价值或不要优先做
@@ -332,9 +363,9 @@ npm run clean:artifacts -- --apply
 - 不要打开/展示 transcript/history/log/auth/config/plugins/skills/rules 正文来“证明功能”。
 - 不要默认清理用户真实 Codex/Claude/AgentScope runtime state。
 
-## 上一轮已验证实现快照
+## 已验证实现快照
 
-上一轮代码和打包验证落在这个提交：
+2026-06-15 代码和打包验证落在这个提交：
 
 ```text
 9d774dc Harden release hygiene and operation journals
@@ -342,7 +373,7 @@ npm run clean:artifacts -- --apply
 20ef449 Trace Codex MCP process trees in smoke
 ```
 
-本文件属于后续文档交接层。如果本文件被提交到新的 HEAD，仍应把 `9d774dc` 理解为上一轮“实现+本地打包+GitHub CI”验证快照；新的 HEAD 是否有 release 产物，以对应 GitHub Actions run 为准。
+2026-06-16 后续批次在本机通过 typecheck、i18n、lint、tests、desktop build、package、packaged smoke、repo audit、artifact audit 和 `git diff --check`。如果本文件被提交到新的 HEAD，该 HEAD 是否有 CI/release 产物仍以对应 GitHub Actions run 为准。
 
 本机 ignored 产物仍可能存在：
 
