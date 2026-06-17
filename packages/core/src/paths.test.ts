@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+﻿import { afterEach, describe, expect, it } from "vitest";
 import { agentScopeHome, claudeHome, codexHome, encodeClaudeProjectPath, normalizeWindowsPath, pathsEqual, userHome } from "./paths.js";
 
 const originalEnv = {
@@ -30,7 +30,7 @@ describe("Windows path helpers", () => {
   });
 
   it("encodes Claude project path", () => {
-    expect(encodeClaudeProjectPath(String.raw`D:\Project\AgentScope`)).toBe("D--Project-AgentScope");
+    expect(encodeClaudeProjectPath(String.raw`D:\Workspace\AgentScopeFixture`)).toBe("D--Workspace-AgentScopeFixture");
   });
 
   it("can route default agent homes to synthetic smoke roots without changing explicit home calls", () => {

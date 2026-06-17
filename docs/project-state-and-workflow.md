@@ -1,4 +1,4 @@
-# AgentScope 当前项目状态与下一 Agent 工作流
+# AgentScope 当前项目状态与工作流
 
 Last updated: 2026-06-16.
 
@@ -6,10 +6,9 @@ Last updated: 2026-06-16.
 
 本文件只汇总当前可核验事实。
 
-- 原始目标来源：`docs/next-ai-prompt.md`、`AGENTS.md`、`docs/handoff-next-ai.md`、`README.md`。
+- 原始目标来源：`AGENTS.md`、`docs/development-runbook.md`、`README.md`。
 - 当前实现来源：`packages/core/src/sessionOps.ts`、`packages/core/src/codexControl.ts`、`packages/core/src/scope.ts`、`packages/core/src/search.ts`、`apps/desktop/src/main/main.ts`、`apps/desktop/src/renderer/src/App.tsx`、`apps/desktop/src/renderer/src/styles.css`。
 - 本机验证来源：本机命令输出和 GitHub Actions run `27447351810`。
-- 记忆来源：本机 Codex memory 中 AgentScope handoff/hygiene 记录。记忆只作为路由提示，当前结论以本仓库文件和本轮验证为准。
 
 ## 原始目标
 
@@ -22,7 +21,7 @@ AgentScope 的目标不是做聊天 UI，也不是 Kanban。它是 Windows-only 
 3. 对本机会话执行可信的 backup、delete、import、restore，并保证 destructive action 有备份、quarantine、journal、blocker 和恢复证据。
 4. 安全管理 Codex 配置、规则、技能、MCP、运行时状态，但不泄露 auth、credentials、hidden reasoning、memory/log/history 正文。
 
-这些目标在 `docs/next-ai-prompt.md` 的“项目定位”“当前重点安全边界”“当前大目标”中明写；`AGENTS.md` 和 `docs/handoff-next-ai.md` 把它们转换成工程规则。
+这些目标在 `README.md`、`AGENTS.md` 和 `docs/development-runbook.md` 中转换成工程规则。
 
 ## 当前已经做到什么
 
@@ -179,12 +178,12 @@ smoke 证据：
 
 ## 当前准确工作流
 
-### 接手后先读
+### 修改前先读
 
 按顺序读：
 
 1. `AGENTS.md`
-2. `docs/handoff-next-ai.md`
+2. `docs/development-runbook.md`
 3. 本文件
 4. `docs/research-local-agent-stores.md`
 5. `docs/repository-hygiene.md`

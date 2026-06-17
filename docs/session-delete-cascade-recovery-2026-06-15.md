@@ -44,7 +44,7 @@ inside the same delete.
 7. Restore the launcher runtime's `AGENTSCOPE_LAUNCHER_APPDATA` behavior and
    prove it with a unit test.
 8. Make lint part of the release gate and remove existing lint failures.
-9. Run the CI-aligned release check before handoff.
+9. Run the CI-aligned release check before closing the work.
 
 ## Implementation Summary
 
@@ -89,7 +89,7 @@ Release gate and lint cleanup:
 - `.github/workflows/ci.yml`
   - CI now runs `npm run lint` and `npm run smoke:desktop:ipc-negative` so the
     remote gate matches the local release-critical checks.
-- `README.md`, `AGENTS.md`, `docs/handoff-next-ai.md`
+- `README.md`, `AGENTS.md`, `docs/development-runbook.md`
   - Command lists now include lint.
 - `apps/desktop/src/main/main.ts`, `apps/desktop/src/renderer/src/App.tsx`,
   `packages/core/src/codexControl.ts`, `scripts/smoke-desktop.mjs`
@@ -147,7 +147,7 @@ Known non-blocking warnings:
 Artifact audit after verification reported only expected generated outputs under
 `apps/desktop/out`, including `builder-debug.yml` and smoke screenshots. Those
 are ignored build artifacts and can be removed with `npm run clean:artifacts`
-after preserving any screenshots needed for handoff.
+after preserving any screenshots needed for maintenance records.
 
 ## Residual Risk
 

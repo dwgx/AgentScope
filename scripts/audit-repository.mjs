@@ -18,7 +18,6 @@ const localPathPatterns = [
   /D:\\Project\\AgentScope\b/gi
 ];
 const allowedLocalPathFiles = new Set([
-  "docs/next-ai-prompt.md",
   "docs/research-local-agent-stores.md",
   "packages/core/src/activity.test.ts",
   "packages/core/src/claude.test.ts",
@@ -41,6 +40,8 @@ const findings = [];
 
 for (const file of files) {
   const normalized = file.replace(/\\/g, "/");
+  const absolutePath = path.join(root, file);
+  if (!fs.existsSync(absolutePath)) continue;
   if (/(^|\/)(node_modules|dist|out|tmp)(\/|$)/.test(normalized)) {
     findings.push({ file, reason: "tracked generated or local artifact path" });
   }
@@ -48,7 +49,7 @@ for (const file of files) {
     findings.push({ file, reason: "tracked local session/database artifact" });
   }
   if (!textFileRe.test(file)) continue;
-  const content = fs.readFileSync(path.join(root, file), "utf8");
+  const content = fs.readFileSync(absolutePath, "utf8");
   const scrubbed = allowedSecretFixtures.reduce((text, fixture) => text.replaceAll(fixture, ""), content);
   for (const pattern of secretPatterns) {
     pattern.lastIndex = 0;

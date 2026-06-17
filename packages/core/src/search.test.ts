@@ -1,4 +1,4 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -90,7 +90,7 @@ describe("search privacy", () => {
       "safe title",
       "private AgentScope preview",
       String.raw`D:\work`,
-      String.raw`C:\Users\dwgx1\.codex\sessions\rollout-preview-thread.jsonl`
+      String.raw`C:\Users\AgentScopeUser\.codex\sessions\rollout-preview-thread.jsonl`
     );
     db.close();
 
@@ -112,7 +112,7 @@ describe("search privacy", () => {
       "AgentScope versioned search",
       "private preview",
       String.raw`D:\work`,
-      String.raw`C:\Users\dwgx1\.codex\rollouts\rollout-versioned-search-thread.jsonl`
+      String.raw`C:\Users\AgentScopeUser\.codex\rollouts\rollout-versioned-search-thread.jsonl`
     );
     db.close();
 

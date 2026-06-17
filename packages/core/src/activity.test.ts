@@ -1,4 +1,4 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,7 +11,7 @@ describe("transcript activity analyzer", () => {
         timestamp: "2026-06-07T01:00:00.000Z",
         type: "session_meta",
         payload: {
-          cwd: String.raw`D:\Project\AgentScope`,
+          cwd: String.raw`D:\Workspace\AgentScopeFixture`,
           cli_version: "0.137.0",
           git: { branch: "main" }
         }
@@ -43,7 +43,7 @@ describe("transcript activity analyzer", () => {
       {
         type: "assistant",
         timestamp: "2026-06-07T01:00:00.000Z",
-        cwd: String.raw`D:\Project\AgentScope`,
+        cwd: String.raw`D:\Workspace\AgentScopeFixture`,
         version: "2.1.167",
         gitBranch: "main",
         message: {

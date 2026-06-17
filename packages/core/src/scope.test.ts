@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+﻿import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -72,7 +72,7 @@ describe("scope confidence", () => {
       writeFileSync(
         rollout,
         [
-          JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }),
+          JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }),
           JSON.stringify({ type: "event_msg", payload: { timestamp: "2026-06-15T10:45:00.000Z" } })
         ].join("\n"),
         "utf8"
@@ -88,7 +88,7 @@ describe("scope confidence", () => {
               pid: 101,
               ppid: 1,
               processName: "node.exe",
-              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js --cwd D:\Project\AgentScope`,
+              commandLine: String.raw`node C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js --cwd D:\Workspace\AgentScopeFixture`,
               startTime: "2026-06-15T10:10:00.000Z",
               agent: "codex",
               evidence: []
@@ -96,7 +96,7 @@ describe("scope confidence", () => {
           ])
       });
 
-      expect(snapshot.processes[0]?.displayTitle).toBe("Codex CLI / AgentScope");
+      expect(snapshot.processes[0]?.displayTitle).toBe("Codex CLI / AgentScopeFixture");
       expect(snapshot.processes[0]?.lastActivityAt).toBe("2026-06-15T10:45:00.000Z");
       expect(snapshot.processes[0]?.evidence.map((item) => item.source)).toContain("process.activity");
     } finally {
@@ -113,7 +113,7 @@ describe("scope confidence", () => {
       writeFileSync(
         rollout,
         [
-          JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }),
+          JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }),
           JSON.stringify({ data: { title: "AgentScope process title polish" } }),
           JSON.stringify({ type: "event_msg", payload: { timestamp: "2026-06-15T10:50:00.000Z" } })
         ].join("\n"),
@@ -128,7 +128,7 @@ describe("scope confidence", () => {
               pid: 102,
               ppid: 1,
               processName: "node.exe",
-              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js --cwd D:\Project\AgentScope`,
+              commandLine: String.raw`node C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js --cwd D:\Workspace\AgentScopeFixture`,
               startTime: "2026-06-15T10:25:00.000Z",
               agent: "codex",
               evidence: []
@@ -167,7 +167,7 @@ describe("scope confidence", () => {
               pid: 103,
               ppid: 1,
               processName: "node.exe",
-              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
+              commandLine: String.raw`node C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
               startTime: "2026-06-15T02:03:00.000Z",
               agent: "codex",
               evidence: []
@@ -206,7 +206,7 @@ describe("scope confidence", () => {
               pid: 201,
               ppid: 100,
               processName: "node.exe",
-              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
+              commandLine: String.raw`node C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
               agent: "codex",
               evidence: []
             }
@@ -244,8 +244,8 @@ describe("scope confidence", () => {
               pid: 301,
               ppid: 100,
               processName: "ida-pro-mcp.exe",
-              executablePath: String.raw`C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe`,
-              commandLine: String.raw`"C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe"`,
+              executablePath: String.raw`C:\Users\AgentScopeUser\.local\bin\ida-pro-mcp.exe`,
+              commandLine: String.raw`"C:\Users\AgentScopeUser\.local\bin\ida-pro-mcp.exe"`,
               agent: "codex",
               evidence: []
             },
@@ -253,7 +253,7 @@ describe("scope confidence", () => {
               pid: 302,
               ppid: 301,
               processName: "python.exe",
-              executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
+              executablePath: String.raw`C:\Users\AgentScopeUser\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
               commandLine: String.raw`python worker.py`,
               agent: "unknown",
               evidence: []
@@ -262,7 +262,7 @@ describe("scope confidence", () => {
               pid: 303,
               ppid: 302,
               processName: "python.exe",
-              executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
+              executablePath: String.raw`C:\Users\AgentScopeUser\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
               commandLine: String.raw`python child_worker.py`,
               agent: "unknown",
               evidence: []
@@ -402,7 +402,7 @@ describe("scope confidence", () => {
               pid: 403,
               ppid: 100,
               processName: "node.exe",
-              commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
+              commandLine: String.raw`node C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
               agent: "codex",
               evidence: []
             }
@@ -578,7 +578,7 @@ describe("scope confidence", () => {
 
   it("requires cwd or transcript evidence for heuristic process matching", () => {
     const session = baseSession("t1", "indexed");
-    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     session.startedAt = "2026-06-07T04:20:00.000Z";
     const process: AgentProcess = {
       pid: 10,
@@ -602,13 +602,13 @@ describe("scope confidence", () => {
 
   it("scores cwd-backed process candidates with evidence reasons", () => {
     const session = baseSession("t1", "indexed");
-    session.cwd = String.raw`D:\Project\AgentScope`;
-    session.transcriptPath = String.raw`C:\Users\dwgx1\.codex\sessions\2026\06\07\rollout-2026-06-07T04-20-00-t1.jsonl`;
+    session.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
+    session.transcriptPath = String.raw`C:\Users\AgentScopeUser\.codex\sessions\2026\06\07\rollout-2026-06-07T04-20-00-t1.jsonl`;
     const process: AgentProcess = {
       pid: 10,
       ppid: 1,
       processName: "Codex.exe",
-      commandLine: String.raw`codex --cwd D:\Project\AgentScope`,
+      commandLine: String.raw`codex --cwd D:\Workspace\AgentScopeFixture`,
       agent: "codex",
       evidence: []
     };
@@ -627,12 +627,12 @@ describe("scope confidence", () => {
 
   it("does not mutate primary session fields when computing heuristic candidates", () => {
     const session = baseSession("runtime-thread", "indexed");
-    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     const process: AgentProcess = {
       pid: 10,
       ppid: 1,
       processName: "codex.exe",
-      commandLine: String.raw`codex --cwd D:\Project\AgentScope`,
+      commandLine: String.raw`codex --cwd D:\Workspace\AgentScopeFixture`,
       agent: "codex",
       evidence: []
     };
@@ -652,12 +652,12 @@ describe("scope confidence", () => {
 
   it("returns process inspection matches with candidate confidence instead of naked sessions", () => {
     const session = baseSession("runtime-thread", "indexed");
-    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     const process: AgentProcess = {
       pid: 10,
       ppid: 1,
       processName: "codex.exe",
-      commandLine: String.raw`codex --cwd D:\Project\AgentScope`,
+      commandLine: String.raw`codex --cwd D:\Workspace\AgentScopeFixture`,
       agent: "codex",
       evidence: []
     };
@@ -703,14 +703,14 @@ describe("scope confidence", () => {
 
   it("does not treat executable paths under the user profile as cwd evidence", () => {
     const session = baseSession("profile-thread", "indexed");
-    session.cwd = String.raw`C:\Users\dwgx1`;
+    session.cwd = String.raw`C:\Users\AgentScopeUser`;
     session.startedAt = "2026-06-08T08:00:00.000Z";
     const process: AgentProcess = {
       pid: 40576,
       ppid: 29828,
       processName: "codex.exe",
-      executablePath: String.raw`C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe`,
-      commandLine: String.raw`"C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe" app-server --listen stdio://`,
+      executablePath: String.raw`C:\Users\AgentScopeUser\AppData\Local\OpenAI\Codex\bin\codex.exe`,
+      commandLine: String.raw`"C:\Users\AgentScopeUser\AppData\Local\OpenAI\Codex\bin\codex.exe" app-server --listen stdio://`,
       startTime: "2026-06-08T08:02:00.000Z",
       agent: "codex",
       processRole: "codex_app_server",
@@ -729,7 +729,7 @@ describe("scope confidence", () => {
 
   it("suppresses helper process candidates unless they carry direct session evidence", () => {
     const session = baseSession("helper-thread", "indexed");
-    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     session.startedAt = "2026-06-08T08:00:00.000Z";
     session.updatedAt = "2026-06-08T08:05:00.000Z";
     const process: AgentProcess = {
@@ -758,13 +758,13 @@ describe("scope confidence", () => {
         pid: 5010,
         ppid: 100,
         processName: "node.exe",
-        commandLine: String.raw`"C:\Program Files\nodejs\node.exe" "D:\tools\kernel.js" --session-id rt-123 --working-dir "D:\Project\AgentScope"`,
+        commandLine: String.raw`"C:\Program Files\nodejs\node.exe" "D:\tools\kernel.js" --session-id rt-123 --working-dir "D:\Workspace\AgentScopeFixture"`,
         agent: "codex",
         evidence: []
       }
     ]);
     const session = baseSession("codex-thread", "indexed");
-    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     session.startedAt = "2026-06-08T08:00:00.000Z";
     const snapshot: ScopeSnapshot = {
       processes: [process!],
@@ -776,7 +776,7 @@ describe("scope confidence", () => {
 
     expect(process?.processRole).toBe("codex_tool_kernel");
     expect(process?.runtimeSessionId).toBe("rt-123");
-    expect(process?.runtimeWorkingDir).toBe(String.raw`D:\Project\AgentScope`);
+    expect(process?.runtimeWorkingDir).toBe(String.raw`D:\Workspace\AgentScopeFixture`);
     expect(process?.evidence.map((item) => item.source)).toContain("process.runtime");
     expect(sessionCandidatesForProcess(snapshot, process!, 5)).toHaveLength(0);
   });
@@ -785,7 +785,7 @@ describe("scope confidence", () => {
     const session = baseSession("claude-session", "indexed");
     session.agent = "claude";
     session.pid = 9352;
-    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     const process: AgentProcess = {
       pid: 9352,
       ppid: 10168,
@@ -815,17 +815,17 @@ describe("scope confidence", () => {
   it("uses window title evidence to rank simulated Codex desktop sessions", () => {
     const older = baseSession("older-thread", "indexed");
     older.title = "SteamVR driver cleanup";
-    older.cwd = String.raw`D:\Project\AgentScope`;
+    older.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     older.updatedAt = "2026-06-07T05:00:00.000Z";
     const newer = baseSession("newer-thread", "indexed");
     newer.title = "AgentScope process tracing UI";
-    newer.cwd = String.raw`D:\Project\AgentScope`;
+    newer.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     newer.updatedAt = "2026-06-07T06:00:00.000Z";
     const process: AgentProcess = {
       pid: 33812,
       ppid: 23132,
       processName: "codex.exe",
-      commandLine: String.raw`codex --cwd D:\Project\AgentScope`,
+      commandLine: String.raw`codex --cwd D:\Workspace\AgentScopeFixture`,
       startTime: "2026-06-07T06:03:00.000Z",
       windowTitle: "AgentScope process tracing UI - Codex",
       agent: "codex",
@@ -853,7 +853,7 @@ describe("process role classification", () => {
         pid: 100,
         ppid: 10,
         processName: "node.exe",
-        commandLine: String.raw`"node" "C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"`,
+        commandLine: String.raw`"node" "C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"`,
         agent: "codex",
         evidence: []
       },
@@ -861,7 +861,7 @@ describe("process role classification", () => {
         pid: 110,
         ppid: 100,
         processName: "codex.exe",
-        executablePath: String.raw`C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe`,
+        executablePath: String.raw`C:\Users\AgentScopeUser\AppData\Local\OpenAI\Codex\bin\codex.exe`,
         commandLine: String.raw`codex.exe`,
         agent: "codex",
         evidence: []
@@ -900,7 +900,7 @@ describe("process role classification", () => {
         pid: 100,
         ppid: 10,
         processName: "node.exe",
-        commandLine: String.raw`"node" "C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"`,
+        commandLine: String.raw`"node" "C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"`,
         agent: "codex",
         evidence: []
       },
@@ -908,8 +908,8 @@ describe("process role classification", () => {
         pid: 110,
         ppid: 100,
         processName: "codex.exe",
-        executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
-        commandLine: String.raw`C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
+        executablePath: String.raw`C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
+        commandLine: String.raw`C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
         agent: "codex",
         evidence: []
       },
@@ -917,8 +917,8 @@ describe("process role classification", () => {
         pid: 120,
         ppid: 110,
         processName: "ida-pro-mcp.exe",
-        executablePath: String.raw`C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe`,
-        commandLine: String.raw`"C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe"`,
+        executablePath: String.raw`C:\Users\AgentScopeUser\.local\bin\ida-pro-mcp.exe`,
+        commandLine: String.raw`"C:\Users\AgentScopeUser\.local\bin\ida-pro-mcp.exe"`,
         agent: "unknown",
         evidence: []
       },
@@ -926,8 +926,8 @@ describe("process role classification", () => {
         pid: 130,
         ppid: 120,
         processName: "python.exe",
-        executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
-        commandLine: String.raw`"C:\Users\dwgx1\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe" "C:\Users\dwgx1\.local\bin\ida-pro-mcp.exe"`,
+        executablePath: String.raw`C:\Users\AgentScopeUser\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe`,
+        commandLine: String.raw`"C:\Users\AgentScopeUser\AppData\Roaming\uv\tools\ida-pro-mcp\Scripts\python.exe" "C:\Users\AgentScopeUser\.local\bin\ida-pro-mcp.exe"`,
         agent: "unknown",
         evidence: []
       }
@@ -956,7 +956,7 @@ describe("process role classification", () => {
         pid: 200,
         ppid: 10,
         processName: "codex.exe",
-        executablePath: String.raw`C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
+        executablePath: String.raw`C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe`,
         commandLine: "codex.exe",
         agent: "codex",
         evidence: []
@@ -966,7 +966,7 @@ describe("process role classification", () => {
         ppid: 200,
         processName: "node.exe",
         executablePath: String.raw`C:\Program Files\nodejs\node.exe`,
-        commandLine: String.raw`"C:\Program Files\nodejs\node.exe" "C:\Temp\kernel.js" --session-id rt-123 --working-dir "D:\Project\AgentScope"`,
+        commandLine: String.raw`"C:\Program Files\nodejs\node.exe" "C:\Temp\kernel.js" --session-id rt-123 --working-dir "D:\Workspace\AgentScopeFixture"`,
         agent: "unknown",
         evidence: []
       }
@@ -979,7 +979,7 @@ describe("process role classification", () => {
       parentAgentPid: 200,
       rootPid: 200,
       runtimeSessionId: "rt-123",
-      runtimeWorkingDir: String.raw`D:\Project\AgentScope`
+      runtimeWorkingDir: String.raw`D:\Workspace\AgentScopeFixture`
     });
   });
 
@@ -989,7 +989,7 @@ describe("process role classification", () => {
         pid: 300,
         ppid: 10,
         processName: "node.exe",
-        commandLine: String.raw`node C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
+        commandLine: String.raw`node C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@playwright\mcp\cli.js`,
         agent: "codex",
         evidence: []
       },
@@ -1035,12 +1035,12 @@ describe("process role classification", () => {
         pid: 400,
         ppid: 390,
         processName: "chrome-native-host.exe",
-        executablePath: String.raw`C:\Users\dwgx1\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe`,
-        commandLine: String.raw`"C:\Users\dwgx1\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe"`,
+        executablePath: String.raw`C:\Users\AgentScopeUser\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe`,
+        commandLine: String.raw`"C:\Users\AgentScopeUser\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe"`,
         agent: classifyProcess(
           "chrome-native-host.exe",
-          String.raw`"C:\Users\dwgx1\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe"`,
-          String.raw`C:\Users\dwgx1\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe`
+          String.raw`"C:\Users\AgentScopeUser\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe"`,
+          String.raw`C:\Users\AgentScopeUser\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\ChromeNativeHost\chrome-native-host.exe`
         ),
         evidence: []
       }
@@ -1063,7 +1063,7 @@ describe("process role classification", () => {
     ]);
     const session = baseSession("helper-pid-thread", "indexed");
     session.pid = 500;
-    session.cwd = String.raw`D:\Project\AgentScope`;
+    session.cwd = String.raw`D:\Workspace\AgentScopeFixture`;
     const snapshot: ScopeSnapshot = {
       processes: [process!],
       sessions: [session],
@@ -1082,7 +1082,7 @@ describe("process role classification", () => {
       classifyProcess(
         "codex.exe",
         "codex resume 019ea --note \"compare Claude behavior\"",
-        String.raw`C:\Users\dwgx1\AppData\Local\OpenAI\Codex\bin\codex.exe`
+        String.raw`C:\Users\AgentScopeUser\AppData\Local\OpenAI\Codex\bin\codex.exe`
       )
     ).toBe("codex");
   });
@@ -1102,7 +1102,7 @@ describe("process role classification", () => {
       isRelatedProcess({
         pid: 11,
         processName: "node.exe",
-        commandLine: String.raw`node C:\Users\dwgx1\.claude\daemon\worker.js`,
+        commandLine: String.raw`node C:\Users\AgentScopeUser\.claude\daemon\worker.js`,
         agent: "claude",
         evidence: []
       })
@@ -1122,7 +1122,7 @@ describe("codex rollout metadata", () => {
         ...filler,
         JSON.stringify({
           payload: {
-            cwd: String.raw`D:\Project\AgentScope`,
+            cwd: String.raw`D:\Workspace\AgentScopeFixture`,
             model: "gpt-5-codex",
             approval_policy: "never",
             sandbox_mode: "danger-full-access",
@@ -1135,7 +1135,7 @@ describe("codex rollout metadata", () => {
 
       const metadata = await readRolloutMetadata(filePath);
 
-      expect(metadata.cwd).toBe(String.raw`D:\Project\AgentScope`);
+      expect(metadata.cwd).toBe(String.raw`D:\Workspace\AgentScopeFixture`);
       expect(metadata.model).toBe("gpt-5-codex");
       expect(metadata.approval_policy).toBe("never");
       expect(metadata.sandbox_mode).toBe("danger-full-access");

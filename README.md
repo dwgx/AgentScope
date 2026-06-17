@@ -192,12 +192,12 @@ Planned later controls:
 - `watch`
 - web/TUI dashboard on the same core library
 
-## Handoff Docs
+## Development Docs
 
-Future agents should read:
+Maintainers should read:
 
 - `AGENTS.md`
-- `docs/handoff-next-ai.md`
+- `docs/development-runbook.md`
 - `docs/research-local-agent-stores.md`
 - `docs/release-0.1.0-summary-2026-06-15.md`
 

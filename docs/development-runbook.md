@@ -1,12 +1,12 @@
-# AgentScope Next-AI Handoff
+# AgentScope Development Runbook
 
 Last updated: 2026-06-16.
 
-Read order for the next AI:
+Recommended read order before changing the project:
 
 1. `AGENTS.md`
 2. this file
-3. `docs/project-state-and-next-agent-workflow-2026-06-13.md`
+3. `docs/project-state-and-workflow.md`
 4. `docs/research-local-agent-stores.md`
 5. `docs/repository-hygiene.md`
 6. `docs/session-delete-cascade-recovery-2026-06-15.md`
@@ -21,11 +21,11 @@ AgentScope is a Windows-only TypeScript/Electron desktop console for local AI co
 
 It is not a chat UI, not a Kanban board, and not a generic file manager. Every association must show evidence and confidence. Heuristics must stay visibly heuristic.
 
-## User Expectations
+## Maintainer Expectations
 
-Always speak Chinese with the user unless they explicitly asks otherwise.
+Use Chinese for maintainer-facing discussion unless English is requested.
 
-The user expects:
+Maintainers expect:
 
 - concrete implementation, not vague planning.
 - direct risk reporting with evidence source: official docs, local observation, or current code.
@@ -52,9 +52,8 @@ sha256: 078BE46458B4DABC33B6DD192EEEB7AE8E1D2408F91F6AAB55B2EA67C6A6DB3E
 
 The stable release is a normal GitHub release, not a prerelease. It was built as
 a portable-only release into ignored `apps/desktop/out-portable/`. Smoke was
-intentionally not run for the final stable republish because the user requested
-no smoke, but the same release cycle previously passed full packaged release
-checks for the MCP/UI work.
+intentionally not run for the final stable republish, but the same release cycle
+previously passed full packaged release checks for the MCP/UI work.
 
 The 2026-06-15 local recovery batch hardened `childMode="includeChildren"`
 delete rollback, fixed SQLite multi-table rollback, restored launcher
@@ -91,11 +90,11 @@ Codex Control usability:
   with line-by-line patch reveal, spinner/check/error states, reduced-motion
   support, and automatic success dismissal. Errors stay visible.
 
-The post-release read-only audit was distilled into this handoff and workflow
+The post-release read-only audit was distilled into this runbook and workflow
 notes instead of a standalone audit report. Do not create more one-off audit
-reports unless there is a release, security incident, or the user explicitly
-asks. Do not commit or push documentation cleanup automatically; keep it local
-until the user asks.
+reports unless there is a release, security incident, or maintainers explicitly
+request it. Do not commit or push documentation cleanup without maintainer
+approval.
 
 Local audit verification at HEAD `5243eaa` before the 2026-06-16 work:
 
@@ -145,7 +144,7 @@ npm run i18n:check
 npm run package
 ```
 
-For release/prebuild handoff:
+For release/prebuild verification:
 
 ```powershell
 npm run check:release

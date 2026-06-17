@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+﻿import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -48,7 +48,7 @@ describe("Codex helpers", () => {
       String.raw`D:\work`,
       "worker",
       "research",
-      String.raw`D:\Project\AgentScope\.codex\agents\worker.md`
+      String.raw`D:\Workspace\AgentScopeFixture\.codex\agents\worker.md`
     );
     db.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id) VALUES (?, ?)").run("parent-thread", "child-thread");
     db.close();

@@ -109,12 +109,12 @@ The `native:restore` step is required after Electron packaging so `better-sqlite
 - Local release artifact directory `apps/desktop/out-portable/` is ignored and should remain untracked.
 - `.gitignore` now ignores `out-portable/`.
 
-## Guidance For The Next AI
+## Maintenance Guidance
 
 Start with:
 
 1. `AGENTS.md`
-2. `docs/handoff-next-ai.md`
+2. `docs/development-runbook.md`
 3. this document
 4. `docs/mcp-tool-identity-2026-06-15.md`
 5. `docs/ui-polish-plan-and-summary-2026-06-15.md`
@@ -133,4 +133,3 @@ For future release work:
 - If the user explicitly says not to run smoke, run at least `audit:repo`, `i18n:check`, `typecheck`, `lint`, and `test`.
 - Use `apps/desktop/out-portable/` for portable-only release assets and keep it ignored.
 - Record the asset SHA256 in release notes.
-

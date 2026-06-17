@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-16.
 
-This document records repository-level hygiene rules for AgentScope handoff work. It covers repository contents, generated artifacts, screenshots, and accidental sensitive data exposure. It does not replace runtime security checks in Electron main or `packages/core`.
+This document records repository-level hygiene rules for AgentScope maintenance work. It covers repository contents, generated artifacts, screenshots, and accidental sensitive data exposure. It does not replace runtime security checks in Electron main or `packages/core`.
 
 ## Current Audit Result
 
@@ -23,7 +23,7 @@ Source: local repository inspection, artifact audit, and local verification on 2
   do not vendor animation libraries or generated bundles into the repo.
 - The 2026-06-16 `npm install motion@12.40.0` run reported existing npm audit
   vulnerabilities. Do not run broad `npm audit fix --force` as part of routine
-  handoff cleanup; treat dependency remediation as a separate reviewed change.
+  maintenance cleanup; treat dependency remediation as a separate reviewed change.
 
 ## Do Not Commit
 
@@ -41,7 +41,7 @@ Source: local repository inspection, artifact audit, and local verification on 2
 
 ## Required Checks
 
-Run before handoff after code changes:
+Run before closing code changes:
 
 ```powershell
 npm run audit:repo
@@ -56,7 +56,7 @@ git status --short
 git diff --stat
 ```
 
-For a CI-aligned release/prebuild handoff, run:
+For a CI-aligned release/prebuild verification, run:
 
 ```powershell
 npm run check:release
@@ -106,7 +106,7 @@ Smoke screenshots are useful for UI review, but they often include local paths a
 - Store screenshots only under ignored paths such as `apps/desktop/out/smoke/`.
 - Do not commit screenshots unless they are sanitized fixtures.
 - Do not use real session screenshots in public docs.
-- If a screenshot is needed for handoff, describe what was verified and keep the file local.
+- If a screenshot is needed for maintenance notes, describe what was verified and keep the file local.
 
 ## If A Real Secret Is Found
 

@@ -1,4 +1,4 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -19,7 +19,7 @@ describe("Claude indexes", () => {
           abc12345: {
             pid: 222,
             sessionId: "session-1",
-            cwd: String.raw`D:\Project\AgentScope`,
+            cwd: String.raw`D:\Workspace\AgentScopeFixture`,
             cliVersion: "2.1.163",
             startedAt: 1770000001000,
             attempt: 1

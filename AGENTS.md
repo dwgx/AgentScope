@@ -1,14 +1,14 @@
-# AgentScope Agent Handoff Rules
+# AgentScope Repository Working Rules
 
 AgentScope is a Windows-only TypeScript/Electron desktop console for local AI coding agent trace and control. It indexes Codex and Claude Code processes, sessions, transcripts, and evidence. It is not a chat UI and not a Kanban board.
 
-## User And Product Direction
+## Maintainer And Product Direction
 
 - Speak with the user in Chinese unless they explicitly ask otherwise.
-- Be direct, rigorous, and pragmatic. The user expects concrete implementation, screenshots/smoke tests when UI changes, and honest risk reporting.
+- Be direct, rigorous, and pragmatic. Maintainers expect concrete implementation, screenshots/smoke tests when UI changes, and honest risk reporting.
 - The user strongly prefers high-quality UI that feels polished, dense, and controllable. Avoid decorative marketing layouts. Use a serious desktop-console feel with careful spacing, alignment, animation, and keyboard behavior.
 - The user dislikes vague claims. Every session/process association must show evidence and confidence.
-- The user wants subagent-style research when explicitly requested, but do not block on delegation if thread limits are reached. Continue locally and document what was verified.
+- Deeper research workflows are useful when explicitly requested, but do not block on delegation if thread limits are reached. Continue locally and document what was verified.
 
 ## Engineering Defaults
 
@@ -22,7 +22,7 @@ AgentScope is a Windows-only TypeScript/Electron desktop console for local AI co
 
 ## Current Commands
 
-Run these before handoff after code changes:
+Run these before sharing code changes:
 
 ```powershell
 npm run audit:repo
@@ -33,7 +33,7 @@ npm run i18n:check
 npm run package
 ```
 
-For release/prebuild handoff, run the CI-aligned release check instead:
+For release/prebuild verification, run the CI-aligned release check instead:
 
 ```powershell
 npm run check:release
@@ -96,10 +96,10 @@ apps/desktop/out/win-unpacked/AgentScope.exe
 
 ## Documentation
 
-The next AI should read these before changing the project:
+Read these before changing the project:
 
 - `README.md`
-- `docs/handoff-next-ai.md`
-- `docs/project-state-and-next-agent-workflow-2026-06-13.md`
+- `docs/development-runbook.md`
+- `docs/project-state-and-workflow.md`
 - `docs/research-local-agent-stores.md`
 - `docs/repository-hygiene.md`

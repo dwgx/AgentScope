@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+﻿import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -37,7 +37,7 @@ describe("session operations", () => {
               ppid: process.pid,
               processName: "node.exe",
               executablePath: String.raw`C:\Program Files\nodejs\node.exe`,
-              commandLine: String.raw`"node" "C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js" resume ${sessionId} --cwd "${cwd}"`,
+              commandLine: String.raw`"node" "C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js" resume ${sessionId} --cwd "${cwd}"`,
               startTime: "2026-06-07T00:00:00.000Z",
               agent: "codex",
               evidence: []
@@ -56,8 +56,8 @@ describe("session operations", () => {
   it("plans Claude session sidecars without treating stale PID files as blockers", async () => {
     const home = tempHome();
     const sessionId = "11111111-1111-4111-8111-111111111111";
-    const cwd = String.raw`D:\Project\AgentScope`;
-    const encoded = "D--Project-AgentScope";
+    const cwd = String.raw`D:\Workspace\AgentScopeFixture`;
+    const encoded = "D--Workspace-AgentScopeFixture";
     fs.mkdirSync(path.join(home, ".claude", "sessions"), { recursive: true });
     fs.mkdirSync(path.join(home, ".claude", "projects", encoded, sessionId, "tool-results"), { recursive: true });
     const stalePid = 2147483000;
@@ -305,7 +305,7 @@ describe("session operations", () => {
             ppid: process.pid,
             processName: "node.exe",
             executablePath: String.raw`C:\Program Files\nodejs\node.exe`,
-            commandLine: String.raw`"node" "C:\Users\dwgx1\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js" resume ${childId} --cwd "D:\Child"`,
+            commandLine: String.raw`"node" "C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js" resume ${childId} --cwd "D:\Child"`,
             startTime: "2026-06-07T08:00:00.000Z",
             agent: "codex",
             evidence: []
@@ -486,7 +486,7 @@ describe("session operations", () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     const dbPath = path.join(home, ".codex", "state_5.sqlite");
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     const db = new Database(dbPath);
@@ -496,7 +496,7 @@ describe("session operations", () => {
       CREATE TABLE thread_dynamic_tools (thread_id TEXT, name TEXT);
       CREATE TRIGGER agentscope_fail_delete BEFORE DELETE ON threads BEGIN SELECT RAISE(FAIL, 'simulated sqlite delete failure'); END;
     `);
-    db.prepare("INSERT INTO threads (id, rollout_path, cwd) VALUES (?, ?, ?)").run(sessionId, rollout, String.raw`D:\Project\AgentScope`);
+    db.prepare("INSERT INTO threads (id, rollout_path, cwd) VALUES (?, ?, ?)").run(sessionId, rollout, String.raw`D:\Workspace\AgentScopeFixture`);
     db.close();
 
     await expect(
@@ -522,7 +522,7 @@ describe("session operations", () => {
     const sessionId = "56565656-5555-4555-8555-565656565656";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
     const goals = new Database(path.join(home, ".codex", "goals_1.sqlite"));
     goals.exec(`
@@ -562,7 +562,7 @@ describe("session operations", () => {
     const sessionId = "67676767-5555-4555-8555-676767676767";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
     const blockingTarget = path.join(
       outputRoot,
@@ -893,7 +893,7 @@ describe("session operations", () => {
     const sessionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
 
     const backup = await backupSession(sessionId, "codex", {
@@ -932,7 +932,7 @@ describe("session operations", () => {
     const sessionId = "f1f1f1f1-1111-4f1f-8f1f-f1f1f1f1f1f1";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
     const backup = await backupSession(sessionId, "codex", { home, outputRoot });
 
@@ -963,7 +963,7 @@ describe("session operations", () => {
     const sessionId = "f2f2f2f2-2222-4f2f-8f2f-f2f2f2f2f2f2";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
     const deleted = await deleteSession(sessionId, "codex", {
       home,
@@ -998,7 +998,7 @@ describe("session operations", () => {
     const sessionId = "abababab-1111-4aba-8aba-abababababab";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
     const backup = await backupSession(sessionId, "codex", { home, outputRoot });
     fs.rmSync(rollout);
@@ -1017,7 +1017,7 @@ describe("session operations", () => {
     const sessionId = "acacacac-1111-4aca-8aca-acacacacacac";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
     const backup = await backupSession(sessionId, "codex", { home, outputRoot });
     fs.rmSync(rollout);
@@ -1038,7 +1038,7 @@ describe("session operations", () => {
     const otherId = "edededed-1111-4ede-8ede-edededededed";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
     const backup = await backupSession(sessionId, "codex", { home, outputRoot });
     fs.rmSync(rollout);
@@ -1062,7 +1062,7 @@ describe("session operations", () => {
     const sessionId = "fefefefe-fefe-4fef-8fef-fefefefefefe";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout);
 
     const deleted = await deleteSession(sessionId, "codex", {
@@ -1096,7 +1096,7 @@ describe("session operations", () => {
     fs.writeFileSync(path.join(codexRoot, "config.toml"), `sqlite_home = "${sqliteRoot.replaceAll("\\", "\\\\")}"\n`);
     const rollout = path.join(codexRoot, "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
     createCodexBundleFixture(home, sessionId, rollout, sqliteRoot);
 
     const deleted = await deleteSession(sessionId, "codex", {
@@ -1123,7 +1123,7 @@ describe("session operations", () => {
     const sessionId = "33333333-3333-4333-8333-333333333333";
     const rollout = path.join(home, ".codex", "sessions", "2026", "06", "07", `rollout-2026-06-07T00-00-00-${sessionId}.jsonl`);
     fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\AgentScope` } }) + "\n");
+    fs.writeFileSync(rollout, JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Workspace\AgentScopeFixture` } }) + "\n");
 
     const planResult = await writeSessionDeletePlan(sessionId, "codex", {
       home,
@@ -1192,7 +1192,7 @@ function makeBackupFixture(home: string, sessionId: string): string {
 function createCodexBundleFixture(home: string, sessionId: string, rollout: string, sqliteRoot = path.join(home, ".codex")): void {
   recreateCodexEmptySchema(home, sqliteRoot);
   const state = new Database(path.join(sqliteRoot, "state_5.sqlite"));
-  state.prepare("INSERT INTO threads (id, rollout_path, cwd, title) VALUES (?, ?, ?, ?)").run(sessionId, rollout, String.raw`D:\Project\AgentScope`, "bundle test");
+  state.prepare("INSERT INTO threads (id, rollout_path, cwd, title) VALUES (?, ?, ?, ?)").run(sessionId, rollout, String.raw`D:\Workspace\AgentScopeFixture`, "bundle test");
   state.prepare("INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id) VALUES (?, ?)").run("parent-thread", sessionId);
   state.prepare("INSERT INTO thread_dynamic_tools (thread_id, name, value) VALUES (?, ?, ?)").run(sessionId, "shell", "enabled");
   state.close();
