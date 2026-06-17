@@ -763,7 +763,8 @@ function renderCodexAnimation() {
   code.innerHTML = visibleLines
     .map(([tone, line], index) => `<div class="codeLine ${tone} ${index === visibleLines.length - 1 ? "active" : ""}"><span>${index + 1}</span><code>${escapeHtml(line)}</code></div>`)
     .join("");
-  code.lastElementChild?.scrollIntoView({ block: "nearest" });
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  code.scrollTo({ top: code.scrollHeight, behavior: reduceMotion ? "auto" : "smooth" });
 
   state.scenarioLine += 1;
   if (state.scenarioLine >= scenario.lines.length + 2) {
