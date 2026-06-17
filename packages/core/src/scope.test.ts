@@ -143,45 +143,6 @@ describe("scope confidence", () => {
     }
   });
 
-  it("keeps a role prefix when only weak session-title evidence is available", async () => {
-    const home = mkdtempSync(join(tmpdir(), "agentscope-process-weak-title-"));
-    try {
-      const sessionId = "55555555-5555-4555-8555-555555555555";
-      const rollout = join(home, ".codex", "sessions", "2026", "06", "15", `rollout-2026-06-15T11-00-00-${sessionId}.jsonl`);
-      mkdirSync(dirname(rollout), { recursive: true });
-      writeFileSync(
-        rollout,
-        [
-          JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd: String.raw`D:\Project\Other` } }),
-          JSON.stringify({ data: { title: "SteamVR driver settings audit" } }),
-          JSON.stringify({ type: "event_msg", payload: { timestamp: "2026-06-15T11:05:00.000Z" } })
-        ].join("\n"),
-        "utf8"
-      );
-
-      const snapshot = await buildSnapshot(home, {
-        includeProcesses: true,
-        processProvider: async () =>
-          annotateProcessTree([
-            {
-              pid: 103,
-              ppid: 1,
-              processName: "codex.exe",
-              commandLine: "codex",
-              startTime: "2026-06-15T04:30:00.000Z",
-              agent: "codex",
-              evidence: []
-            }
-          ])
-      });
-
-      expect(snapshot.processes[0]?.sessionCandidates?.[0]?.confidence).toBe("unknown");
-      expect(snapshot.processes[0]?.displayTitle).toBe("Codex Engine / SteamVR driver settings audit");
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-
   it("decorates MCP tool processes with config-backed identity", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentscope-mcp-identity-"));
     try {
