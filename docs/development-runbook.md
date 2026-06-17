@@ -144,7 +144,14 @@ npm run i18n:check
 npm run package
 ```
 
-For release/prebuild verification:
+Default GitHub CI runs the lightweight gate on every push and pull request:
+repository audit, lint, typecheck, i18n, unit tests, and synthetic smoke. Desktop
+packaging and Electron smoke are intentionally kept out of the default push
+workflow so routine documentation or fixture changes do not trigger heavyweight
+release checks.
+
+For release/prebuild verification, use the manual GitHub `Release Check`
+workflow or run:
 
 ```powershell
 npm run check:release

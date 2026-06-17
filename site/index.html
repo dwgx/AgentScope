@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="AgentScope is a Windows desktop console for monitoring local Codex and Claude Code sessions with evidence-backed safety controls."
+    />
+    <title>AgentScope</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="hero" aria-labelledby="title">
+        <div class="heroText">
+          <p class="eyebrow">Windows desktop console</p>
+          <h1 id="title">AgentScope</h1>
+          <p class="lede">
+            Monitor local Codex and Claude Code sessions, inspect evidence-backed
+            process relationships, and manage risky session operations with
+            backups, quarantine records, and journals.
+          </p>
+          <div class="actions">
+            <a class="primary" href="https://github.com/dwgx/AgentScope/releases/tag/v0.1.0">Download v0.1.0</a>
+            <a class="secondary" href="https://github.com/dwgx/AgentScope">View repository</a>
+          </div>
+        </div>
+        <div class="console" aria-label="AgentScope summary">
+          <div class="consoleBar">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="metricGrid">
+            <div>
+              <strong>Evidence</strong>
+              <span>PID, cwd, transcript path, session id, window title, time</span>
+            </div>
+            <div>
+              <strong>Confidence</strong>
+              <span>exact, indexed, heuristic, unknown</span>
+            </div>
+            <div>
+              <strong>Safety</strong>
+              <span>backup, quarantine, journal, schema checks</span>
+            </div>
+            <div>
+              <strong>Control</strong>
+              <span>structured Codex settings with read-back verification</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="features" aria-label="Features">
+        <article>
+          <h2>Trace Local Agents</h2>
+          <p>
+            Index Windows process metadata, Codex SQLite stores and rollout
+            JSONL, Claude session maps, and local transcript paths without
+            exposing hidden vendor reasoning.
+          </p>
+        </article>
+        <article>
+          <h2>Explain Associations</h2>
+          <p>
+            Keep every process-to-session association tied to evidence and
+            confidence. Heuristics stay visible instead of being presented as
+            exact facts.
+          </p>
+        </article>
+        <article>
+          <h2>Control Risky Operations</h2>
+          <p>
+            Session backup, delete, import, and restore workflows use explicit
+            plans, protected file roles, row-level SQLite bundles, and recovery
+            evidence.
+          </p>
+        </article>
+      </section>
+
+      <section class="links" aria-label="Project links">
+        <a href="https://github.com/dwgx/AgentScope/blob/main/README.md">Read the README</a>
+        <a href="https://github.com/dwgx/AgentScope/blob/main/docs/development-runbook.md">Development runbook</a>
+        <a href="https://github.com/dwgx/AgentScope/blob/main/SECURITY.md">Security policy</a>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,43 @@
+name: Release Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release-check:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run audit:repo
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run i18n:check
+      - run: npm test
+      - run: npm run smoke:agentscope
+      - run: npm run build
+      - run: npm run package:pre
+        env:
+          AGENTSCOPE_PRE_VERSION: 0.1.0-pre
+      - run: npm run verify:desktop-artifacts -- --strict-head
+      - run: npm run audit:artifacts
+      - run: npm run smoke:desktop:packaged
+      - run: npm run smoke:desktop:ipc-negative
+      - run: npm run smoke:desktop:portable
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AgentScope-win-pre
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            apps/desktop/out/AgentScope-*-Setup-x64.exe
+            apps/desktop/out/AgentScope-*-Portable-x64.exe
+            apps/desktop/out/AgentScope-*-win-x64.zip
+            apps/desktop/out/*.blockmap
+            apps/desktop/out/agentscope-prebuild.json
+            apps/desktop/out/win-unpacked/**

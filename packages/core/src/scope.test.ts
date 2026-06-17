@@ -166,9 +166,9 @@ describe("scope confidence", () => {
             {
               pid: 103,
               ppid: 1,
-              processName: "node.exe",
-              commandLine: String.raw`node C:\Users\AgentScopeUser\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
-              startTime: "2026-06-15T02:03:00.000Z",
+              processName: "codex.exe",
+              commandLine: "codex",
+              startTime: "2026-06-15T04:30:00.000Z",
               agent: "codex",
               evidence: []
             }
@@ -176,7 +176,7 @@ describe("scope confidence", () => {
       });
 
       expect(snapshot.processes[0]?.sessionCandidates?.[0]?.confidence).toBe("unknown");
-      expect(snapshot.processes[0]?.displayTitle).toBe("Codex CLI / SteamVR driver settings audit");
+      expect(snapshot.processes[0]?.displayTitle).toBe("Codex Engine / SteamVR driver settings audit");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

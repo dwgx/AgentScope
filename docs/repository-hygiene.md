@@ -41,7 +41,7 @@ Source: local repository inspection, artifact audit, and local verification on 2
 
 ## Required Checks
 
-Run before closing code changes:
+Run the lightweight gate before closing code changes:
 
 ```powershell
 npm run audit:repo
@@ -61,6 +61,10 @@ For a CI-aligned release/prebuild verification, run:
 ```powershell
 npm run check:release
 ```
+
+The GitHub `CI` workflow intentionally mirrors the lightweight gate. The
+GitHub `Release Check` workflow is manual and covers packaging, artifact
+verification, and desktop smoke checks.
 
 `npm run package` builds the unpacked app. `npm run package:pre` builds the
 installer, portable executable, portable zip, and `agentscope-prebuild.json`.

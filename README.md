@@ -6,6 +6,8 @@ AgentScope is a TypeScript/Electron desktop console for identifying, indexing,
 searching, and explaining local Codex and Claude Code sessions on Windows. It is
 not a chat UI and not a Kanban board.
 
+Project site: `https://dwgx.github.io/AgentScope/`
+
 ## Architecture
 
 ```text
@@ -113,6 +115,11 @@ builds the installer, portable executable, portable zip, and prebuild manifest.
 typecheck, i18n check, tests, synthetic smoke, `package:pre`, artifact
 verification, and packaged/portable desktop smoke.
 
+The default GitHub CI workflow keeps push checks lightweight: repository audit,
+lint, typecheck, i18n, unit tests, and synthetic smoke. Packaging and desktop
+smoke checks run from the manual `Release Check` workflow or through
+`npm run check:release`.
+
 Artifact inspection and cleanup:
 
 ```powershell
@@ -200,6 +207,7 @@ Maintainers should read:
 - `docs/development-runbook.md`
 - `docs/research-local-agent-stores.md`
 - `docs/release-0.1.0-summary-2026-06-15.md`
+- `CONTRIBUTING.md`
 
 ## Repository Governance
 
