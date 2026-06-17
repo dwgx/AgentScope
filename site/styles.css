@@ -53,8 +53,6 @@ code,
 }
 
 .topbar {
-  position: sticky;
-  top: 0;
   z-index: 10;
   min-height: 58px;
   display: flex;
@@ -68,7 +66,8 @@ code,
 }
 
 .brand,
-.topbar nav {
+.topbar nav,
+.languageSwitch {
   display: inline-flex;
   align-items: center;
 }
@@ -80,7 +79,6 @@ code,
 
 .brandMark,
 .appLogo {
-  position: relative;
   width: 28px;
   height: 28px;
   display: inline-grid;
@@ -90,27 +88,9 @@ code,
   background: color-mix(in srgb, var(--surface2) 82%, var(--accent) 9%);
 }
 
-.brandMark span,
-.appLogo::before,
-.appLogo::after {
-  position: absolute;
-  content: "";
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-}
-
-.brandMark span:first-child,
-.appLogo::before {
-  width: 12px;
-  height: 12px;
-  transform: translate(-4px, -3px);
-}
-
-.brandMark span:last-child,
-.appLogo::after {
-  width: 12px;
-  height: 12px;
-  transform: translate(4px, 4px);
+.agentGlyph {
+  display: block;
+  color: var(--accent);
 }
 
 .topbar nav {
@@ -129,6 +109,32 @@ code,
 .topbar nav a:hover {
   color: var(--text);
   background: var(--hover);
+}
+
+.languageSwitch {
+  gap: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--control) 76%, transparent);
+  padding: 3px;
+}
+
+.languageSwitch button {
+  min-height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+  padding: 0 8px;
+}
+
+.languageSwitch button.active {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface2));
+  color: var(--text);
 }
 
 main {
@@ -305,11 +311,16 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  border: 0;
   border-radius: 7px;
+  background: transparent;
   padding: 9px 10px;
   color: color-mix(in srgb, var(--text) 76%, var(--muted));
+  cursor: pointer;
+  font: inherit;
   font-size: 12px;
   font-weight: 650;
+  text-align: left;
 }
 
 .navItem.active {
@@ -332,12 +343,13 @@ h2 {
   color: var(--muted2);
   font-size: 10px;
   text-transform: uppercase;
+  cursor: default;
 }
 
 .appWorkspace {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   background: var(--bg);
 }
 
@@ -356,7 +368,8 @@ h2 {
 .searchPill,
 .statusChip,
 .badge,
-.agentBadge {
+.agentBadge,
+.countChip {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface2);
@@ -373,7 +386,8 @@ h2 {
 
 .statusChip,
 .badge,
-.agentBadge {
+.agentBadge,
+.countChip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -381,6 +395,17 @@ h2 {
   padding: 0 8px;
   font-size: 11px;
   font-weight: 680;
+}
+
+.countChip {
+  align-self: start;
+  min-width: 0;
+  max-width: 94px;
+  height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .statusChip.ok,
@@ -405,6 +430,38 @@ h2 {
   padding: 10px;
 }
 
+.mobileViewTabs {
+  display: none;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--topbar);
+  padding: 8px 10px;
+}
+
+.mobileViewTabs button,
+.filterRail button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.mobileViewTabs button.active,
+.filterRail button.active {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface2));
+  color: var(--text);
+}
+
 .listPane,
 .inspectorPane {
   min-width: 0;
@@ -417,7 +474,7 @@ h2 {
 
 .listPane {
   display: grid;
-  grid-template-rows: auto repeat(3, minmax(0, auto));
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
   padding: 10px;
 }
@@ -428,6 +485,21 @@ h2 {
   gap: 10px;
   border-bottom: 1px solid var(--border-soft);
   padding: 2px 4px 10px;
+}
+
+.filterRail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.demoRows {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
 }
 
 .paneTitle strong,
@@ -972,6 +1044,7 @@ h2 {
   border-radius: 999px;
   color: var(--warn);
   padding: 4px 8px;
+  text-transform: lowercase;
 }
 
 .modalBody {
@@ -992,10 +1065,45 @@ h2 {
   font-weight: 900;
 }
 
+.statusRing svg {
+  width: 42px;
+  height: 42px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.statusRing.writing {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--border-soft));
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface2));
+}
+
+.statusRing.success {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 48%, var(--border-soft));
+  background: color-mix(in srgb, var(--ok) 10%, var(--surface2));
+}
+
+.statusRing.error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--border-soft));
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface2));
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
 .codePanel {
   min-width: 0;
+  max-height: 220px;
   display: grid;
+  align-content: start;
   gap: 6px;
+  overflow: auto;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, #0f172a 92%, var(--surface));
@@ -1010,6 +1118,7 @@ h2 {
   border-left: 2px solid transparent;
   padding-left: 6px;
   color: #d7e0ed;
+  animation: codeLineIn 240ms ease both;
 }
 
 .codeLine span {
@@ -1032,9 +1141,31 @@ h2 {
   color: #facc15;
 }
 
+.codeLine.danger,
+.codeLine.danger span {
+  color: var(--danger);
+}
+
 .codeLine.active {
   border-left-color: color-mix(in srgb, var(--accent) 72%, transparent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+@keyframes codeLineIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .mcpMatrix {
@@ -1201,6 +1332,15 @@ h2 {
     padding-bottom: 2px;
   }
 
+  .languageSwitch {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .languageSwitch button {
+    flex: 1;
+  }
+
   main {
     width: min(100% - 28px, 680px);
   }
@@ -1230,6 +1370,10 @@ h2 {
 
   .appSidebar {
     display: none;
+  }
+
+  .mobileViewTabs {
+    display: flex;
   }
 
   .commandBar {
@@ -1263,6 +1407,20 @@ h2 {
 
   .modalBody {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

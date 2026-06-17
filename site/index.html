@@ -9,40 +9,54 @@
     />
     <title>AgentScope</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
   </head>
   <body>
     <header class="topbar" aria-label="Site navigation">
       <a class="brand" href="#top" aria-label="AgentScope">
-        <span class="brandMark" aria-hidden="true"><span></span><span></span></span>
+        <span class="brandMark" aria-hidden="true">
+          <svg class="agentGlyph" width="21" height="21" viewBox="0 0 24 24" fill="none">
+            <path d="M5.4 7.1c0-1.2 1-2.1 2.1-2.1h9c1.2 0 2.1 1 2.1 2.1v8.2c0 1.2-1 2.1-2.1 2.1h-9c-1.2 0-2.1-1-2.1-2.1V7.1Z" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round" />
+            <path d="M8.2 10.6h4.1M8.2 13.8h2.2M15.6 8.7v3.1M14 10.2h3.1" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" />
+            <path d="M12.5 17.6v2.2h3.3M18.6 17.4l2.1 2.1" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="18" cy="19.8" r="1.25" fill="currentColor" />
+            <circle cx="20.6" cy="20.4" r=".8" fill="currentColor" />
+          </svg>
+        </span>
         <strong>AgentScope</strong>
       </a>
       <nav>
-        <a href="#product">Product</a>
-        <a href="#evidence">Evidence</a>
-        <a href="#safety">Safety</a>
-        <a href="#control">Codex Control</a>
-        <a href="#release">Download</a>
+        <a href="#product" data-i18n="nav.product">Product</a>
+        <a href="#evidence" data-i18n="nav.evidence">Evidence</a>
+        <a href="#safety" data-i18n="nav.safety">Safety</a>
+        <a href="#control" data-i18n="nav.control">Codex Control</a>
+        <a href="#release" data-i18n="nav.download">Download</a>
       </nav>
+      <div class="languageSwitch" role="group" aria-label="Language">
+        <button type="button" data-lang="en-US">EN</button>
+        <button type="button" data-lang="zh-CN">中文</button>
+        <button type="button" data-lang="ja-JP">日本語</button>
+      </div>
     </header>
 
     <main id="top">
       <section class="hero" aria-labelledby="hero-title">
         <div class="heroCopy">
-          <p class="eyebrow">Windows desktop console</p>
+          <p class="eyebrow" data-i18n="hero.eyebrow">Windows desktop console</p>
           <h1 id="hero-title">AgentScope</h1>
-          <p class="lede">
+          <p class="lede" data-i18n="hero.lede">
             Trace local Codex and Claude Code processes, explain session relationships
             with evidence and confidence, and keep risky operations behind plans,
             backups, quarantine records, and journals.
           </p>
           <div class="heroActions" aria-label="Primary actions">
-            <a class="button primary" href="https://github.com/dwgx/AgentScope/releases/tag/v0.1.0">Download v0.1.0</a>
-            <a class="button" href="https://github.com/dwgx/AgentScope">View repository</a>
-            <a class="button quiet" href="#safety">Safety boundaries</a>
+            <a class="button primary" href="https://github.com/dwgx/AgentScope/releases/tag/v0.1.0" data-i18n="hero.download">Download v0.1.0</a>
+            <a class="button" href="https://github.com/dwgx/AgentScope" data-i18n="hero.repo">View repository</a>
+            <a class="button quiet" href="#safety" data-i18n="hero.safety">Safety boundaries</a>
           </div>
           <dl class="releaseFacts" aria-label="Release facts">
             <div>
-              <dt>Asset</dt>
+              <dt data-i18n="release.assetLabel">Asset</dt>
               <dd>AgentScope-0.1.0-Portable-x64.exe</dd>
             </div>
             <div>
@@ -52,144 +66,29 @@
           </dl>
         </div>
 
-        <div class="desktopFrame heroFrame" aria-label="AgentScope desktop console preview">
-          <aside class="appSidebar">
-            <div class="windowDots" aria-hidden="true"><span></span><span></span><span></span></div>
-            <div class="appBrand">
-              <span class="appLogo" aria-hidden="true"></span>
-              <strong>AgentScope</strong>
-            </div>
-            <span class="navItem active">Processes</span>
-            <span class="navItem">Sessions</span>
-            <span class="navItem">Relations</span>
-            <span class="navItem warn">Doctor <em>2</em></span>
-            <span class="navLabel">System</span>
-            <span class="navItem">Codex Control</span>
-            <span class="navItem">Settings</span>
-          </aside>
-
-          <section class="appWorkspace">
-            <div class="commandBar">
-              <span class="searchPill">Search sessions, cwd, PID, evidence</span>
-              <span class="statusChip ok">safe mode</span>
-              <span class="statusChip">motion reduced</span>
-            </div>
-            <div class="appContent">
-              <div class="listPane">
-                <div class="paneTitle">
-                  <div>
-                    <strong>Live process map</strong>
-                    <span>Codex, Claude, MCP helpers, app servers</span>
-                  </div>
-                  <span class="badge">12 indexed</span>
-                </div>
-
-                <button class="processRow selected" type="button">
-                  <span class="agentTile codex">C</span>
-                  <span class="rowMain">
-                    <span class="rowTop">
-                      <strong>codex.exe</strong>
-                      <span class="badge ok">indexed</span>
-                    </span>
-                    <span class="rowMeta">
-                      <code>PID 18428</code>
-                      <span>root PID 16804</span>
-                      <span>MCP Tool</span>
-                    </span>
-                    <code class="rowPath">%USERPROFILE%\work\agentscope-demo</code>
-                    <span class="evidenceLine">process.mcp.config + parent tree + command marker</span>
-                  </span>
-                </button>
-
-                <button class="processRow" type="button">
-                  <span class="agentTile claude">Cl</span>
-                  <span class="rowMain">
-                    <span class="rowTop">
-                      <strong>claude-code session</strong>
-                      <span class="badge heuristic">heuristic</span>
-                    </span>
-                    <span class="rowMeta">
-                      <code>PID 19344</code>
-                      <span>window title</span>
-                      <span>cwd evidence</span>
-                    </span>
-                    <code class="rowPath">%USERPROFILE%\.claude\projects\...</code>
-                    <span class="scoreGrid">
-                      <b>+42</b>
-                      <span>cwd</span>
-                      <em>project path matched active session map</em>
-                    </span>
-                  </span>
-                </button>
-
-                <button class="processRow" type="button">
-                  <span class="agentTile neutral">N</span>
-                  <span class="rowMain">
-                    <span class="rowTop">
-                      <strong>node helper</strong>
-                      <span class="badge">unknown</span>
-                    </span>
-                    <span class="rowMeta">
-                      <code>PID 20112</code>
-                      <span>generic command</span>
-                      <span>weak evidence</span>
-                    </span>
-                    <code class="rowPath">node server.js</code>
-                    <span class="evidenceLine">generic runtime is not enough to match MCP config</span>
-                  </span>
-                </button>
-              </div>
-
-              <aside class="inspectorPane" aria-label="Evidence inspector">
-                <div class="inspectorHeader">
-                  <span class="agentBadge codex">Codex</span>
-                  <strong>playwright helper</strong>
-                  <span>Evidence-backed process identity</span>
-                </div>
-                <div class="fieldGroup">
-                  <h2>Confidence</h2>
-                  <div class="field"><span>level</span><strong>indexed</strong></div>
-                  <div class="field"><span>source</span><strong>Codex config metadata</strong></div>
-                </div>
-                <div class="fieldGroup">
-                  <h2>Evidence</h2>
-                  <div class="evidenceItem">
-                    <strong>process.mcp.config</strong>
-                    <p>Matched server name and safe command summary from Codex TOML.</p>
-                    <code>mcp_servers.playwright</code>
-                  </div>
-                  <div class="evidenceItem warn">
-                    <strong>redaction</strong>
-                    <p>Token-like arguments are excluded from MCP command summaries.</p>
-                    <code>--token &lt;redacted&gt;</code>
-                  </div>
-                </div>
-              </aside>
-            </div>
-          </section>
-        </div>
+        <div class="desktopFrame heroFrame" data-app-demo aria-label="AgentScope desktop console preview"></div>
       </section>
 
       <section class="proofBand" aria-label="Positioning">
         <article>
-          <strong>Not a chat UI</strong>
-          <span>AgentScope observes and controls local coding agent state. It does not replace Codex or Claude Code.</span>
+          <strong data-i18n="proof.chatTitle">Not a chat UI</strong>
+          <span data-i18n="proof.chatBody">AgentScope observes and controls local coding agent state. It does not replace Codex or Claude Code.</span>
         </article>
         <article>
-          <strong>Not a Kanban board</strong>
-          <span>The primary objects are processes, sessions, transcripts, relations, config surfaces, and operation journals.</span>
+          <strong data-i18n="proof.kanbanTitle">Not a Kanban board</strong>
+          <span data-i18n="proof.kanbanBody">The primary objects are processes, sessions, transcripts, relations, config surfaces, and operation journals.</span>
         </article>
         <article>
-          <strong>Not a file manager</strong>
-          <span>Privileged local paths stay behind explicit open/reveal allowlists and safety roles.</span>
+          <strong data-i18n="proof.fileTitle">Not a file manager</strong>
+          <span data-i18n="proof.fileBody">Privileged local paths stay behind explicit open/reveal allowlists and safety roles.</span>
         </article>
       </section>
 
       <section id="product" class="section productTour" aria-labelledby="product-title">
         <div class="sectionHead">
-          <p class="eyebrow">Product tour</p>
-          <h2 id="product-title">The desktop UI is the product signal.</h2>
-          <p>
+          <p class="eyebrow" data-i18n="product.eyebrow">Product tour</p>
+          <h2 id="product-title" data-i18n="product.title">The desktop UI is the product signal.</h2>
+          <p data-i18n="product.body">
             The public page should feel like AgentScope itself: dense, controlled,
             evidence-heavy, and clear about what is known, what is inferred, and
             what stays blocked.
@@ -248,9 +147,9 @@
 
       <section id="evidence" class="section evidenceModel" aria-labelledby="evidence-title">
         <div class="sectionHead">
-          <p class="eyebrow">Evidence model</p>
-          <h2 id="evidence-title">Associations stay explainable.</h2>
-          <p>
+          <p class="eyebrow" data-i18n="evidence.eyebrow">Evidence model</p>
+          <h2 id="evidence-title" data-i18n="evidence.title">Associations stay explainable.</h2>
+          <p data-i18n="evidence.body">
             AgentScope never turns a weak timing hint into certainty. Each link
             between a process and a session carries evidence, confidence, and the
             reason it was scored that way.
@@ -288,8 +187,8 @@
 
       <section class="section dataSources" aria-labelledby="sources-title">
         <div class="sectionHead compact">
-          <p class="eyebrow">Local sources</p>
-          <h2 id="sources-title">Index the local state that actually exists.</h2>
+          <p class="eyebrow" data-i18n="sources.eyebrow">Local sources</p>
+          <h2 id="sources-title" data-i18n="sources.title">Index the local state that actually exists.</h2>
         </div>
         <div class="sourceMatrix">
           <article>
@@ -313,8 +212,8 @@
 
       <section class="section views" aria-labelledby="views-title">
         <div class="sectionHead compact">
-          <p class="eyebrow">Core views</p>
-          <h2 id="views-title">A control console, not a chat surface.</h2>
+          <p class="eyebrow" data-i18n="views.eyebrow">Core views</p>
+          <h2 id="views-title" data-i18n="views.title">A control console, not a chat surface.</h2>
         </div>
         <div class="viewRows">
           <article>
@@ -346,9 +245,9 @@
 
       <section id="safety" class="section safety" aria-labelledby="safety-title">
         <div class="sectionHead">
-          <p class="eyebrow">Safety boundaries</p>
-          <h2 id="safety-title">Destructive operations are planned, backed up, and evidenced.</h2>
-          <p>
+          <p class="eyebrow" data-i18n="safety.eyebrow">Safety boundaries</p>
+          <h2 id="safety-title" data-i18n="safety.title">Destructive operations are planned, backed up, and evidenced.</h2>
+          <p data-i18n="safety.body">
             AgentScope treats local agent state as sensitive. Session delete, import,
             restore, and config mutation flows are blocked or confirmed before they
             touch files or SQLite rows.
@@ -383,12 +282,12 @@
 
       <section id="control" class="section control" aria-labelledby="control-title">
         <div class="sectionHead compact">
-          <p class="eyebrow">Codex Control</p>
-          <h2 id="control-title">Structured config changes with read-back verification.</h2>
+          <p class="eyebrow" data-i18n="control.eyebrow">Codex Control</p>
+          <h2 id="control-title" data-i18n="control.title">Structured config changes with read-back verification.</h2>
         </div>
         <div class="controlLayout">
           <div class="controlCopy">
-            <p>
+            <p data-i18n="control.body">
               Raw `config.toml` editing stays behind structured controls. AgentScope
               classifies official keys, known local keys, unverified advanced keys,
               reserved provider IDs, sensitive values, and unsafe TOML before it
@@ -405,14 +304,14 @@
           <div class="applyModal" aria-label="Codex apply modal preview">
             <div class="modalHeader">
               <div>
-                <strong>Applying structured patch</strong>
-                <span>config.toml current snapshot loaded</span>
+                <strong data-codex-demo-title>Applying structured patch</strong>
+                <span data-codex-demo-detail>config.toml current snapshot loaded</span>
               </div>
-              <span class="modalState">writing</span>
+              <span class="modalState" data-codex-demo-state>writing</span>
             </div>
             <div class="modalBody">
-              <span class="statusRing">...</span>
-              <div class="codePanel">
+              <span class="statusRing writing" data-codex-demo-status>...</span>
+              <div class="codePanel" data-codex-demo-code>
                 <div class="codeLine ok"><span>1</span><code>model = "gpt-5.4"</code></div>
                 <div class="codeLine warn"><span>2</span><code>model_reasoning_effort = "high" # advanced</code></div>
                 <div class="codeLine active"><span>*</span><code>atomic write, fsync, rename, journal</code></div>
